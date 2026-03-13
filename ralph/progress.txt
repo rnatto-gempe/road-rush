@@ -53,3 +53,20 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - setValueAtTime + setTargetAtTime on a shared gain node enables sidechain ducking without extra nodes
   - _scheduleBassNote guards on this.bass.gain to safely ignore notes scheduled after stopBass()
 ---
+
+## 2026-03-13 - US-004
+- Implemented musical pickup SFX using current chord/scale for all pickup types
+- Coin: steps through ARPS_BY_CHORD[chordIdx] notes using coinSeq.count as index (ascending arpeggio per cluster)
+- Fuel: major triad chord — root + major 3rd (+4 semitones) + 5th (+7 semitones) from PAD_CHORDS[chordIdx][0]
+- Nitro: sawtooth sweep from A3 (220Hz) to A4 (440Hz, the tonic) — always resolves to tonic
+- Shield: two sines at root and perfect 5th (root × 1.5) from current chord, with 8Hz LFO tremolo via gainNode modulation
+- Near miss: short sine at G#4 (415.3Hz, one semitone below tonic A4), 0.05s
+- Combo: power chord (root + 5th) using arp notes by chord, stepping up per combo level
+- All SFX reference this.pad.chordIdx for harmonic alignment; guard with `chordIdx < 0 ? 0 : chordIdx`
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - LFO tremolo: connect LFO oscillator → gainNode (depth) → target AudioParam (e.g. gain.gain) to modulate
+  - When multiple oscillators share a gain node, track endedCount to disconnect gain only after all oscs end
+  - PAD_CHORDS[chordIdx][0] is the chord root frequency (A4, F4, C4, G4 for Am/F/C/G)
+  - ARPS_BY_CHORD[chordIdx] gives harmonically correct pentatonic notes for the current chord — use for SFX note selection
+---

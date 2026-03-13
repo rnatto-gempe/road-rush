@@ -75,7 +75,7 @@
         "Verify in browser using dev-browser skill: pickups sound musical and in harmony with the track"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
