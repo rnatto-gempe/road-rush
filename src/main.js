@@ -429,6 +429,161 @@ const AudioManager = {
     source.start(now);
     source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
   },
+
+  // ─── Collision & Explosion SFX ───
+
+  // Metallic crash: short noise burst (high-pass ~2kHz) + low-freq impact thump (sine ~60Hz)
+  playCrash() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // High-pass noise burst (metallic clang)
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.15);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const hpFilter = this.ctx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.setValueAtTime(2000, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.5, now + 0.005);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    noiseSrc.connect(hpFilter);
+    hpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.15);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); hpFilter.disconnect(); noiseGain.disconnect(); };
+
+    // Low-freq impact thump
+    const thump = this.ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(60, now);
+    const thumpGain = this.ctx.createGain();
+    thumpGain.gain.setValueAtTime(0, now);
+    thumpGain.gain.linearRampToValueAtTime(0.5, now + 0.005);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+    thump.start(now);
+    thump.stop(now + 0.15);
+    thump.onended = () => { thump.disconnect(); thumpGain.disconnect(); };
+  },
+
+  // Layered explosion boom: low sine sweep + noise burst + crackle
+  playExplosion() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Low sine sweep 80→30Hz over 0.5s
+    const boom = this.ctx.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(80, now);
+    boom.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+    const boomGain = this.ctx.createGain();
+    boomGain.gain.setValueAtTime(0, now);
+    boomGain.gain.linearRampToValueAtTime(0.8, now + 0.01);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    boom.connect(boomGain);
+    boomGain.connect(this.masterGain);
+    boom.start(now);
+    boom.stop(now + 0.5);
+    boom.onended = () => { boom.disconnect(); boomGain.disconnect(); };
+
+    // Noise burst with decaying low-pass filter
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.8);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const lpFilter = this.ctx.createBiquadFilter();
+    lpFilter.type = 'lowpass';
+    lpFilter.frequency.setValueAtTime(4000, now);
+    lpFilter.frequency.exponentialRampToValueAtTime(200, now + 0.8);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.7, now + 0.01);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+    noiseSrc.connect(lpFilter);
+    lpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.8);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); lpFilter.disconnect(); noiseGain.disconnect(); };
+
+    // Crackle: 4 random short noise bursts spaced over 1.5s
+    for (let i = 0; i < 4; i++) {
+      const delay = 0.2 + Math.random() * 1.3;
+      const crackleLen = Math.floor(sampleRate * 0.06);
+      const crackleBuf = this.ctx.createBuffer(1, crackleLen, sampleRate);
+      const crackleData = crackleBuf.getChannelData(0);
+      for (let j = 0; j < crackleLen; j++) crackleData[j] = Math.random() * 2 - 1;
+      const crackleSrc = this.ctx.createBufferSource();
+      crackleSrc.buffer = crackleBuf;
+      const crackleFilter = this.ctx.createBiquadFilter();
+      crackleFilter.type = 'highpass';
+      crackleFilter.frequency.setValueAtTime(1500, now);
+      const crackleGain = this.ctx.createGain();
+      crackleGain.gain.setValueAtTime(0, now + delay);
+      crackleGain.gain.linearRampToValueAtTime(0.3, now + delay + 0.005);
+      crackleGain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.06);
+      crackleSrc.connect(crackleFilter);
+      crackleFilter.connect(crackleGain);
+      crackleGain.connect(this.masterGain);
+      crackleSrc.start(now + delay);
+      crackleSrc.stop(now + delay + 0.06);
+      crackleSrc.onended = () => { crackleSrc.disconnect(); crackleFilter.disconnect(); crackleGain.disconnect(); };
+    }
+  },
+
+  // Shield break: crystalline shatter — high-freq sine sweep 2kHz→500Hz + short noise burst
+  playShieldBreak() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // High-freq sine sweep 2kHz→500Hz over 0.2s
+    const sweep = this.ctx.createOscillator();
+    sweep.type = 'sine';
+    sweep.frequency.setValueAtTime(2000, now);
+    sweep.frequency.exponentialRampToValueAtTime(500, now + 0.2);
+    const sweepGain = this.ctx.createGain();
+    sweepGain.gain.setValueAtTime(0, now);
+    sweepGain.gain.linearRampToValueAtTime(0.4, now + 0.01);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    sweep.connect(sweepGain);
+    sweepGain.connect(this.masterGain);
+    sweep.start(now);
+    sweep.stop(now + 0.2);
+    sweep.onended = () => { sweep.disconnect(); sweepGain.disconnect(); };
+
+    // Short noise burst
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.1);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const hpFilter = this.ctx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.setValueAtTime(3000, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.35, now + 0.005);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    noiseSrc.connect(hpFilter);
+    hpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.1);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); hpFilter.disconnect(); noiseGain.disconnect(); };
+  },
 };
 
 // Survivor flash text state
@@ -693,6 +848,7 @@ function handleVehicleCollision(v) {
   if (player.hasShield) {
     player.hasShield = false;
     shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+    AudioManager.playShieldBreak();
     v.collided = true; // tag vehicle so overtake bonus is skipped
     invulnTimer = Math.max(invulnTimer, INVULN_DURATION);
     spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
@@ -717,6 +873,7 @@ function handleVehicleCollision(v) {
   ddaCleanTimer = 0;
 
   // Any collision is fatal — trigger explosion immediately
+  AudioManager.playCrash();
   triggerShake(0.5, 10);
   fsm.transition(explosionState);
   return;
@@ -950,6 +1107,7 @@ function updatePlayer(dt) {
     if (player.hasShield) {
       player.hasShield = false;
       shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+      AudioManager.playShieldBreak();
       invulnTimer = INVULN_DURATION;
       spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
     } else {
@@ -2163,6 +2321,7 @@ const explosionState = {
     this.fadeInAlpha = 0;
     this.textAlpha = 0;
     playerVisible = false;
+    AudioManager.playExplosion();
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
