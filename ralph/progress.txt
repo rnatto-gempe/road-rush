@@ -1,0 +1,28 @@
+# Ralph Progress Log
+Started: Fri Mar 13 15:11:23 -03 2026
+
+## Codebase Patterns
+- Single-file pure JS + HTML5 Canvas game in `src/main.js` (~2019 lines)
+- FSM states are `const` objects with `onEnter()`, `update(dt)`, `render(ctx)` methods
+- States reference each other via closure (forward references work since methods are called at runtime)
+- Module-level variables hold game state (particles[], traffic[], gameState, etc.)
+- `resetGameState()` must reset ALL module-level state introduced by new features
+
+---
+
+## 2026-03-13T18:19:31 - US-001
+- Implemented `explosionState` FSM state object before `gameOverState` in src/main.js
+- Wired fatal collision (`scrollSpeed > 600`) in `handleVehicleCollision()` to transition to `explosionState` instead of `gameOverState`; removed old `spawnExplosion()` call
+- `explosionState.onEnter()` captures origin, saves final stats, sets timer=2.0s, sets `playerVisible=false`
+- `explosionState.update(dt)` decrements timer; on 0, pre-sets stats on `gameOverState` and transitions
+- `explosionState.render(ctx)` renders frozen world (road + traffic only, no player, no collectibles)
+- Added `playerVisible` module-level variable; reset to `true` in `resetGameState()`
+- Added `statsPreset` flag to `gameOverState`; `onEnter()` skips stat capture if preset (collision death), resets flag after use
+- Fuel empty death path unchanged: transitions directly to `gameOverState` which captures stats normally
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `explosionState` is at ~line 1901, `gameOverState` at ~line 1938 in the updated file
+  - `playerVisible` flag is module-level (line ~199); `explosionState.onEnter()` sets it false, `resetGameState()` sets it true
+  - US-002 should clear `particles[]` in `explosionState.onEnter()` and spawn fire/debris particles
+  - US-003 should add `shockwaveRings[]` and remove old `spawnExplosion()`/`updateExplosions()`/`renderExplosions()` functions + `gameOverState` calls to them
+---
