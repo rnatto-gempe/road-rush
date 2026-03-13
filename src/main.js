@@ -584,6 +584,107 @@ const AudioManager = {
     noiseSrc.stop(now + 0.1);
     noiseSrc.onended = () => { noiseSrc.disconnect(); hpFilter.disconnect(); noiseGain.disconnect(); };
   },
+
+  // ─── Collectible Pickup SFX ───
+
+  // Coin cluster sequence counter (ascending pitch per rapid coin)
+  coinSeq: { count: 0, resetTimer: 0 },
+
+  // Fuel pickup: warm ascending sine 400→800Hz over 0.15s
+  playFuelPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, now);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.15);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + 0.14);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Coin pickup: bright metallic ding, pitch rises +50Hz per rapid coin in cluster
+  playCoinPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Track rapid coin sequence
+    this.coinSeq.count++;
+    this.coinSeq.resetTimer = 0.4; // reset after 0.4s gap
+    const freq = 1200 + (this.coinSeq.count - 1) * 50;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, now); // sharp attack
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Nitro pickup: aggressive sawtooth sweep 200→600Hz over 0.3s
+  playNitroPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(200, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.35, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Shield pickup: ethereal beat-frequency tone (two detuned sines ~500Hz/505Hz, 0.4s)
+  playShieldPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Oscillator 1 at 500Hz
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(500, now);
+    // Oscillator 2 at 505Hz (5Hz beat frequency)
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(505, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.1); // slow fade-in
+    gain.gain.linearRampToValueAtTime(0, now + 0.39);
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.masterGain);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.4);
+    osc2.stop(now + 0.4);
+    osc1.onended = () => { osc1.disconnect(); };
+    osc2.onended = () => { osc2.disconnect(); gain.disconnect(); };
+  },
+
+  // Update coin sequence timer (call from game update loop)
+  updateCoinSeq(dt) {
+    if (this.coinSeq.count > 0) {
+      this.coinSeq.resetTimer -= dt;
+      if (this.coinSeq.resetTimer <= 0) {
+        this.coinSeq.count = 0;
+      }
+    }
+  },
 };
 
 // Survivor flash text state
@@ -1615,6 +1716,7 @@ function updateFuelItems(dt) {
     if (aabbOverlap(ph, itemHb)) {
       const fuelAdd = getFuelCollectAmount(elapsed);
       gameState.fuel = Math.min(FUEL_INITIAL, gameState.fuel + fuelAdd);
+      AudioManager.playFuelPickup();
       item.collectAnim = { timer: FUEL_COLLECT_ANIM_DURATION };
     }
   }
@@ -1729,6 +1831,7 @@ function updateCoins(dt) {
     if (aabbOverlap(ph, coinHb)) {
       gameState.score += COIN_POINTS;
       coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
+      AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
     }
   }
@@ -1831,6 +1934,7 @@ function updateNitroItems(dt) {
       nitroEaseTimer = 0;
       // Full invulnerability during boost
       invulnTimer = Math.max(invulnTimer, NITRO_BOOST_DURATION);
+      AudioManager.playNitroPickup();
       item.collectAnim = { timer: NITRO_COLLECT_ANIM_DURATION };
     }
   }
@@ -1922,6 +2026,7 @@ function updateShieldItems(dt) {
       if (!gameState.player.hasShield) {
         gameState.player.hasShield = true;
       }
+      AudioManager.playShieldPickup();
       item.collectAnim = { timer: SHIELD_COLLECT_ANIM_DURATION };
     }
   }
@@ -2139,6 +2244,7 @@ const playingState = {
     updateCoins(dt);
     updateNitroItems(dt);
     updateShieldItems(dt);
+    AudioManager.updateCoinSeq(dt);
     updateParticles(dt);
 
     // Tick nitro boost and ease-out timers; spawn blue particle trail during active boost

@@ -15,6 +15,8 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Reuse noise buffers (store on AudioManager) when creating looping noise sources to avoid repeated buffer generation
 - exponentialRampToValueAtTime cannot ramp to 0 — use 0.001 as the floor for all decay envelopes
 - Shield break has TWO trigger locations: handleVehicleCollision and border collision — both need consistent SFX
+- Pickup SFX gains (0.25-0.35) sit below collision/explosion hierarchy (0.4-0.8) — maintain this for new SFX
+- Coin cluster ascending pitch uses AudioManager.coinSeq with a 0.4s timeout, decremented via updateCoinSeq(dt) in game loop
 
 ---
 
@@ -68,4 +70,18 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Explosion is the loudest event (gain 0.8) vs crash/shield (0.4-0.5) — maintain this hierarchy for future SFX
   - exponentialRampToValueAtTime cannot ramp to 0 (must use 0.001) — use this for all decay envelopes
   - Crackle bursts use scheduled start times (now + delay) with gain automation starting at the same offset
+---
+
+## 2026-03-13 - US-005
+- Added playFuelPickup() SFX: ascending sine 400→800Hz over 0.15s with soft envelope
+- Added playCoinPickup() SFX: triangle wave ding at 1200Hz+, pitch rises +50Hz per rapid coin in cluster via coinSeq counter
+- Added playNitroPickup() SFX: aggressive sawtooth sweep 200→600Hz over 0.3s
+- Added playShieldPickup() SFX: two detuned sines at 500Hz/505Hz creating 5Hz beat frequency, 0.4s with slow fade-in
+- Added updateCoinSeq(dt) to decay the cluster sequence counter after 0.4s gap
+- Wired all 4 SFX into their respective update functions (updateFuelItems, updateCoins, updateNitroItems, updateShieldItems)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Coin cluster ascending pitch uses a sequence counter (coinSeq) with a 0.4s timeout — reset timer is decremented in the game update loop
+  - Shield pickup plays SFX even when player already has shield (item still gets collected with anim) — this is intentional for feedback
+  - Pickup SFX gains are in the 0.25-0.35 range to sit below collision/explosion hierarchy
 ---
