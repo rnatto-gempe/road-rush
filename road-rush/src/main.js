@@ -29,6 +29,16 @@ const SHAKE_INTENSITY = 10; // max px offset
 const INVULN_DURATION = 1.5; // seconds of invulnerability after any collision
 const BLINK_INTERVAL = 0.1; // seconds per blink toggle during invulnerability
 
+// Fuel system constants
+const FUEL_INITIAL = 100;
+const FUEL_DRAIN_BASE = 2.0;          // units/s base drain
+const FUEL_DRAIN_SPEED = 3.0;         // extra units/s at max speed (800 px/s)
+const FUEL_ITEM_RADIUS = 12;          // 24px diameter fuel circle
+const FUEL_SPAWN_BASE_MIN = 900;      // px traveled min spawn interval
+const FUEL_SPAWN_BASE_MAX = 1400;     // px traveled max spawn interval
+const FUEL_SPAWN_INTERVAL_GROWTH = 5; // extra px per elapsed second (scarcity ramp)
+const FUEL_COLLECT_ANIM_DURATION = 0.2;
+
 // Scroll speed ramp constants
 const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
 const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
@@ -255,6 +265,7 @@ function handleVehicleCollision(v) {
     // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
     if (gameState.scrollSpeed > 600) {
       triggerShake();
+      gameOverState.causeOfDeath = '';
       fsm.transition(gameOverState);
       return;
     }
@@ -282,6 +293,10 @@ const gameState = {
   },
   traffic: [],
   nextSpawnDistance: 1200,
+  // Fuel system
+  fuel: FUEL_INITIAL,
+  fuelItems: [],
+  nextFuelSpawnDistance: FUEL_SPAWN_BASE_MIN,
 };
 
 function resetGameState() {
@@ -301,6 +316,10 @@ function resetGameState() {
   invulnTimer = 0;
   redFlash.alpha = 0;
   particles.length = 0;
+  // Reset fuel state
+  gameState.fuel = FUEL_INITIAL;
+  gameState.fuelItems = [];
+  gameState.nextFuelSpawnDistance = FUEL_SPAWN_BASE_MIN + Math.random() * (FUEL_SPAWN_BASE_MAX - FUEL_SPAWN_BASE_MIN);
 }
 
 // --- Scroll Speed Ramp ---
@@ -758,6 +777,124 @@ function renderTraffic(ctx) {
   }
 }
 
+// --- Fuel System ---
+
+// Fuel pickup amount decreases over time
+function getFuelCollectAmount(elapsed) {
+  if (elapsed < 60) return 20;
+  if (elapsed < 90) return 18;
+  return 15;
+}
+
+// Spawn a fuel item; 60% chance in a lane adjacent to an existing traffic vehicle
+function spawnFuelItem() {
+  const elapsed = gameState.elapsedTime;
+  let lane;
+  if (gameState.traffic.length > 0 && Math.random() < 0.6) {
+    const v = gameState.traffic[Math.floor(Math.random() * gameState.traffic.length)];
+    const adj = [];
+    if (v.lane > 0) adj.push(v.lane - 1);
+    if (v.lane < LANE_COUNT - 1) adj.push(v.lane + 1);
+    lane = adj.length > 0
+      ? adj[Math.floor(Math.random() * adj.length)]
+      : Math.floor(Math.random() * LANE_COUNT);
+  } else {
+    lane = Math.floor(Math.random() * LANE_COUNT);
+  }
+
+  const x = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+  gameState.fuelItems.push({ x, y: -FUEL_ITEM_RADIUS, collectAnim: null });
+
+  // Spawn interval grows with elapsed (scarcity ramp)
+  const intervalMin = FUEL_SPAWN_BASE_MIN + elapsed * FUEL_SPAWN_INTERVAL_GROWTH;
+  const intervalMax = FUEL_SPAWN_BASE_MAX + elapsed * FUEL_SPAWN_INTERVAL_GROWTH;
+  gameState.nextFuelSpawnDistance = gameState.distanceTraveled + intervalMin + Math.random() * (intervalMax - intervalMin);
+}
+
+function updateFuelItems(dt) {
+  const elapsed = gameState.elapsedTime;
+  const effSpeed = getEffectiveScrollSpeed();
+
+  // Spawn when threshold reached
+  if (gameState.distanceTraveled >= gameState.nextFuelSpawnDistance) {
+    spawnFuelItem();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.fuelItems.length - 1; i >= 0; i--) {
+    const item = gameState.fuelItems[i];
+
+    if (item.collectAnim !== null) {
+      item.collectAnim.timer -= dt;
+      if (item.collectAnim.timer <= 0) gameState.fuelItems.splice(i, 1);
+      continue;
+    }
+
+    // Fuel items are road-fixed: scroll at effective scroll speed (own speed = 0)
+    item.y += effSpeed * dt;
+
+    if (item.y > CANVAS_HEIGHT + FUEL_ITEM_RADIUS) {
+      gameState.fuelItems.splice(i, 1);
+      continue;
+    }
+
+    // Collection check: 100% hitbox (full diameter square)
+    const itemHb = {
+      x: item.x - FUEL_ITEM_RADIUS,
+      y: item.y - FUEL_ITEM_RADIUS,
+      w: FUEL_ITEM_RADIUS * 2,
+      h: FUEL_ITEM_RADIUS * 2,
+    };
+    if (aabbOverlap(ph, itemHb)) {
+      const fuelAdd = getFuelCollectAmount(elapsed);
+      gameState.fuel = Math.min(FUEL_INITIAL, gameState.fuel + fuelAdd);
+      item.collectAnim = { timer: FUEL_COLLECT_ANIM_DURATION };
+    }
+  }
+}
+
+function renderFuelItems(ctx) {
+  for (const item of gameState.fuelItems) {
+    let scale = 1;
+    let alpha = 1;
+    if (item.collectAnim !== null) {
+      const progress = 1 - item.collectAnim.timer / FUEL_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(item.x, item.y);
+    ctx.scale(scale, scale);
+
+    // Glow aura
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, FUEL_ITEM_RADIUS * 2);
+    glow.addColorStop(0, 'rgba(67, 160, 71, 0.5)');
+    glow.addColorStop(1, 'rgba(67, 160, 71, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, FUEL_ITEM_RADIUS * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main circle
+    ctx.fillStyle = '#43A047';
+    ctx.beginPath();
+    ctx.arc(0, 0, FUEL_ITEM_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // "F" label
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('F', 0, 0);
+
+    ctx.restore();
+  }
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -812,7 +949,17 @@ const playingState = {
 
     updatePlayer(dt);
     updateTraffic(dt);
+    updateFuelItems(dt);
     updateParticles(dt);
+
+    // Drain fuel proportional to effective speed
+    const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
+    gameState.fuel = Math.max(0, gameState.fuel - fuelDrain);
+    if (gameState.fuel <= 0) {
+      gameOverState.causeOfDeath = 'Fuel Empty';
+      fsm.transition(gameOverState);
+      return;
+    }
 
     // Tick invulnerability timer
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
@@ -835,6 +982,7 @@ const playingState = {
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
     renderTraffic(ctx);
+    renderFuelItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
 
@@ -844,26 +992,31 @@ const playingState = {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
-    // Show elapsed time overlay
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    // Show elapsed time and fuel overlay
     ctx.font = '14px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, 8, 8);
+    // Fuel color: green > 50%, yellow 20-50%, red < 20%
+    const fuelPct = gameState.fuel / FUEL_INITIAL;
+    ctx.fillStyle = fuelPct > 0.5 ? 'rgba(67,160,71,0.9)' : fuelPct > 0.2 ? 'rgba(255,193,7,0.9)' : 'rgba(229,57,53,0.9)';
+    ctx.fillText(`Fuel: ${gameState.fuel.toFixed(0)}%`, 8, 26);
 
     // Debug overlay (toggle with D key)
     if (debugMode) {
       renderFairnessDebug(ctx);
       ctx.fillStyle = 'rgba(255,255,0,0.85)';
       ctx.font = '12px monospace';
-      ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s (eff: ${getEffectiveScrollSpeed().toFixed(0)})`, 8, 26);
-      ctx.fillText(`Dist: ${(gameState.distanceTraveled / 100).toFixed(0)}m`, 8, 42);
-      ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 58);
-      ctx.fillText(`Invuln: ${invulnTimer.toFixed(1)}s`, 8, 74);
+      ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s (eff: ${getEffectiveScrollSpeed().toFixed(0)})`, 8, 44);
+      ctx.fillText(`Dist: ${(gameState.distanceTraveled / 100).toFixed(0)}m`, 8, 58);
+      ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 72);
+      ctx.fillText(`Invuln: ${invulnTimer.toFixed(1)}s`, 8, 86);
+      ctx.fillText(`Fuel: ${gameState.fuel.toFixed(1)}`, 8, 100);
       // Type breakdown
       const counts = {};
       for (const v of gameState.traffic) counts[v.type] = (counts[v.type] || 0) + 1;
-      let y = 90;
+      let y = 114;
       for (const [type, count] of Object.entries(counts)) {
         ctx.fillText(`  ${type}: ${count}`, 8, y);
         y += 14;
@@ -877,6 +1030,7 @@ const gameOverState = {
   pulseTime: 0,
   finalTime: 0,
   finalDistance: 0,
+  causeOfDeath: '', // set by caller before transition; '' = collision
 
   onEnter() {
     this.pulseTime = 0;
@@ -903,6 +1057,13 @@ const gameOverState = {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+
+    // Cause of death (if known)
+    if (this.causeOfDeath) {
+      ctx.fillStyle = '#FFC107';
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText(this.causeOfDeath, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
+    }
 
     // Stats
     ctx.fillStyle = '#FFFFFF';
