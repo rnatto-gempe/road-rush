@@ -214,7 +214,7 @@
         "Verify in browser: fuel bar is visible, color changes are clear, flashing is noticeable but not annoying"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Render on top of everything. Vignette: draw radial gradient from transparent center to rgba(255,0,0,0.15) at corners."
     },
     {

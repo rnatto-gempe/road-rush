@@ -1,3 +1,17 @@
+## 2026-03-13 - US-012
+- Added `renderFuelHUD(ctx)` function: 4px-tall fuel bar at canvas top (full 400px width), color-coded green/yellow/red by fuel level
+- Blink effect: when fuel < 20%, bar toggles off every 0.3s using `Math.floor(elapsedTime / 0.3) % 2 === 1` (no new state variable needed)
+- Red vignette: radial gradient from transparent center to rgba(229,57,53,0.25) at edges when fuel < 20%
+- Removed redundant fuel text overlay; kept time text display
+- `renderFuelHUD` called after all game elements (rendered on top of everything)
+- Files changed: road-rush/src/main.js
+- Verified in browser: green bar visible spanning ~89% width at game start; bar and vignette render correctly
+- **Learnings for future iterations:**
+  - Use `Math.floor(elapsedTime / N) % 2` for blink effects — avoids adding a new timer variable
+  - `ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)` for vignette effects; inner radius ~0.3*CANVAS_HEIGHT keeps center transparent
+  - Render HUD elements last (after all overlays) so they're always on top
+---
+
 ## 2026-03-13 - US-011
 - Added fuel system: initial 100 units, drains at `(2.0 + effSpeed/800 * 3.0) * dt` per frame
 - Fuel drain uses `getEffectiveScrollSpeed()` so collision slowdown reduces consumption (mercy mechanic)
