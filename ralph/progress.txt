@@ -22,6 +22,7 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Overtake bonus SFX is in the traffic filter callback (v.y > 760 && !v.collided) — fires frequently, keep it subtle
 - Title drone and state-specific ambient audio: start in onEnter (guard with ctx check), stop in onExit — follows same pattern as engine/road
 - Beat scheduler uses AudioContext.currentTime look-ahead pattern — schedule ~4 beats ahead, refill as time advances (never use setTimeout/setInterval for musical timing)
+- State-specific ambient audio (rumble, drone) follows onEnter/onExit pattern — start in onEnter, stop in onExit; cancelScheduledValues before new ramps on stop
 
 ---
 
@@ -149,4 +150,20 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Hi-hat noise buffers are short-lived (0.05s) and cheap — no need to cache like the road noise buffer
   - stopBeat only needs to set running=false — already-scheduled sounds will play out naturally (they're short percussive hits)
   - Beat gains (kick 0.35, hi-hat 0.12, sub 0.25) sit in the mix below SFX but audible as rhythm backbone
+---
+
+## 2026-03-13 - US-010
+- Added startExplosionRumble() / stopExplosionRumble(): looping filtered noise (LP 80Hz) with 1s fade-in during explosionState
+- Added startGameOverDrone() / stopGameOverDrone(): two detuned sines (48Hz + 51Hz) creating dissonance + soft filtered noise tail
+- Wired startExplosionRumble into explosionState.onEnter (alongside playExplosion)
+- Added explosionState.onExit to stop rumble on transition to gameOverState
+- Added gameOverState.onEnter audio: starts somber drone after stats capture
+- Added gameOverState.onExit: stops somber drone cleanly on retry (Enter → playingState)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - explosionState had no onExit before — adding it follows same FSM pattern as titleState/playingState
+  - gameOverState has two entry paths: from explosionState (collision) and from playingState (fuel empty) — audio must work for both
+  - Rumble buffer can be shared with game over drone noise (_rumbleBuffer on AudioManager) to avoid duplicate allocation
+  - cancelScheduledValues(now) is needed before setTargetAtTime when stopping nodes that may still have pending ramps
+  - Game over drone gains (0.15 osc, 0.04 noise) are subtle — sit below the volume hierarchy as ambient atmosphere
 ---

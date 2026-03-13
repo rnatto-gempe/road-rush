@@ -175,7 +175,7 @@
         "Verify in browser that explosion cuts the music and game over has a somber atmosphere"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
