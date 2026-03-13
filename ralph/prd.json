@@ -72,7 +72,7 @@
         "Verify in browser that collision and explosion sounds are distinct and impactful"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

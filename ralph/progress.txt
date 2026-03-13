@@ -13,6 +13,8 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Long-lived audio nodes (engine, road, nitro) use start/stop/update pattern: start in onEnter, stop in onExit, update per frame
 - Nitro audio activation is driven by nitroTimer in playingState.update, not in updateNitroItems — keeps audio logic centralized
 - Reuse noise buffers (store on AudioManager) when creating looping noise sources to avoid repeated buffer generation
+- exponentialRampToValueAtTime cannot ramp to 0 — use 0.001 as the floor for all decay envelopes
+- Shield break has TWO trigger locations: handleVehicleCollision and border collision — both need consistent SFX
 
 ---
 
@@ -51,4 +53,19 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Noise buffer can be cached on AudioManager (road.buffer) and reused across start/stop cycles
   - stopNitro must be called before stopEngine in onExit to avoid accessing dead engine nodes
   - The nitro harmonic needs per-frame updateNitro() calls to track the boosted engine frequency
+---
+
+## 2026-03-13 - US-004
+- Added playCrash() SFX: high-pass noise burst (metallic clang) + low sine thump at 60Hz, both 0.15s with exponential decay
+- Added playExplosion() SFX: low sine sweep 80→30Hz over 0.5s + noise burst with decaying LP filter over 0.8s + 4 random crackle bursts over 1.5s
+- Added playShieldBreak() SFX: sine sweep 2kHz→500Hz over 0.2s + short high-pass noise burst
+- Wired playCrash() into handleVehicleCollision (fatal collision path)
+- Wired playExplosion() into explosionState.onEnter()
+- Wired playShieldBreak() into both shield break locations (vehicle collision + border collision)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - There are TWO shield break locations: handleVehicleCollision (line ~850) and border collision check (line ~1109) — both need SFX
+  - Explosion is the loudest event (gain 0.8) vs crash/shield (0.4-0.5) — maintain this hierarchy for future SFX
+  - exponentialRampToValueAtTime cannot ramp to 0 (must use 0.001) — use this for all decay envelopes
+  - Crackle bursts use scheduled start times (now + delay) with gain automation starting at the same offset
 ---
