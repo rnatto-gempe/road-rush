@@ -106,7 +106,7 @@
         "Verify in browser that near miss whoosh is audible when passing close to traffic"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

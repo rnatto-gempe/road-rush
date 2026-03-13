@@ -17,6 +17,9 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Shield break has TWO trigger locations: handleVehicleCollision and border collision — both need consistent SFX
 - Pickup SFX gains (0.25-0.35) sit below collision/explosion hierarchy (0.4-0.8) — maintain this for new SFX
 - Coin cluster ascending pitch uses AudioManager.coinSeq with a 0.4s timeout, decremented via updateCoinSeq(dt) in game loop
+- Near miss/combo/bonus SFX gains (0.2-0.3) sit at or below pickup SFX hierarchy — maintain volume ordering: explosion > collision > pickups >= bonus SFX
+- triggerNearMiss() is the single trigger point for near miss whoosh + combo stinger — no need to wire multiple locations
+- Overtake bonus SFX is in the traffic filter callback (v.y > 760 && !v.collided) — fires frequently, keep it subtle
 
 ---
 
@@ -84,4 +87,20 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Coin cluster ascending pitch uses a sequence counter (coinSeq) with a 0.4s timeout — reset timer is decremented in the game update loop
   - Shield pickup plays SFX even when player already has shield (item still gets collected with anim) — this is intentional for feedback
   - Pickup SFX gains are in the 0.25-0.35 range to sit below collision/explosion hierarchy
+---
+
+## 2026-03-13 - US-006
+- Added playNearMiss() SFX: band-passed noise burst (~2kHz center, Q 1.5) for 0.1s whoosh
+- Added playComboUp(combo) SFX: ascending sine stinger at 600Hz + combo×100Hz, 0.15s — triggers at x2+
+- Added playSurvivorBonus() SFX: major chord with three sines at 400/500/600Hz, 0.3s gentle decay
+- Added playOvertake() SFX: subtle low-pass filtered sawtooth sweep 80→120Hz, 0.15s
+- Wired near miss whoosh + combo stinger into triggerNearMiss()
+- Wired survivor bonus chord into survivor bonus scoring block in playingState.update
+- Wired overtake vroom into traffic removal filter (clean overtake path)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - triggerNearMiss() is the single trigger point for all near miss audio — no need to wire multiple locations
+  - Overtake bonus fires for every clean vehicle pass — keep its SFX very subtle (gain 0.2) to avoid fatigue
+  - Combo stinger uses the already-incremented comboMultiplier value, so at first near miss (combo goes 1→2) it plays at freq 800Hz
+  - Volume hierarchy: explosion (0.8) > collision (0.5) > pickups (0.25-0.35) >= bonus SFX (0.2-0.3)
 ---
