@@ -196,6 +196,7 @@ let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
 const particles = [];             // spark particles
+let playerVisible = true;         // set to false during explosion sequence
 
 // Post-collision spawn pause (US-014)
 let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
@@ -491,9 +492,7 @@ function handleVehicleCollision(v) {
     // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
     if (gameState.scrollSpeed > 600) {
       triggerShake(0.5, 10); // full death shake
-      spawnExplosion(sparkX, sparkY); // expanding rings on fatal death
-      gameOverState.causeOfDeath = '';
-      fsm.transition(gameOverState);
+      fsm.transition(explosionState);
       return;
     }
     applySpeedPenalty(0.6, 1.5);
@@ -591,6 +590,7 @@ function resetGameState() {
   shieldBreakFlash = 0;
   // Reset VFX
   explosions.length = 0;
+  playerVisible = true;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1895,6 +1895,46 @@ const playingState = {
   },
 };
 
+// --- Explosion State ---
+// Orchestrates the cinematic explosion sequence after a fatal collision.
+// Renders the frozen game world for 2.0s before transitioning to gameOverState.
+const explosionState = {
+  originX: 0,
+  originY: 0,
+  timer: 0,
+  finalTime: 0,
+  finalDistance: 0,
+  finalScore: 0,
+
+  onEnter() {
+    this.originX = gameState.player.x + PLAYER_WIDTH / 2;
+    this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
+    this.timer = 2.0;
+    playerVisible = false;
+    this.finalTime = gameState.elapsedTime;
+    this.finalDistance = gameState.distanceTraveled;
+    this.finalScore = Math.floor(gameState.score);
+  },
+
+  update(dt) {
+    this.timer -= dt;
+    if (this.timer <= 0) {
+      gameOverState.finalTime = this.finalTime;
+      gameOverState.finalDistance = this.finalDistance;
+      gameOverState.finalScore = this.finalScore;
+      gameOverState.statsPreset = true;
+      gameOverState.causeOfDeath = '';
+      fsm.transition(gameOverState);
+    }
+  },
+
+  render(ctx) {
+    renderRoad(ctx, gameState.scrollOffset);
+    renderTraffic(ctx);
+    // No renderPlayer (car hidden), no collectibles
+  },
+};
+
 // --- GameOver State ---
 const gameOverState = {
   pulseTime: 0,
@@ -1904,12 +1944,17 @@ const gameOverState = {
   bestScore: 0,
   isNewBest: false,
   causeOfDeath: '', // set by caller before transition; '' = collision
+  statsPreset: false, // true when explosionState pre-sets final stats
 
   onEnter() {
     this.pulseTime = 0;
-    this.finalTime = gameState.elapsedTime;
-    this.finalDistance = gameState.distanceTraveled;
-    this.finalScore = Math.floor(gameState.score);
+    if (!this.statsPreset) {
+      // Fuel empty or other non-collision death: capture stats now
+      this.finalTime = gameState.elapsedTime;
+      this.finalDistance = gameState.distanceTraveled;
+      this.finalScore = Math.floor(gameState.score);
+    }
+    this.statsPreset = false;
     const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
     this.isNewBest = this.finalScore > stored;
     this.bestScore = this.isNewBest ? this.finalScore : stored;
