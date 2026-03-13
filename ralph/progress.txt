@@ -21,6 +21,7 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - triggerNearMiss() is the single trigger point for near miss whoosh + combo stinger — no need to wire multiple locations
 - Overtake bonus SFX is in the traffic filter callback (v.y > 760 && !v.collided) — fires frequently, keep it subtle
 - Title drone and state-specific ambient audio: start in onEnter (guard with ctx check), stop in onExit — follows same pattern as engine/road
+- Beat scheduler uses AudioContext.currentTime look-ahead pattern — schedule ~4 beats ahead, refill as time advances (never use setTimeout/setInterval for musical timing)
 
 ---
 
@@ -131,4 +132,21 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Title drone on first play is very brief (starts on Enter, immediately transitions) — the real payoff is on return visits to title
   - titleState had no onExit before — FSM calls it automatically, use for audio cleanup
   - LFO amplitude modulation connects to gain.gain AudioParam directly — modulation depth controlled by LFO gain node
+---
+
+## 2026-03-13 - US-009
+- Added rhythmic beat scheduler to AudioManager with kick drum, hi-hat, and sub bass
+- Kick: sine 150→50Hz sweep with 0.1s exponential decay on every beat
+- Hi-hat: noise burst with high-pass 8kHz on off-beats (halfway between beats)
+- Sub bass: sine 45Hz on every 4th beat for low-end pulse
+- Tempo maps to scrollSpeed: 90 BPM at 200px/s → 150 BPM at 800px/s
+- Beat scheduling uses AudioContext.currentTime look-ahead (~4 beats), refilled each frame
+- Wired startBeat/stopBeat into playingState onEnter/onExit, updateBeat in update loop
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - AudioContext.currentTime look-ahead scheduling is the correct pattern for musical timing — never use setTimeout/setInterval
+  - Beat scheduler state (scheduledUpTo, beatIndex) must be reset in startBeat to avoid stale scheduling on retry
+  - Hi-hat noise buffers are short-lived (0.05s) and cheap — no need to cache like the road noise buffer
+  - stopBeat only needs to set running=false — already-scheduled sounds will play out naturally (they're short percussive hits)
+  - Beat gains (kick 0.35, hi-hat 0.12, sub 0.25) sit in the mix below SFX but audible as rhythm backbone
 ---

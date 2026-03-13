@@ -158,7 +158,7 @@
         "Verify in browser that beat is audible and tempo increases with speed"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
