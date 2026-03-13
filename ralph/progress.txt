@@ -2,6 +2,24 @@
 Started: Fri Mar 13 19:15:22 -03 2026
 ---
 
+## 2026-03-13 - US-007
+- Implemented score submission via webhook POST on Submit Score
+- Added `coinsCollected` field to `gameState` (incremented on each coin pickup, reset in resetGameState)
+- Captured `coinsCollected` in `explosionState.onEnter()` and passed through to `gameOverState` alongside other stats
+- Changed `causeOfDeath` values to spec format: `'collision'` (was `''`) and `'fuel_empty'` (was `'Fuel Empty'`)
+- `gameOverState.onEnter()` captures `coinsCollected` from `gameState` for non-statsPreset (fuel_empty) path
+- `handleNameSubmit()` now POSTs `{ name, score, distance, time, causeOfDeath, coinsCollected }` to webhook
+- Visual feedback: button → 'Sending...' (disabled) → 'Score submitted! ✓' (disabled) or 'Failed to submit. Try again' (re-enabled)
+- Retry via Enter key still works during/after submission (key handler is independent of form state)
+- Updated causeOfDeath display label in render: maps 'fuel_empty' → 'Fuel Empty', 'collision' → 'Collision'
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - `gameOverState` stats come from two paths: explosionState (statsPreset=true) and direct capture (statsPreset=false, fuel_empty) — add new stats to BOTH paths
+  - `gameOverState.causeOfDeath` is set BEFORE `fsm.transition(gameOverState)` is called — check for it in handleNameSubmit via `gameOverState.causeOfDeath`
+  - `fetch()` .then(res => { if (!res.ok) throw }) pattern ensures HTTP errors (4xx/5xx) are caught by .catch()
+  - Distance in gameState is in pixels (100px = 1m), so divide by 100 for meters in payload
+---
+
 ## Codebase Patterns
 - AudioManager uses long-lived nodes stored as properties (engine, road, nitro, pad, etc.) — start/stop/update triplets follow the same pattern
 - playingState.onEnter/onExit are the canonical hooks for starting/stopping gameplay audio

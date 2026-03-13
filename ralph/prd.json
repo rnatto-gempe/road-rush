@@ -131,7 +131,7 @@
         "Verify in browser using dev-browser skill: score POST succeeds and feedback updates correctly"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
