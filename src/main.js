@@ -1207,6 +1207,19 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
+// --- Mute icon click detection ---
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const cx = (e.clientX - rect.left) * scaleX;
+  const cy = (e.clientY - rect.top) * scaleY;
+  // Icon area: top-right corner, 32x32 region
+  if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
+    AudioManager.toggleMute();
+  }
+});
+
 // --- Input tracking ---
 const keys = {};
 window.addEventListener('keydown', (e) => { keys[e.key] = true; });
@@ -2603,6 +2616,50 @@ function renderScoreHUD(ctx) {
   }
 }
 
+// --- Mute Icon HUD ---
+function renderMuteIcon(ctx) {
+  const x = CANVAS_WIDTH - 28; // center of icon
+  const y = 54;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.fillStyle = '#FFFFFF';
+
+  // Speaker body (small rectangle)
+  ctx.fillRect(x - 8, y - 5, 6, 10);
+  // Speaker cone (triangle)
+  ctx.beginPath();
+  ctx.moveTo(x - 2, y - 5);
+  ctx.lineTo(x + 4, y - 10);
+  ctx.lineTo(x + 4, y + 10);
+  ctx.lineTo(x - 2, y + 5);
+  ctx.closePath();
+  ctx.fill();
+
+  if (!AudioManager.muted) {
+    // Sound wave arcs
+    ctx.beginPath();
+    ctx.arc(x + 5, y, 7, -Math.PI / 4, Math.PI / 4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + 5, y, 12, -Math.PI / 4, Math.PI / 4);
+    ctx.stroke();
+  } else {
+    // X mark
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 7);
+    ctx.lineTo(x + 16, y + 7);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + 16, y - 7);
+    ctx.lineTo(x + 6, y + 7);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 // --- Combo HUD ---
 function renderComboHUD(ctx) {
   if (comboMultiplier < 2) return; // only show at x2+
@@ -3182,6 +3239,11 @@ function gameLoop(timestamp) {
 
   accumulator += frameTime;
 
+  // M key mute toggle (all states)
+  if (consumeKey('m') || consumeKey('M')) {
+    AudioManager.toggleMute();
+  }
+
   while (accumulator >= FIXED_DT) {
     if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
     fsm.update(FIXED_DT);
@@ -3199,6 +3261,8 @@ function gameLoop(timestamp) {
   }
   fsm.render(ctx);
   ctx.restore();
+  // Mute icon rendered outside shake transform, visible in all states
+  renderMuteIcon(ctx);
   requestAnimationFrame(gameLoop);
 }
 
