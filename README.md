@@ -2,6 +2,8 @@
 
 Um jogo de corrida endless runner desenvolvido com JavaScript puro e Canvas API.
 
+🎮 **[Jogar agora](https://rnatto-gempe.github.io/road-rush/)**
+
 ![Road Rush](screenshot.png)
 
 ## Como jogar
