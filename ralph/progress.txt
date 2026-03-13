@@ -10,6 +10,9 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - AudioContext is created on first Enter press in titleState (browser autoplay policy compliance)
 - The game has two places where Enter starts gameplay: titleState and gameOverState — both need audio handling
 - FSM calls onExit() automatically if defined — use it for cleanup when leaving a state (covers all exit paths)
+- Long-lived audio nodes (engine, road, nitro) use start/stop/update pattern: start in onEnter, stop in onExit, update per frame
+- Nitro audio activation is driven by nitroTimer in playingState.update, not in updateNitroItems — keeps audio logic centralized
+- Reuse noise buffers (store on AudioManager) when creating looping noise sources to avoid repeated buffer generation
 
 ---
 
@@ -35,4 +38,17 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - The FSM calls onExit() automatically if defined on the current state — use this for cleanup
   - playingState has two exit paths: collision → explosionState, fuel empty → gameOverState; onExit covers both
   - Engine drone uses long-lived nodes with setTargetAtTime for smooth parameter changes — no per-frame node creation
+---
+
+## 2026-03-13 - US-003
+- Added road ambience: looping white noise through band-pass filter (~300-800Hz), volume/bandwidth scale with scrollSpeed
+- Added nitro boost audio: high-freq sawtooth harmonic at 2x engine freq with own gain node, plus 1.3x engine pitch boost via updateEngine
+- Road noise starts/stops with engine in playingState onEnter/onExit
+- Nitro audio activates/deactivates based on nitroTimer in playingState.update
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Modifying updateEngine to check nitro.active flag is cleaner than manually setting pitch in startNitro — avoids fighting with per-frame updates
+  - Noise buffer can be cached on AudioManager (road.buffer) and reused across start/stop cycles
+  - stopNitro must be called before stopEngine in onExit to avoid accessing dead engine nodes
+  - The nitro harmonic needs per-frame updateNitro() calls to track the boosted engine frequency
 ---
