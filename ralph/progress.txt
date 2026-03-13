@@ -70,3 +70,17 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - PAD_CHORDS[chordIdx][0] is the chord root frequency (A4, F4, C4, G4 for Am/F/C/G)
   - ARPS_BY_CHORD[chordIdx] gives harmonically correct pentatonic notes for the current chord — use for SFX note selection
 ---
+
+## 2026-03-13 - US-005
+- Implemented 4 musical state transitions:
+  1. Title→Playing riser: 1s white noise sweep (highpass 200→8000Hz) + crescendo (0→0.15 gain), called in titleState.update() before transition
+  2. Collision tape-stop: pad oscillator frequencies ramp to 20% over 0.3s, gain fades out; beat/arp/bass stop immediately; called before fsm.transition(explosionState)
+  3. Game Over dim chord: A diminished chord (A2=110Hz, C3=130.8Hz, Eb3=155.6Hz) added to startGameOverDrone(), fades in 0.3s then resolves over ~2s via setTargetAtTime
+  4. Retry drum roll: 4 rapid kicks at 75ms intervals (0.3s total), called in gameOverState.update() before fsm.transition(playingState)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - playTapeStop() must null out pad.noteGroups/filter/gain and set pad.active=false so stopPad() in playingState.onExit() becomes a no-op (guard: `if (!this.pad.active) return`)
+  - osc.frequency.value gives current frequency at the moment of the call — use this to start an exponentialRamp from the current playback frequency
+  - Diminished chord resolving: linearRamp to peak then setTargetAtTime(0, peakTime, timeConstant) creates the "resolving" envelope
+  - _scheduleKick() works without the beat scheduler running — can be called directly with AudioContext.currentTime + offset for drum fills
+---
