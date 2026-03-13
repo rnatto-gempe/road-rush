@@ -33,6 +33,15 @@ const SEDAN_SPAWN_MAX = 1600; // px traveled between spawns (max)
 const SHAKE_DURATION = 0.5; // seconds
 const SHAKE_INTENSITY = 10; // max px offset
 
+// Scroll speed ramp constants
+const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
+const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
+const SPEED_RAMP_PHASE2_RATE = 1.5; // px/s per second in phase 2
+const SPEED_MAX = 800; // px/s hard cap
+
+// Debug mode
+let debugMode = false;
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -153,6 +162,20 @@ function resetGameState() {
   gameState.player.vx = 0;
   gameState.traffic = [];
   gameState.nextSpawnDistance = SEDAN_SPAWN_MIN + Math.random() * (SEDAN_SPAWN_MAX - SEDAN_SPAWN_MIN);
+}
+
+// --- Scroll Speed Ramp ---
+function updateScrollSpeed(dt) {
+  if (gameState.scrollSpeed < SPEED_RAMP_PHASE1_CAP) {
+    // Phase 1: formula-driven from elapsed time
+    gameState.scrollSpeed = Math.min(
+      INITIAL_SCROLL_SPEED + gameState.elapsedTime * SPEED_RAMP_PHASE1_RATE,
+      SPEED_RAMP_PHASE1_CAP
+    );
+  } else {
+    // Phase 2: incremental ramp
+    gameState.scrollSpeed = Math.min(gameState.scrollSpeed + SPEED_RAMP_PHASE2_RATE * dt, SPEED_MAX);
+  }
 }
 
 // --- Road Rendering ---
@@ -394,8 +417,11 @@ const playingState = {
 
   update(dt) {
     gameState.elapsedTime += dt;
+    updateScrollSpeed(dt);
     gameState.scrollOffset += gameState.scrollSpeed * dt;
     gameState.distanceTraveled += gameState.scrollSpeed * dt;
+
+    if (consumeKey('d') || consumeKey('D')) debugMode = !debugMode;
 
     updatePlayer(dt);
     updateTraffic(dt);
@@ -422,6 +448,15 @@ const playingState = {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, 8, 8);
+
+    // Debug overlay (toggle with D key)
+    if (debugMode) {
+      ctx.fillStyle = 'rgba(255,255,0,0.85)';
+      ctx.font = '12px monospace';
+      ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s`, 8, 26);
+      ctx.fillText(`Dist: ${(gameState.distanceTraveled / 100).toFixed(0)}m`, 8, 42);
+      ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 58);
+    }
   },
 };
 
