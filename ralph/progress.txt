@@ -10,7 +10,8 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - gameState is module-scoped (not on window) — browser evaluate can't access it; use screenshots or debug mode (D key) to verify game state
 - ctx.createRadialGradient(cx, cy, r1, cx, cy, r2) is the pattern for vignette overlays — both fuel and speed vignettes use this
 - All visual overlays (vignettes, flashes) use fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT) after setting fillStyle to the gradient
-- Render order in playingState.render(): road → traffic/items → player → particles → overlays → HUD (draw HUD last so overlays don't darken it)
+- Render order in playingState.render(): road → [motion ghost] → traffic/items → player → particles → [capture ghost] → overlays → HUD (draw HUD last so overlays don't darken it)
+- Motion blur ghost: draw offscreen canvas AFTER renderRoad() (so background is fresh) but BEFORE renderTraffic(); capture AFTER renderParticles() but BEFORE overlays — keeps HUD and overlays ghost-free
 - The game runs at 60fps fixed timestep (FIXED_DT = 1/60); scrollSpeed ramps from 200 to 800 px/s over the run
 
 ## 2026-03-13 22:48 - US-001
@@ -40,4 +41,19 @@ Started: Fri Mar 13 19:37:51 -03 2026
   - Canvas `multiply` composite with a solid color extracts that color channel from the destination pixels — useful for per-channel effects without WebGL
   - Two separate offscreen canvases are cleaner than re-snapshotting the main canvas between red and blue draws (avoids capturing the first chroma pass into the second)
   - `renderChromaticAberration()` takes no arguments — it reads module-level `canvas`, `ctx`, and chroma state directly, consistent with other render functions
+---
+
+## 2026-03-13 - US-003
+- Implemented motion blur / frame ghosting at high speed
+- Added `ghostCanvas` / `ghostCtx` offscreen canvas (module level) and `ghostValid` boolean flag
+- `renderMotionGhost()`: draws ghostCanvas at globalAlpha 0.18 (speed 600–700) or 0.28 (speed > 700), called AFTER renderRoad() and BEFORE renderTraffic()
+- `captureGhostFrame()`: snapshots main canvas to ghostCanvas AFTER renderParticles() and BEFORE overlays/HUD; clears and invalidates ghost when speed drops below 600
+- `ghostValid = false` reset in `initGame()` so stale ghost doesn't bleed into a new run
+- Effect activates only above 600 px/s (zero cost below — no capture, no draw)
+- Ghost excludes speed vignette, chromatic aberration, HUD overlays (captured before those are drawn)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - "Previous frame ghost" pattern: capture AFTER world render, draw AFTER background clear but BEFORE current world render — gives trailing effect without affecting HUD
+  - `ghostValid` flag prevents a stale ghost from flickering on first frame above threshold
+  - scrollSpeed ramps from 200 → 600 over ~80s (phase1Rate=5 px/s/s), so this effect only appears late in runs — hard to verify in browser without a long session
 ---

@@ -50,7 +50,7 @@
         "Verify in browser using dev-browser skill: ghosting trails visible on vehicles at high speed"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
