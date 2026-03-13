@@ -4,6 +4,24 @@ const CANVAS_WIDTH = 400;
 const CANVAS_HEIGHT = 700;
 const FIXED_DT = 1 / 60; // Fixed timestep: 60 FPS
 
+// Road constants
+const ROAD_LEFT = 40;
+const ROAD_RIGHT = 360;
+const ROAD_WIDTH = 320;
+const LANE_WIDTH = 80;
+const LANE_COUNT = 4;
+
+const INITIAL_SCROLL_SPEED = 200; // px/s
+
+// Dash pattern constants
+const DASH_LENGTH = 30;
+const DASH_GAP = 20;
+const DASH_PERIOD = DASH_LENGTH + DASH_GAP;
+
+// Rumble strip constants
+const RUMBLE_SEGMENT = 20; // each color block height
+const RUMBLE_PERIOD = RUMBLE_SEGMENT * 2; // red + white
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
@@ -85,11 +103,77 @@ const fsm = {
 const gameState = {
   elapsedTime: 0,
   distanceTraveled: 0,
+  scrollSpeed: INITIAL_SCROLL_SPEED,
+  scrollOffset: 0,
 };
 
 function resetGameState() {
   gameState.elapsedTime = 0;
   gameState.distanceTraveled = 0;
+  gameState.scrollSpeed = INITIAL_SCROLL_SPEED;
+  gameState.scrollOffset = 0;
+}
+
+// --- Road Rendering ---
+function renderRoad(ctx, scrollOffset) {
+  // Asphalt background with vertical gradient
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#1A1A2E');
+  gradient.addColorStop(1, '#16213E');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // Rumble strips (left and right margins)
+  const rumbleOffset = scrollOffset % RUMBLE_PERIOD;
+  for (let side = 0; side < 2; side++) {
+    const stripX = side === 0 ? 0 : ROAD_RIGHT;
+    const stripW = ROAD_LEFT; // 40px
+
+    // Draw segments from above screen to below
+    let y = -rumbleOffset;
+    let colorIndex = 0;
+    while (y < CANVAS_HEIGHT) {
+      ctx.fillStyle = colorIndex % 2 === 0 ? '#E53935' : '#FFFFFF';
+      ctx.fillRect(stripX, y, stripW, RUMBLE_SEGMENT);
+      y += RUMBLE_SEGMENT;
+      colorIndex++;
+    }
+  }
+
+  // Road surface (asphalt, re-drawn on top of rumble edges)
+  const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  roadGradient.addColorStop(0, '#2A2A3E');
+  roadGradient.addColorStop(1, '#26314E');
+  ctx.fillStyle = roadGradient;
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+  // White border lines
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  // Dashed lane markers between 4 lanes (3 markers)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(laneX, -dashScrollOffset);
+    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
 }
 
 // --- Title State ---
@@ -137,6 +221,8 @@ const playingState = {
 
   update(dt) {
     gameState.elapsedTime += dt;
+    gameState.scrollOffset += gameState.scrollSpeed * dt;
+    gameState.distanceTraveled += gameState.scrollSpeed * dt;
 
     // Placeholder: press Escape to simulate game over (for testing)
     // In future stories, collision will trigger this
@@ -146,19 +232,14 @@ const playingState = {
   },
 
   render(ctx) {
-    // Placeholder: colored background to distinguish from title
-    ctx.fillStyle = '#16213E';
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    renderRoad(ctx, gameState.scrollOffset);
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '16px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Playing...', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-
-    // Show elapsed time
+    // Show elapsed time overlay
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '14px monospace';
-    ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, 8, 8);
   },
 };
 
