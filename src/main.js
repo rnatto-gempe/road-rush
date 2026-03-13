@@ -233,6 +233,59 @@ const AudioManager = {
     osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   },
 
+  // ─── Engine drone (long-lived nodes) ───
+  engine: { osc: null, filter: null, gain: null },
+
+  startEngine() {
+    if (!this.ctx) return;
+    this.stopEngine(); // clean up any existing
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, now);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.15, now, 0.05); // smooth ramp up
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    this.engine = { osc, filter, gain };
+  },
+
+  stopEngine() {
+    if (!this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    this.engine.gain.gain.setTargetAtTime(0, now, 0.05);
+    const osc = this.engine.osc;
+    const filter = this.engine.filter;
+    const gain = this.engine.gain;
+    // Stop after fade-out completes (~0.25s)
+    setTimeout(() => {
+      try { osc.stop(); } catch (_) {}
+      osc.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 250);
+    this.engine = { osc: null, filter: null, gain: null };
+  },
+
+  // Update engine pitch/volume based on scroll speed (call every frame)
+  updateEngine(scrollSpeed) {
+    if (!this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    // Map scrollSpeed 200→800 to frequency 60→180Hz
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    const freq = 60 + t * 120;
+    this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
+    // Filter cutoff maps 400→800Hz
+    this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
+    // Volume ramps 0.08→0.20 with speed
+    const vol = 0.08 + t * 0.12;
+    this.engine.gain.gain.setTargetAtTime(vol, now, 0.05);
+  },
+
   // Create filtered noise burst
   createNoise(duration, filterFreq, filterType) {
     if (!this.ctx) return;
@@ -1783,12 +1836,17 @@ const titleState = {
 // --- Playing State ---
 const playingState = {
   onEnter() {
-    // Future stories will initialize game objects here
+    AudioManager.startEngine();
+  },
+
+  onExit() {
+    AudioManager.stopEngine();
   },
 
   update(dt) {
     gameState.elapsedTime += dt;
     updateScrollSpeed(dt);
+    AudioManager.updateEngine(gameState.scrollSpeed);
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
