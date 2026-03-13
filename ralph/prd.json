@@ -322,7 +322,7 @@
         "Verify in browser: nitro is visually distinct, boost feels powerful, particles trail behind car"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "During nitro, skip collision checks entirely (invulnerable). Particles: spawn at car bottom-center, random spread ±10px X, velocity downward 50-100 px/s, color #42A5F5 fading to transparent."
     },
     {

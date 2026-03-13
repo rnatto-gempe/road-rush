@@ -1,3 +1,24 @@
+## 2026-03-13 - US-018
+- Added NITRO_ITEM_HALF=10, NITRO_SPAWN_MIN=2500, NITRO_SPAWN_MAX=4000, NITRO_BOOST_FACTOR=1.3, NITRO_BOOST_DURATION=3.0, NITRO_EASE_DURATION=0.5, NITRO_COLLECT_ANIM_DURATION=0.2 constants
+- Added module-level `nitroTimer` and `nitroEaseTimer` state vars
+- Added `getNitroMultiplier()`: returns 1.3 during boost, linear ease 1.3→1.0 during ease-out, 1.0 otherwise; integrated into `getEffectiveScrollSpeed()`
+- Added `gameState.nitroItems[]` and `gameState.nextNitroSpawnDistance`; reset in `resetGameState()`
+- `spawnNitroItem()`: spawns at lane center above screen; sets next distance threshold (2500-4000px)
+- `updateNitroItems(dt)`: scrolls road-fixed; AABB collection with 20x20 hitbox; on collect: sets nitroTimer=3.0, nitroEaseTimer=0, sets invulnTimer=max(invulnTimer, 3.0)
+- `renderNitroItems(ctx)`: yellow (#FFD600) upward-pointing triangle with pulsing scale (0.9-1.1, 0.5s cycle); 'N' label; collect scale→120%/fade animation
+- In `playingState.update()`: ticks nitroTimer (starts ease when hits 0), ticks nitroEaseTimer; spawns 4-6 blue (#42A5F5) particles per frame at car bottom during active boost; calls updateNitroItems
+- In `playingState.render()`: calls renderNitroItems between coins and player
+- Debug overlay shows `NITRO: Xs (x1.30)` during boost and `Nitro ease: Xs (xN.NN)` during ease-out
+- Verified in browser: game runs correctly at 68m=6800px, score 1146, build 21.89 kB; nitro is rare (2500-4000px) so timing-dependent to see in screenshot
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - `getNitroMultiplier()` as a separate function lets `getEffectiveScrollSpeed()` compose speed factors cleanly: `scrollSpeed * penaltyMultiplier * nitroMultiplier`
+  - Ease-out: `progress = nitroEaseTimer / NITRO_EASE_DURATION` gives 1→0; multiply by (boostFactor - 1.0) and add 1.0 for smooth linear return
+  - invulnTimer during nitro: set to `Math.max(invulnTimer, NITRO_BOOST_DURATION)` to avoid prematurely clearing existing invuln
+  - Nitro particles spawn at `player.y + PLAYER_HEIGHT` with positive vy (downward on screen) — they trail visually below the car
+  - Pulsing animation: `1.0 + 0.1 * Math.sin(elapsedTime * 4 * Math.PI)` gives 0.9-1.1 over 0.5s cycle
+---
+
 ## 2026-03-13 - US-017
 - Added COIN_RADIUS=8 (16px diameter), COIN_POINTS=100, COIN_SPAWN_MIN=600, COIN_SPAWN_MAX=1000, COIN_COLLECT_ANIM_DURATION=0.2, COIN_FLOAT_DURATION=0.8 constants
 - Added module-level `coinFloatTexts[]` array for floating '+100' text effects
@@ -218,6 +239,8 @@
 - Combo system: `comboMultiplier` starts at 1, increments on near miss; display only when >= 2; `comboResetTimer` countdown for 3s timeout + fade; reset to 1 on collision or timeout
 - Coin clusters: `spawnCoinCluster()` creates 3-5 coins with `y = -COIN_RADIUS - i*40` (first arrives first); patterns 'line'/'arc'/'zigzag'; road-fixed scroll like fuel items; `coinFloatTexts[]` module array for '+100' float effect
 - DDA: `ddaCleanTimer` + `ddaSpawnRate` (1.0–1.5); +5% per 10s clean play; partial reset on collision halves bonus: `1.0 + (rate - 1.0) * 0.5`; applied at spawn time by dividing raw interval; fuel distance x1.2 when fuel > 70%; fairness constraint unaffected
+- `getEffectiveScrollSpeed()` = `scrollSpeed * speedPenaltyMultiplier * getNitroMultiplier()` — compose speed modifiers as separate multiplier functions
+- Nitro: `nitroTimer` (3s boost) → `nitroEaseTimer` (0.5s ease); `getNitroMultiplier()` returns 1.3 during boost, linear 1.3→1.0 during ease; invulnTimer set to NITRO_BOOST_DURATION on collect
 
 ---
 
