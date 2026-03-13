@@ -475,22 +475,10 @@ function handleVehicleCollision(v) {
   ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
   ddaCleanTimer = 0;
 
-  if (isLateral) {
-    // Glancing blow: 20% speed reduction 0.8s + yellow sparks + light shake
-    applySpeedPenalty(0.8, 0.8);
-    spawnSparks(sparkX, sparkY, 4 + Math.floor(Math.random() * 5));
-    triggerShake(0.15, 2);
-  } else {
-    // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
-    if (gameState.scrollSpeed > 600) {
-      triggerShake(0.5, 10); // full death shake
-      fsm.transition(explosionState);
-      return;
-    }
-    applySpeedPenalty(0.6, 1.5);
-    redFlash.alpha = 0.2;
-    triggerShake(0.3, 6);
-  }
+  // Any collision is fatal — trigger explosion immediately
+  triggerShake(0.5, 10);
+  fsm.transition(explosionState);
+  return;
 
   // Start invulnerability window + spawn pause
   invulnTimer = INVULN_DURATION;
