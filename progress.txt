@@ -1,0 +1,26 @@
+## Codebase Patterns
+- All game code lives in `road-rush/src/main.js` (single file, vanilla JS)
+- Road constants: ROAD_LEFT=40, ROAD_RIGHT=360, ROAD_WIDTH=320, LANE_WIDTH=80, LANE_COUNT=4
+- `gameState` is a shared mutable object; `resetGameState()` resets it on retry
+- FSM: `fsm.transition(state)` calls onExit/onEnter; each state has update(dt) and render(ctx)
+- Input: `keys[key]` for held keys, `consumeKey(key)` for one-shot presses
+- Game loop uses fixed timestep accumulator at 1/60s (FIXED_DT)
+- scrollOffset scrolls indefinitely (no wrap needed in storage — only modulo at render time)
+- Canvas context state (lineDash, lineWidth, etc.) must be reset after use to avoid bleed-over
+
+---
+
+## 2026-03-13 - US-003
+- Implemented road rendering with scrolling lanes in playingState
+- Added road constants (ROAD_LEFT, ROAD_RIGHT, ROAD_WIDTH, LANE_WIDTH, LANE_COUNT)
+- Added INITIAL_SCROLL_SPEED=200 and scrollSpeed/scrollOffset to gameState
+- renderRoad() draws: gradient background, rumble strips (red/white, 20px segments), asphalt road surface, white border lines, dashed lane markers (30/20px dash/gap, 40% opacity)
+- Rumble and dash offsets use modulo of scrollOffset for seamless infinite scroll
+- playingState.update() now increments scrollOffset and distanceTraveled
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - ctx.setLineDash() is the easiest way to draw scrolling dashes — just offset the start Y by -(scrollOffset % dashPeriod)
+  - Redraw road surface on top of rumble strips (rather than clipping) to get clean edges
+  - scrollOffset grows unbounded — only apply % PERIOD at render time for wrap
+  - resetGameState() must reset scrollOffset to 0 for clean retry
+---
