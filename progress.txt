@@ -20,6 +20,24 @@
 
 ---
 
+## 2026-03-13 - US-006
+- Added SHAKE_DURATION=0.5s, SHAKE_INTENSITY=10px constants
+- Added module-level `shake` object {time} and `triggerShake()` function
+- Added `aabbOverlap(a, b)` using standard AABB exclusion formula
+- Added collision check in playingState.update(): iterates traffic hitboxes vs player hitbox, calls triggerShake() then transitions to gameOverState on first hit
+- Removed Escape-key game-over shortcut (no longer needed)
+- Applied screen shake in game loop: ctx.save/translate/restore wrapping fsm.render(); shake.time decrements in update loop
+- gameOverState now stores finalTime and finalDistance on onEnter(), renders both on game over screen
+- Distance displayed as meters: distanceTraveled / 100
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Screen shake: store time at module level, decrement in update loop, apply random translate in render (exponential decay via linear progress ratio)
+  - AABB: !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h)
+  - Save finalTime/finalDistance in gameOverState.onEnter() before resetGameState() clears them
+  - Vite ES modules scope all vars — can't access from browser console (use dispatchEvent for key simulation)
+  - Player centered at x=180; sedan lanes at x=60,140,220,300 — 80% hitboxes have 8px gap, player must move to collide
+---
+
 ## 2026-03-13 - US-005
 - Added sedan constants: SEDAN_WIDTH=40, SEDAN_HEIGHT=60, SEDAN_SPEED_RATIO=0.6, SEDAN_MAX_COUNT=2, SEDAN_SPAWN_MIN=1200, SEDAN_SPAWN_MAX=1600
 - Added `gameState.traffic[]` array and `gameState.nextSpawnDistance` for spawn tracking
