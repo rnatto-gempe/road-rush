@@ -1603,10 +1603,102 @@ function resizeCanvas() {
 
   canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
+  positionNameForm();
 }
+
+// Declared early so positionNameForm() guard works when resizeCanvas() is called below
+let nameFormEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// --- Name Input Overlay (US-006) ---
+nameFormEl = document.createElement('div');
+nameFormEl.style.cssText = 'display:none;position:fixed;flex-direction:column;align-items:center;gap:6px;';
+
+const nameInputEl = document.createElement('input');
+nameInputEl.type = 'text';
+nameInputEl.placeholder = 'Enter your name';
+nameInputEl.maxLength = 15;
+nameInputEl.style.cssText = [
+  'font:16px monospace',
+  'padding:6px 10px',
+  'background:#1a1a2e',
+  'color:#fff',
+  'border:2px solid #555',
+  'border-radius:4px',
+  'width:200px',
+  'text-align:center',
+  'outline:none',
+].join(';') + ';';
+
+const nameErrorEl = document.createElement('span');
+nameErrorEl.style.cssText = 'color:#E53935;font:12px monospace;visibility:hidden;';
+nameErrorEl.textContent = 'Name too short';
+
+const nameSubmitEl = document.createElement('button');
+nameSubmitEl.textContent = 'Submit Score';
+nameSubmitEl.style.cssText = [
+  'font:14px monospace',
+  'padding:7px 18px',
+  'background:#E53935',
+  'color:#fff',
+  'border:none',
+  'border-radius:4px',
+  'cursor:pointer',
+].join(';') + ';';
+
+nameFormEl.append(nameInputEl, nameErrorEl, nameSubmitEl);
+document.body.appendChild(nameFormEl);
+
+// Restore saved name
+nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+
+function positionNameForm() {
+  if (!nameFormEl || nameFormEl.style.display === 'none') return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const centerX = rect.left + rect.width / 2;
+  // Position below stats block — canvas logical y ≈ 460
+  nameFormEl.style.left = `${centerX - 120}px`;
+  nameFormEl.style.top = `${rect.top + 460 * scale}px`;
+}
+
+function showNameForm() {
+  nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+  nameErrorEl.style.visibility = 'hidden';
+  nameSubmitEl.textContent = 'Submit Score';
+  nameSubmitEl.disabled = false;
+  nameFormEl.style.display = 'flex';
+  positionNameForm();
+  nameInputEl.focus();
+}
+
+function hideNameForm() {
+  nameFormEl.style.display = 'none';
+}
+
+// Prevent game controls when typing in name input
+nameInputEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleNameSubmit();
+  }
+});
+
+function handleNameSubmit() {
+  const name = nameInputEl.value.trim();
+  if (name.length < 2) {
+    nameErrorEl.style.visibility = 'visible';
+    return;
+  }
+  nameErrorEl.style.visibility = 'hidden';
+  localStorage.setItem('roadRushPlayerName', name);
+  // Actual score POST is implemented in US-007
+}
+
+nameSubmitEl.addEventListener('click', handleNameSubmit);
 
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
@@ -3568,10 +3660,12 @@ const gameOverState = {
     }
     this.statsPreset = false;
     AudioManager.startGameOverDrone();
+    showNameForm();
   },
 
   onExit() {
     AudioManager.stopGameOverDrone();
+    hideNameForm();
   },
 
   update(dt) {
@@ -3625,11 +3719,11 @@ const gameOverState = {
       ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
     }
 
-    // Pulsing retry text
+    // Pulsing retry text (moved down to make room for name input overlay)
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
-    ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 100);
+    ctx.font = '16px monospace';
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 30);
     ctx.globalAlpha = 1;
   },
 };
