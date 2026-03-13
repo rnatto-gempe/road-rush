@@ -1600,6 +1600,13 @@ chromaCanvasB.width = CANVAS_WIDTH;
 chromaCanvasB.height = CANVAS_HEIGHT;
 const chromaCtxB = chromaCanvasB.getContext('2d');
 
+// Offscreen canvas for motion blur / frame ghosting (US-003) — initialized once
+const ghostCanvas = document.createElement('canvas');
+ghostCanvas.width = CANVAS_WIDTH;
+ghostCanvas.height = CANVAS_HEIGHT;
+const ghostCtx = ghostCanvas.getContext('2d');
+let ghostValid = false; // true once first capture has been taken above 600 px/s
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
   const windowWidth = window.innerWidth;
@@ -1817,6 +1824,34 @@ function renderChromaticAberration() {
   ctx.restore();
 }
 
+// Motion blur: composite previous frame as ghost behind current frame (US-003)
+// Called AFTER renderRoad() clears the background, BEFORE renderTraffic()/renderPlayer()
+function renderMotionGhost() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600 || !ghostValid) return;
+  const alpha = speed > 700 ? 0.28 : 0.18;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(ghostCanvas, 0, 0);
+  ctx.restore();
+}
+
+// Capture the road/traffic/player/particles layer to ghostCanvas for use next frame (US-003)
+// Called AFTER renderParticles(), BEFORE overlays and HUD
+function captureGhostFrame() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600) {
+    if (ghostValid) {
+      ghostCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ghostValid = false;
+    }
+    return;
+  }
+  ghostCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  ghostCtx.drawImage(canvas, 0, 0);
+  ghostValid = true;
+}
+
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
 function renderSpeedLines(ctx) {
   const speed = gameState.scrollSpeed;
@@ -2008,6 +2043,8 @@ function resetGameState() {
   nitroEaseTimer = 0;
   // Reset chromatic aberration
   chromaTimer = 0;
+  // Reset motion blur ghost (US-003)
+  ghostValid = false;
   // Reset shield state
   gameState.player.hasShield = false;
   gameState.shieldItems = [];
@@ -3366,6 +3403,8 @@ const playingState = {
 
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
+    // Motion blur: ghost of previous frame composited behind current world (US-003)
+    renderMotionGhost();
     renderSpeedLines(ctx);
     renderTraffic(ctx);
     renderFuelItems(ctx);
@@ -3374,6 +3413,8 @@ const playingState = {
     renderShieldItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
+    // Capture road/traffic/player/particles layer for motion blur next frame (US-003)
+    captureGhostFrame();
 
     // Red flash overlay on frontal collision
     if (redFlash.alpha > 0) {
