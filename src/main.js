@@ -166,6 +166,10 @@ let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
 let comboResetTimer = 0;  // seconds until combo resets to 1
 let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 
+// DDA (Dynamic Difficulty Adjustment) state
+let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
+let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, cap 1.5; halves on collision
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -348,6 +352,9 @@ function handleVehicleCollision(v) {
   gameState.survivorTimer = 0;
   comboMultiplier = 1;
   comboResetTimer = 0;
+  // DDA: partial reset — accumulated spawn rate bonus halved, clean timer reset
+  ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
+  ddaCleanTimer = 0;
 
   if (isLateral) {
     // Glancing blow: 20% speed reduction 0.8s + yellow sparks
@@ -427,6 +434,9 @@ function resetGameState() {
   comboMultiplier = 1;
   comboResetTimer = 0;
   comboScaleTimer = 0;
+  // Reset DDA fully on game over / retry
+  ddaCleanTimer = 0;
+  ddaSpawnRate = 1.0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -560,6 +570,9 @@ function updatePlayer(dt) {
     invulnTimer = INVULN_DURATION;
     spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
     gameState.survivorTimer = 0;
+    // DDA partial reset on border hit
+    ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
+    ddaCleanTimer = 0;
   }
 }
 
@@ -802,8 +815,11 @@ function updateTraffic(dt) {
     const candidate = buildVehicleCandidate();
     if (isFairToSpawn(candidate)) {
       spawnVehicle(candidate);
+      // DDA: combo >= 3 reduces interval by 10% (closer spawns); ddaSpawnRate scales it further
+      const ddaComboMul = comboMultiplier >= 3 ? 0.9 : 1.0;
+      const rawInterval = spawnMin + Math.random() * (spawnMax - spawnMin);
       gameState.nextSpawnDistance =
-        gameState.distanceTraveled + spawnMin + Math.random() * (spawnMax - spawnMin);
+        gameState.distanceTraveled + rawInterval / (ddaSpawnRate * ddaComboMul);
     }
     // If not fair, skip this frame — will retry next frame with a fresh candidate
   }
@@ -973,7 +989,9 @@ function spawnFuelItem() {
   // Spawn interval grows with elapsed (scarcity ramp)
   const intervalMin = FUEL_SPAWN_BASE_MIN + elapsed * FUEL_SPAWN_INTERVAL_GROWTH;
   const intervalMax = FUEL_SPAWN_BASE_MAX + elapsed * FUEL_SPAWN_INTERVAL_GROWTH;
-  gameState.nextFuelSpawnDistance = gameState.distanceTraveled + intervalMin + Math.random() * (intervalMax - intervalMin);
+  // DDA: when fuel > 70%, next fuel spawns 20% further (punishes excess fuel)
+  const ddaFuelMul = gameState.fuel > 70 ? 1.2 : 1.0;
+  gameState.nextFuelSpawnDistance = gameState.distanceTraveled + (intervalMin + Math.random() * (intervalMax - intervalMin)) * ddaFuelMul;
 }
 
 function updateFuelItems(dt) {
@@ -1214,6 +1232,13 @@ const playingState = {
       if (survivorFlash.timer <= 0) survivorFlash = null;
     }
 
+    // DDA: accumulate clean time; every 10s without collision → +5% spawn rate (cap 1.5)
+    ddaCleanTimer += dt;
+    while (ddaCleanTimer >= 10) {
+      ddaCleanTimer -= 10;
+      ddaSpawnRate = Math.min(1.5, ddaSpawnRate + 0.05);
+    }
+
     // Lerp displayed score toward actual score
     gameState.displayedScore += (gameState.score - gameState.displayedScore) * Math.min(1, SCORE_LERP_RATE * dt);
 
@@ -1301,6 +1326,11 @@ const playingState = {
         ctx.fillText(`  ${type}: ${count}`, 8, y);
         y += 14;
       }
+      // DDA values
+      ctx.fillText(`DDA rate: x${ddaSpawnRate.toFixed(2)} (${ddaCleanTimer.toFixed(0)}s clean)`, 8, y);
+      y += 14;
+      if (comboMultiplier >= 3) { ctx.fillText(`DDA combo: x0.9 (combo ${comboMultiplier})`, 8, y); y += 14; }
+      if (gameState.fuel > 70) { ctx.fillText(`DDA fuel: x1.2 (fuel ${gameState.fuel.toFixed(0)})`, 8, y); y += 14; }
     }
   },
 };
