@@ -1091,8 +1091,93 @@ const AudioManager = {
     this.explosionRumble = { source: null, filter: null, gain: null };
   },
 
+  // ─── Title→Playing riser (1s white noise ascending sweep + crescendo) ───
+  playRiser() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const dur = 1.0;
+
+    const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(200, now);
+    filter.frequency.exponentialRampToValueAtTime(8000, now + dur);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + dur * 0.8);
+    gain.gain.linearRampToValueAtTime(0, now + dur);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + dur);
+    src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // ─── Collision tape-stop effect (pitch drops to 20% over 0.3s then silence) ───
+  playTapeStop() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const dur = 0.3;
+
+    // Tape-stop the pad: ramp all oscillator frequencies to 20% over dur
+    if (this.pad.active) {
+      for (const grp of this.pad.noteGroups) {
+        for (const osc of grp.oscs) {
+          const curFreq = osc.frequency.value;
+          osc.frequency.cancelScheduledValues(now);
+          osc.frequency.setValueAtTime(curFreq, now);
+          osc.frequency.exponentialRampToValueAtTime(Math.max(1, curFreq * 0.2), now + dur);
+        }
+      }
+      this.pad.gain.gain.cancelScheduledValues(now);
+      this.pad.gain.gain.setValueAtTime(this.pad.gain.gain.value, now);
+      this.pad.gain.gain.setTargetAtTime(0, now + dur * 0.7, 0.02);
+
+      // Schedule cleanup; mark inactive so stopPad() in onExit is a no-op
+      const { noteGroups, filter, gain } = this.pad;
+      setTimeout(() => {
+        for (const grp of noteGroups) {
+          for (const osc of grp.oscs) { try { osc.stop(); } catch (_) {} osc.disconnect(); }
+          grp.noteGain.disconnect();
+        }
+        if (filter) filter.disconnect();
+        if (gain) gain.disconnect();
+      }, 500);
+      this.pad.noteGroups = [];
+      this.pad.filter = null;
+      this.pad.gain = null;
+      this.pad.active = false;
+      this.pad.chordIdx = -1;
+    }
+
+    // Stop beat, arp, bass immediately (their short-lived notes just cut off)
+    this.stopBeat();
+    this.stopArp();
+    this.stopBass();
+  },
+
+  // ─── Retry drum roll fill (4 rapid kicks over 0.3s) ───
+  playDrumRoll() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const interval = 0.075; // 4 kicks → 0.3s total
+    for (let i = 0; i < 4; i++) {
+      this._scheduleKick(now + i * interval);
+    }
+  },
+
   // ─── Game over somber drone (two detuned low sines + filtered noise tail) ───
-  gameOverDrone: { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null },
+  gameOverDrone: { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null, dimOsc1: null, dimOsc2: null, dimOsc3: null, dimGain: null },
 
   startGameOverDrone() {
     if (!this.ctx) return;
@@ -1139,7 +1224,25 @@ const AudioManager = {
     noiseGain.connect(this.masterGain);
     noiseSource.start(now);
 
-    this.gameOverDrone = { osc1, osc2, oscGain, noiseSource, noiseGain };
+    // Diminished minor chord (A dim: A2=110Hz, C3=130.8Hz, Eb3=155.6Hz)
+    // Fades in 0.3s, then resolves (fades out) over 2s for cinematic tension
+    const dimFreqs = [110, 130.8, 155.6];
+    const dimGain = this.ctx.createGain();
+    dimGain.gain.setValueAtTime(0, now);
+    dimGain.gain.linearRampToValueAtTime(0.10, now + 0.3);
+    dimGain.gain.setTargetAtTime(0, now + 0.3, 0.7); // slow resolve over ~2s
+    dimGain.connect(this.masterGain);
+
+    const dimOscs = dimFreqs.map(freq => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq, now);
+      o.connect(dimGain);
+      o.start(now);
+      return o;
+    });
+
+    this.gameOverDrone = { osc1, osc2, oscGain, noiseSource, noiseGain, dimOscs, dimGain };
   },
 
   stopGameOverDrone() {
@@ -1153,8 +1256,12 @@ const AudioManager = {
       d.noiseGain.gain.cancelScheduledValues(now);
       d.noiseGain.gain.setTargetAtTime(0, now, 0.05);
     }
+    if (d.dimGain) {
+      d.dimGain.gain.cancelScheduledValues(now);
+      d.dimGain.gain.setTargetAtTime(0, now, 0.05);
+    }
 
-    const { osc1, osc2, oscGain, noiseSource, noiseGain } = d;
+    const { osc1, osc2, oscGain, noiseSource, noiseGain, dimOscs, dimGain } = d;
     setTimeout(() => {
       try { osc1.stop(); } catch (_) {}
       try { osc2.stop(); } catch (_) {}
@@ -1162,8 +1269,10 @@ const AudioManager = {
       osc1.disconnect(); osc2.disconnect(); oscGain.disconnect();
       if (noiseSource) noiseSource.disconnect();
       if (noiseGain) noiseGain.disconnect();
+      if (dimOscs) { for (const o of dimOscs) { try { o.stop(); } catch (_) {} o.disconnect(); } }
+      if (dimGain) dimGain.disconnect();
     }, 300);
-    this.gameOverDrone = { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null };
+    this.gameOverDrone = { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null, dimOsc1: null, dimOsc2: null, dimOsc3: null, dimGain: null };
   },
 
   // ─── Harmonic chord pad (supersaw) ───
@@ -1730,6 +1839,7 @@ function handleVehicleCollision(v) {
   ddaCleanTimer = 0;
 
   // Any collision is fatal — trigger explosion immediately
+  AudioManager.playTapeStop(); // pitch-drop all musical elements before explosion
   AudioManager.playCrash();
   triggerShake(0.5, 10);
   fsm.transition(explosionState);
@@ -3001,6 +3111,7 @@ const titleState = {
       AudioManager.resume();
       // Start drone briefly — it will crossfade out via onExit
       AudioManager.startTitleDrone();
+      AudioManager.playRiser();
       resetGameState();
       fsm.transition(playingState);
     }
@@ -3466,6 +3577,7 @@ const gameOverState = {
   update(dt) {
     this.pulseTime += dt;
     if (consumeKey('Enter')) {
+      AudioManager.playDrumRoll();
       resetGameState();
       fsm.transition(playingState);
     }
