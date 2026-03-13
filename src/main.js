@@ -1565,6 +1565,11 @@ const coinFloatTexts = []; // {x, y, timer}
 let nitroTimer = 0;      // countdown during active boost (3s → 0)
 let nitroEaseTimer = 0;  // countdown during ease-out (0.5s → 0)
 
+// Chromatic aberration state (US-002)
+let chromaTimer = 0;        // countdown (s); 0 = inactive
+let chromaDuration = 0.4;   // total duration of current trigger (for decay calc)
+let chromaIntensity = 1.0;  // peak intensity: 1.0 = full (collision), 0.6 = nitro
+
 // Shield state
 let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
 
@@ -1583,6 +1588,17 @@ const ctx = canvas.getContext('2d');
 // Set logical resolution
 canvas.width = CANVAS_WIDTH;
 canvas.height = CANVAS_HEIGHT;
+
+// Offscreen canvases for chromatic aberration (US-002) — initialized once
+const chromaCanvasR = document.createElement('canvas');
+chromaCanvasR.width = CANVAS_WIDTH;
+chromaCanvasR.height = CANVAS_HEIGHT;
+const chromaCtxR = chromaCanvasR.getContext('2d');
+
+const chromaCanvasB = document.createElement('canvas');
+chromaCanvasB.width = CANVAS_WIDTH;
+chromaCanvasB.height = CANVAS_HEIGHT;
+const chromaCtxB = chromaCanvasB.getContext('2d');
 
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
@@ -1761,6 +1777,44 @@ function renderSpeedVignette(ctx) {
   vignette.addColorStop(1, `rgba(0,0,0,${alpha})`);
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
+// Chromatic aberration — RGB split overlay on impact and nitro (US-002)
+// Snapshots the current canvas frame, extracts red/blue channels via multiply,
+// and re-draws them offset by ±3px with 'screen' compositing.
+// Zero cost when chromaTimer === 0.
+function renderChromaticAberration() {
+  if (chromaTimer <= 0) return;
+  const t = chromaTimer / chromaDuration;        // 1.0 at start → 0.0 at end (linear decay)
+  const intensity = chromaIntensity * t;
+  if (intensity <= 0.005) return;
+
+  const offset = 3 * intensity;
+  const alpha = 0.4 * intensity;
+
+  // Build red-channel snapshot
+  chromaCtxR.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxR.drawImage(canvas, 0, 0);
+  chromaCtxR.globalCompositeOperation = 'multiply';
+  chromaCtxR.fillStyle = 'rgb(255, 0, 0)';
+  chromaCtxR.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxR.globalCompositeOperation = 'source-over';
+
+  // Build blue-channel snapshot
+  chromaCtxB.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxB.drawImage(canvas, 0, 0);
+  chromaCtxB.globalCompositeOperation = 'multiply';
+  chromaCtxB.fillStyle = 'rgb(0, 0, 255)';
+  chromaCtxB.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxB.globalCompositeOperation = 'source-over';
+
+  // Composite onto main canvas with screen blending
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(chromaCanvasR, offset, 0);
+  ctx.drawImage(chromaCanvasB, -offset, 0);
+  ctx.restore();
 }
 
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
@@ -1952,6 +2006,8 @@ function resetGameState() {
   gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
   nitroTimer = 0;
   nitroEaseTimer = 0;
+  // Reset chromatic aberration
+  chromaTimer = 0;
   // Reset shield state
   gameState.player.hasShield = false;
   gameState.shieldItems = [];
@@ -2829,6 +2885,10 @@ function updateNitroItems(dt) {
       invulnTimer = Math.max(invulnTimer, NITRO_BOOST_DURATION);
       AudioManager.playNitroPickup();
       item.collectAnim = { timer: NITRO_COLLECT_ANIM_DURATION };
+      // Chromatic aberration on nitro activation (US-002)
+      chromaTimer = 0.25;
+      chromaDuration = 0.25;
+      chromaIntensity = 0.6;
     }
   }
 }
@@ -3232,6 +3292,9 @@ const playingState = {
     }
     if (nitroEaseTimer > 0) nitroEaseTimer = Math.max(0, nitroEaseTimer - dt);
 
+    // Tick chromatic aberration timer (US-002)
+    if (chromaTimer > 0) chromaTimer = Math.max(0, chromaTimer - dt);
+
     // Tick shield break flash
     if (shieldBreakFlash > 0) shieldBreakFlash = Math.max(0, shieldBreakFlash - dt);
 
@@ -3321,6 +3384,9 @@ const playingState = {
     // Speed vignette — tunnel vision effect (darkens edges at high speed)
     renderSpeedVignette(ctx);
 
+    // Chromatic aberration — RGB split on collision/nitro (US-002)
+    renderChromaticAberration();
+
     // Fuel bar HUD (full-width bar at top + low-fuel vignette)
     renderFuelHUD(ctx);
 
@@ -3395,6 +3461,10 @@ const explosionState = {
     playerVisible = false;
     AudioManager.playExplosion();
     AudioManager.startExplosionRumble();
+    // Chromatic aberration on explosion entry (US-002)
+    chromaTimer = 0.4;
+    chromaDuration = 0.4;
+    chromaIntensity = 1.0;
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
@@ -3473,6 +3543,8 @@ const explosionState = {
     if (this.screenFlashAlpha > 0) {
       this.screenFlashAlpha = Math.max(0, this.screenFlashAlpha - dt / 0.2);
     }
+    // Tick chromatic aberration timer (US-002)
+    if (chromaTimer > 0) chromaTimer = Math.max(0, chromaTimer - dt);
     // Update scattered vehicles
     for (const v of gameState.traffic) {
       if (v.scattered) {
@@ -3525,6 +3597,8 @@ const explosionState = {
     // No renderPlayer (car hidden), no collectibles
     renderShockwaveRings(ctx);
     renderParticles(ctx);
+    // Chromatic aberration — RGB split (US-002)
+    renderChromaticAberration();
     // Screen flash: white overlay fading over ~0.2s
     if (this.screenFlashAlpha > 0) {
       ctx.fillStyle = '#FFFFFF';
