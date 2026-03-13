@@ -12,7 +12,29 @@
 - Game loop uses fixed timestep accumulator at 1/60s (FIXED_DT)
 - scrollOffset scrolls indefinitely (no wrap needed in storage — only modulo at render time)
 - Canvas context state (lineDash, lineWidth, etc.) must be reset after use to avoid bleed-over
+- Traffic stored in `gameState.traffic[]` as {x, y, width, height, ownSpeed}
+- `getVehicleHitbox(v)` returns 80% centered hitbox — reusable for all vehicle types
+- Sedan visual speed = scrollSpeed - ownSpeed (downward on screen); ownSpeed = 0.6 * scrollSpeed
+- Spawn tracking: `gameState.nextSpawnDistance` compared to `gameState.distanceTraveled`
+- `resetGameState()` must clear `gameState.traffic = []` and reset `nextSpawnDistance`
 
+---
+
+## 2026-03-13 - US-005
+- Added sedan constants: SEDAN_WIDTH=40, SEDAN_HEIGHT=60, SEDAN_SPEED_RATIO=0.6, SEDAN_MAX_COUNT=2, SEDAN_SPAWN_MIN=1200, SEDAN_SPAWN_MAX=1600
+- Added `gameState.traffic[]` array and `gameState.nextSpawnDistance` for spawn tracking
+- Added `getVehicleHitbox(v)` returning 80% centered hitbox (reusable for future vehicle types)
+- Added `spawnSedan()` spawning at Y=-60 in random lane, centered within lane
+- Added `updateTraffic(dt)` that spawns when distanceTraveled >= nextSpawnDistance, moves each sedan by (scrollSpeed - ownSpeed)*dt, removes when y > 760
+- Added `renderTraffic(ctx)` drawing blue body + windshield + rear window
+- Integrated updateTraffic/renderTraffic into playingState.update/render (traffic rendered before player)
+- Updated resetGameState() to clear traffic array and reset nextSpawnDistance
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Visual screen speed = scrollSpeed - ownSpeed (world speeds differ from screen speeds)
+  - Render traffic before player so player car always appears on top
+  - nextSpawnDistance tracks absolute distanceTraveled (not a relative counter), reset to distanceTraveled + random range after each spawn
+  - Lane centering: x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - carWidth) / 2
 ---
 
 ## 2026-03-13 - US-004
