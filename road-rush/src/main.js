@@ -21,11 +21,9 @@ function resizeCanvas() {
   let displayWidth, displayHeight;
 
   if (windowAspect > targetAspect) {
-    // Window is wider than canvas aspect - fit to height
     displayHeight = windowHeight;
     displayWidth = windowHeight * targetAspect;
   } else {
-    // Window is taller than canvas aspect - fit to width
     displayWidth = windowWidth;
     displayHeight = windowWidth / targetAspect;
   }
@@ -37,44 +35,179 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Demo: moving rectangle to verify game loop works
-let rectX = 180;
-let rectY = 300;
-let rectVX = 120; // px/s
-let rectVY = 80;  // px/s
+// --- Input tracking ---
+const keys = {};
+window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+window.addEventListener('keyup', (e) => { keys[e.key] = false; });
 
-function update(dt) {
-  rectX += rectVX * dt;
-  rectY += rectVY * dt;
+// Track single key presses (consumed on read)
+const justPressed = {};
+window.addEventListener('keydown', (e) => {
+  if (!e.repeat) justPressed[e.key] = true;
+});
 
-  // Bounce off walls
-  if (rectX < 0 || rectX + 40 > CANVAS_WIDTH) {
-    rectVX = -rectVX;
-    rectX = Math.max(0, Math.min(rectX, CANVAS_WIDTH - 40));
+function consumeKey(key) {
+  if (justPressed[key]) {
+    justPressed[key] = false;
+    return true;
   }
-  if (rectY < 0 || rectY + 40 > CANVAS_HEIGHT) {
-    rectVY = -rectVY;
-    rectY = Math.max(0, Math.min(rectY, CANVAS_HEIGHT - 40));
-  }
+  return false;
 }
 
-function render() {
-  // Clear canvas
-  ctx.fillStyle = '#1A1A2E';
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+// --- FSM ---
+const fsm = {
+  currentState: null,
 
-  // Draw bouncing rectangle
-  ctx.fillStyle = '#E53935';
-  ctx.fillRect(rectX, rectY, 40, 40);
+  transition(newState) {
+    if (this.currentState && this.currentState.onExit) {
+      this.currentState.onExit();
+    }
+    this.currentState = newState;
+    if (this.currentState.onEnter) {
+      this.currentState.onEnter();
+    }
+  },
 
-  // Draw info text
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = '16px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('Road Rush - Game Loop Active', CANVAS_WIDTH / 2, 30);
+  update(dt) {
+    if (this.currentState && this.currentState.update) {
+      this.currentState.update(dt);
+    }
+  },
+
+  render(ctx) {
+    if (this.currentState && this.currentState.render) {
+      this.currentState.render(ctx);
+    }
+  },
+};
+
+// --- Game State (shared) ---
+const gameState = {
+  elapsedTime: 0,
+  distanceTraveled: 0,
+};
+
+function resetGameState() {
+  gameState.elapsedTime = 0;
+  gameState.distanceTraveled = 0;
 }
 
-// Game loop with fixed timestep accumulator
+// --- Title State ---
+const titleState = {
+  pulseTime: 0,
+
+  onEnter() {
+    this.pulseTime = 0;
+  },
+
+  update(dt) {
+    this.pulseTime += dt;
+    if (consumeKey('Enter')) {
+      resetGameState();
+      fsm.transition(playingState);
+    }
+  },
+
+  render(ctx) {
+    // Background
+    ctx.fillStyle = '#1A1A2E';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Title text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 48px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Road Rush', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
+
+    // Pulsing "Press Enter to Start"
+    const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
+    ctx.globalAlpha = alpha;
+    ctx.font = '20px monospace';
+    ctx.fillText('Press Enter to Start', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+    ctx.globalAlpha = 1;
+  },
+};
+
+// --- Playing State ---
+const playingState = {
+  onEnter() {
+    // Future stories will initialize game objects here
+  },
+
+  update(dt) {
+    gameState.elapsedTime += dt;
+
+    // Placeholder: press Escape to simulate game over (for testing)
+    // In future stories, collision will trigger this
+    if (consumeKey('Escape')) {
+      fsm.transition(gameOverState);
+    }
+  },
+
+  render(ctx) {
+    // Placeholder: colored background to distinguish from title
+    ctx.fillStyle = '#16213E';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Playing...', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+
+    // Show elapsed time
+    ctx.font = '14px monospace';
+    ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+  },
+};
+
+// --- GameOver State ---
+const gameOverState = {
+  pulseTime: 0,
+
+  onEnter() {
+    this.pulseTime = 0;
+  },
+
+  update(dt) {
+    this.pulseTime += dt;
+    if (consumeKey('Enter')) {
+      resetGameState();
+      fsm.transition(playingState);
+    }
+  },
+
+  render(ctx) {
+    // Dark background
+    ctx.fillStyle = '#0A0A1A';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // GAME OVER text
+    ctx.fillStyle = '#E53935';
+    ctx.font = 'bold 44px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
+
+    // Stats
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '18px monospace';
+    ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+
+    // Pulsing retry text
+    const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
+    ctx.globalAlpha = alpha;
+    ctx.font = '20px monospace';
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+    ctx.globalAlpha = 1;
+  },
+};
+
+// --- Start with Title state ---
+fsm.transition(titleState);
+
+// --- Game loop with fixed timestep accumulator ---
 let accumulator = 0;
 let lastTime = 0;
 
@@ -83,19 +216,18 @@ function gameLoop(timestamp) {
     lastTime = timestamp;
   }
 
-  const frameTime = Math.min((timestamp - lastTime) / 1000, 0.1); // Cap at 100ms to prevent spiral
+  const frameTime = Math.min((timestamp - lastTime) / 1000, 0.1);
   lastTime = timestamp;
 
   accumulator += frameTime;
 
   while (accumulator >= FIXED_DT) {
-    update(FIXED_DT);
+    fsm.update(FIXED_DT);
     accumulator -= FIXED_DT;
   }
 
-  render();
+  fsm.render(ctx);
   requestAnimationFrame(gameLoop);
 }
 
-// Start the game loop
 requestAnimationFrame(gameLoop);
