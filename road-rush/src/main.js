@@ -13,6 +13,14 @@ const LANE_COUNT = 4;
 
 const INITIAL_SCROLL_SPEED = 200; // px/s
 
+// Player constants
+const PLAYER_WIDTH = 40;
+const PLAYER_HEIGHT = 64;
+const PLAYER_Y = 560;
+const PLAYER_ACCEL = 1200; // px/s²
+const PLAYER_DECEL = 1800; // px/s²
+const PLAYER_MAX_SPEED = 400; // px/s
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -105,6 +113,13 @@ const gameState = {
   distanceTraveled: 0,
   scrollSpeed: INITIAL_SCROLL_SPEED,
   scrollOffset: 0,
+  player: {
+    x: ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2,
+    y: PLAYER_Y,
+    width: PLAYER_WIDTH,
+    height: PLAYER_HEIGHT,
+    vx: 0,
+  },
 };
 
 function resetGameState() {
@@ -112,6 +127,9 @@ function resetGameState() {
   gameState.distanceTraveled = 0;
   gameState.scrollSpeed = INITIAL_SCROLL_SPEED;
   gameState.scrollOffset = 0;
+  gameState.player.x = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
+  gameState.player.y = PLAYER_Y;
+  gameState.player.vx = 0;
 }
 
 // --- Road Rendering ---
@@ -176,6 +194,67 @@ function renderRoad(ctx, scrollOffset) {
   ctx.setLineDash([]);
 }
 
+// --- Player ---
+function getPlayerHitbox(player) {
+  return {
+    x: player.x + 4,
+    y: player.y + 6.5,
+    w: 32,
+    h: 51,
+  };
+}
+
+function updatePlayer(dt) {
+  const player = gameState.player;
+  const left = keys['ArrowLeft'];
+  const right = keys['ArrowRight'];
+
+  if (left && !right) {
+    player.vx -= PLAYER_ACCEL * dt;
+    if (player.vx < -PLAYER_MAX_SPEED) player.vx = -PLAYER_MAX_SPEED;
+  } else if (right && !left) {
+    player.vx += PLAYER_ACCEL * dt;
+    if (player.vx > PLAYER_MAX_SPEED) player.vx = PLAYER_MAX_SPEED;
+  } else {
+    if (player.vx > 0) {
+      player.vx -= PLAYER_DECEL * dt;
+      if (player.vx < 0) player.vx = 0;
+    } else if (player.vx < 0) {
+      player.vx += PLAYER_DECEL * dt;
+      if (player.vx > 0) player.vx = 0;
+    }
+  }
+
+  player.x += player.vx * dt;
+
+  // Constrain within road borders
+  if (player.x < ROAD_LEFT) {
+    player.x = ROAD_LEFT;
+    player.vx = 0;
+  }
+  if (player.x + PLAYER_WIDTH > ROAD_RIGHT) {
+    player.x = ROAD_RIGHT - PLAYER_WIDTH;
+    player.vx = 0;
+  }
+}
+
+function renderPlayer(ctx, player) {
+  const { x, y, width, height } = player;
+
+  // Car body
+  ctx.fillStyle = '#E53935';
+  ctx.beginPath();
+  ctx.roundRect(x, y, width, height, 6);
+  ctx.fill();
+
+  // Windshield
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+  ctx.fillRect(x + 6, y + 8, width - 12, 16);
+
+  // Rear window
+  ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -224,8 +303,9 @@ const playingState = {
     gameState.scrollOffset += gameState.scrollSpeed * dt;
     gameState.distanceTraveled += gameState.scrollSpeed * dt;
 
-    // Placeholder: press Escape to simulate game over (for testing)
-    // In future stories, collision will trigger this
+    updatePlayer(dt);
+
+    // Escape to simulate game over (for testing until collision is implemented)
     if (consumeKey('Escape')) {
       fsm.transition(gameOverState);
     }
@@ -233,6 +313,7 @@ const playingState = {
 
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
+    renderPlayer(ctx, gameState.player);
 
     // Show elapsed time overlay
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
