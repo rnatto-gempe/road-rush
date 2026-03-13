@@ -1241,6 +1241,100 @@ const AudioManager = {
       }
     }
   },
+
+  // ─── Procedural arpeggio melody ───
+  // Notes from A minor pentatonic (A, C, D, E, G) by chord for harmonic match
+  ARPS_BY_CHORD: [
+    [440.0, 523.3, 659.3, 880.0],  // Am: A4, C5, E5, A5
+    [440.0, 523.3, 587.3, 784.0],  // F:  A4, C5, D5, G5
+    [392.0, 523.3, 659.3, 784.0],  // C:  G4, C5, E5, G5
+    [392.0, 440.0, 587.3, 784.0],  // G:  G4, A4, D5, G5
+  ],
+  arp: { running: false, scheduledUpTo: 0, noteIndex: 0 },
+
+  startArp() {
+    if (!this.ctx) return;
+    this.arp.running = true;
+    // Sync start time with beat scheduler (or now + small offset)
+    this.arp.scheduledUpTo = this.beat.scheduledUpTo > 0
+      ? this.beat.scheduledUpTo
+      : this.ctx.currentTime + 0.1;
+    this.arp.noteIndex = 0;
+  },
+
+  stopArp() {
+    this.arp.running = false;
+    this.arp.scheduledUpTo = 0;
+    this.arp.noteIndex = 0;
+  },
+
+  // Schedule a single arpeggio note: square wave + bandpass filter
+  _scheduleArpNote(time, freq, duration) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, time);
+    osc.detune.setValueAtTime(5, time); // slight detune
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(freq * 1.5, time);
+    filter.Q.setValueAtTime(3, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.15, time + 0.01);
+    gain.gain.linearRampToValueAtTime(0, time + duration * 0.85);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + duration);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Called every frame — schedules arp notes ahead using AudioContext timing
+  updateArp(scrollSpeed) {
+    if (!this.ctx || !this.arp.running) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    const bpm = 90 + t * 60; // matches beat BPM
+    const beatInterval = 60 / bpm;
+
+    // Sub-division: quarter notes at slow, sixteenth at fast
+    // t < 0.33 → 1 note/beat, t < 0.67 → 2 notes/beat, else 4 notes/beat
+    const subDiv = t < 0.33 ? 1 : t < 0.67 ? 2 : 4;
+    const noteInterval = beatInterval / subDiv;
+    const noteDuration = noteInterval * 0.75; // 75% gate for crispness
+
+    const lookAhead = beatInterval * 4;
+    while (this.arp.scheduledUpTo < now + lookAhead) {
+      const time = this.arp.scheduledUpTo;
+      const ni = this.arp.noteIndex;
+
+      // Get notes from current chord (A minor pentatonic, chord-matched)
+      const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+      const notes = this.ARPS_BY_CHORD[chordIdx];
+
+      // Pattern type changes every 8 bars (32 beats)
+      const barIdx = Math.floor(this.beat.beatIndex / 4);
+      const patternType = Math.floor(barIdx / 8) % 3;
+
+      let noteArrayIdx;
+      if (patternType === 0) {
+        // Ascending
+        noteArrayIdx = ni % notes.length;
+      } else if (patternType === 1) {
+        // Descending (inversion)
+        noteArrayIdx = (notes.length - 1) - (ni % notes.length);
+      } else {
+        // Offset inversion: start from index 1
+        noteArrayIdx = (ni + 1) % notes.length;
+      }
+
+      this._scheduleArpNote(time, notes[noteArrayIdx], noteDuration);
+      this.arp.scheduledUpTo += noteInterval;
+      this.arp.noteIndex++;
+    }
+  },
 };
 
 // Survivor flash text state
@@ -2851,11 +2945,13 @@ const playingState = {
     AudioManager.startRoad();
     AudioManager.startBeat();
     AudioManager.startPad();
+    AudioManager.startArp();
   },
 
   onExit() {
     AudioManager.stopNitro();
     AudioManager.stopBeat();
+    AudioManager.stopArp();
     AudioManager.stopEngine();
     AudioManager.stopRoad();
     AudioManager.stopPad();
@@ -2869,6 +2965,7 @@ const playingState = {
     AudioManager.updateNitro();
     AudioManager.updateBeat(gameState.scrollSpeed);
     AudioManager.updatePad(gameState.scrollSpeed);
+    AudioManager.updateArp(gameState.scrollSpeed);
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
