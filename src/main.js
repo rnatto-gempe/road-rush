@@ -585,6 +585,8 @@ function resetGameState() {
   shockwaveRings.length = 0;
   playerVisible = true;
   explosionState.screenFlashAlpha = 0;
+  explosionState.fadeInAlpha = 0;
+  explosionState.textAlpha = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1900,17 +1902,27 @@ const explosionState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  isNewBest: false,
+  bestScore: 0,
   screenFlashAlpha: 0,
+  fadeInAlpha: 0,
+  textAlpha: 0,
 
   onEnter() {
     this.originX = gameState.player.x + PLAYER_WIDTH / 2;
     this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
     this.timer = 2.0;
     this.screenFlashAlpha = 1.0;
+    this.fadeInAlpha = 0;
+    this.textAlpha = 0;
     playerVisible = false;
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
+    const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
+    this.isNewBest = this.finalScore > stored;
+    this.bestScore = this.isNewBest ? this.finalScore : stored;
+    if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     // Clear any pre-existing particles (e.g. nitro trail)
     particles.length = 0;
     // Spawn 40 fire/debris particles from explosion origin
@@ -1991,9 +2003,19 @@ const explosionState = {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
       gameOverState.finalScore = this.finalScore;
+      gameOverState.isNewBest = this.isNewBest;
+      gameOverState.bestScore = this.bestScore;
       gameOverState.statsPreset = true;
       gameOverState.causeOfDeath = '';
       fsm.transition(gameOverState);
+    }
+    // Fade in dark overlay and text after 1.0s elapsed (timer < 1.0)
+    const elapsed = 2.0 - this.timer;
+    if (elapsed >= 1.0) {
+      this.fadeInAlpha = Math.min(1, this.fadeInAlpha + dt / 0.9);
+    }
+    if (elapsed >= 1.2) {
+      this.textAlpha = Math.min(1, this.textAlpha + dt / 0.8);
     }
   },
 
@@ -2027,6 +2049,40 @@ const explosionState = {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.globalAlpha = 1;
     }
+    // Dark overlay fading in from 1.0s elapsed
+    if (this.fadeInAlpha > 0) {
+      ctx.fillStyle = '#0A0A1A';
+      ctx.globalAlpha = this.fadeInAlpha;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.globalAlpha = 1;
+    }
+    // Game over text fading in from 1.2s elapsed
+    if (this.textAlpha > 0) {
+      ctx.globalAlpha = this.textAlpha;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#E53935';
+      ctx.font = 'bold 44px monospace';
+      ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '18px monospace';
+      const meters = (this.finalDistance / 100).toFixed(0);
+      ctx.fillText(`Time: ${this.finalTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+      ctx.fillText(`Distance: ${meters}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
+      ctx.fillStyle = this.isNewBest ? '#FFD700' : '#FFFFFF';
+      ctx.font = 'bold 22px monospace';
+      ctx.fillText(`Score: ${this.finalScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 48);
+      if (this.isNewBest) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillText('NEW BEST!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '14px monospace';
+        ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+      }
+      ctx.globalAlpha = 1;
+    }
   },
 };
 
@@ -2048,12 +2104,12 @@ const gameOverState = {
       this.finalTime = gameState.elapsedTime;
       this.finalDistance = gameState.distanceTraveled;
       this.finalScore = Math.floor(gameState.score);
+      const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
+      this.isNewBest = this.finalScore > stored;
+      this.bestScore = this.isNewBest ? this.finalScore : stored;
+      if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
-    const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
-    this.isNewBest = this.finalScore > stored;
-    this.bestScore = this.isNewBest ? this.finalScore : stored;
-    if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
   },
 
   update(dt) {
