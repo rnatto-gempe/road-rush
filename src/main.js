@@ -21,6 +21,14 @@ const PLAYER_ACCEL = 1200; // px/s²
 const PLAYER_DECEL = 1800; // px/s²
 const PLAYER_MAX_SPEED = 400; // px/s
 
+// Sedan (traffic) constants
+const SEDAN_WIDTH = 40;
+const SEDAN_HEIGHT = 60;
+const SEDAN_SPEED_RATIO = 0.6; // sedan own speed = 60% of scrollSpeed
+const SEDAN_MAX_COUNT = 2;
+const SEDAN_SPAWN_MIN = 1200; // px traveled between spawns (min)
+const SEDAN_SPAWN_MAX = 1600; // px traveled between spawns (max)
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -120,6 +128,8 @@ const gameState = {
     height: PLAYER_HEIGHT,
     vx: 0,
   },
+  traffic: [],
+  nextSpawnDistance: SEDAN_SPAWN_MIN,
 };
 
 function resetGameState() {
@@ -130,6 +140,8 @@ function resetGameState() {
   gameState.player.x = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
   gameState.player.y = PLAYER_Y;
   gameState.player.vx = 0;
+  gameState.traffic = [];
+  gameState.nextSpawnDistance = SEDAN_SPAWN_MIN + Math.random() * (SEDAN_SPAWN_MAX - SEDAN_SPAWN_MIN);
 }
 
 // --- Road Rendering ---
@@ -255,6 +267,68 @@ function renderPlayer(ctx, player) {
   ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
 }
 
+// --- Traffic (Sedans) ---
+function getVehicleHitbox(v) {
+  const hbW = v.width * 0.8;
+  const hbH = v.height * 0.8;
+  return {
+    x: v.x + (v.width - hbW) / 2,
+    y: v.y + (v.height - hbH) / 2,
+    w: hbW,
+    h: hbH,
+  };
+}
+
+function spawnSedan() {
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - SEDAN_WIDTH) / 2;
+  gameState.traffic.push({
+    x,
+    y: -SEDAN_HEIGHT,
+    width: SEDAN_WIDTH,
+    height: SEDAN_HEIGHT,
+    ownSpeed: gameState.scrollSpeed * SEDAN_SPEED_RATIO,
+  });
+}
+
+function updateTraffic(dt) {
+  // Try spawning
+  if (
+    gameState.traffic.length < SEDAN_MAX_COUNT &&
+    gameState.distanceTraveled >= gameState.nextSpawnDistance
+  ) {
+    spawnSedan();
+    gameState.nextSpawnDistance =
+      gameState.distanceTraveled +
+      SEDAN_SPAWN_MIN +
+      Math.random() * (SEDAN_SPAWN_MAX - SEDAN_SPAWN_MIN);
+  }
+
+  // Move sedans: visual speed = scrollSpeed - ownSpeed (downward on screen)
+  for (const v of gameState.traffic) {
+    const visualSpeed = gameState.scrollSpeed - v.ownSpeed;
+    v.y += visualSpeed * dt;
+  }
+
+  // Remove sedans that have scrolled past the bottom
+  gameState.traffic = gameState.traffic.filter((v) => v.y <= 760);
+}
+
+function renderTraffic(ctx) {
+  for (const v of gameState.traffic) {
+    // Car body
+    ctx.fillStyle = '#1E88E5';
+    ctx.fillRect(v.x, v.y, v.width, v.height);
+
+    // Windshield (front — top of sprite since sedan faces upward)
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+    ctx.fillRect(v.x + 5, v.y + 6, v.width - 10, 14);
+
+    // Rear window
+    ctx.fillRect(v.x + 5, v.y + v.height - 18, v.width - 10, 10);
+  }
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -304,6 +378,7 @@ const playingState = {
     gameState.distanceTraveled += gameState.scrollSpeed * dt;
 
     updatePlayer(dt);
+    updateTraffic(dt);
 
     // Escape to simulate game over (for testing until collision is implemented)
     if (consumeKey('Escape')) {
@@ -313,6 +388,7 @@ const playingState = {
 
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
+    renderTraffic(ctx);
     renderPlayer(ctx, gameState.player);
 
     // Show elapsed time overlay
