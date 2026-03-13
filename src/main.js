@@ -966,6 +966,8 @@ const AudioManager = {
 
       this.beat.scheduledUpTo += beatInterval;
       this.beat.beatIndex++;
+      // Update chord pad on each newly scheduled beat
+      this.updatePadChord(this.beat.beatIndex);
     }
   },
 
@@ -1131,6 +1133,113 @@ const AudioManager = {
       if (noiseGain) noiseGain.disconnect();
     }, 300);
     this.gameOverDrone = { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null };
+  },
+
+  // ─── Harmonic chord pad (supersaw) ───
+  // Am → F → C → G progression, chord changes every 4 beats (1 bar), 4-bar loop
+  PAD_CHORDS: [
+    [440.0, 523.3, 659.3],  // Am: A4, C5, E5
+    [349.2, 440.0, 523.3],  // F:  F4, A4, C5
+    [261.6, 329.6, 392.0],  // C:  C4, E4, G4
+    [392.0, 493.9, 587.3],  // G:  G4, B4, D5
+  ],
+  PAD_DETUNE: [-15, 0, 15], // cents detune per oscillator (supersaw width)
+  pad: { noteGroups: [], filter: null, gain: null, active: false, chordIdx: -1 },
+
+  startPad() {
+    if (!this.ctx) return;
+    this.stopPad();
+    const now = this.ctx.currentTime;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(600, now);
+    filter.Q.setValueAtTime(0.5, now);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.12, now, 0.1); // fade-in ~0.3s
+
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    const chordFreqs = this.PAD_CHORDS[0]; // start with Am
+    const noteGroups = [];
+    for (let n = 0; n < 3; n++) {
+      const noteGain = this.ctx.createGain();
+      noteGain.gain.setValueAtTime(0.33, now); // equal weight per note
+      noteGain.connect(filter);
+
+      const oscs = [];
+      for (let d = 0; d < 3; d++) {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(chordFreqs[n], now);
+        osc.detune.setValueAtTime(this.PAD_DETUNE[d], now);
+        osc.connect(noteGain);
+        osc.start(now);
+        oscs.push(osc);
+      }
+      noteGroups.push({ oscs, noteGain });
+    }
+
+    this.pad.noteGroups = noteGroups;
+    this.pad.filter = filter;
+    this.pad.gain = gain;
+    this.pad.active = true;
+    this.pad.chordIdx = 0;
+  },
+
+  stopPad() {
+    if (!this.pad.active) return;
+    const now = this.ctx.currentTime;
+    this.pad.gain.gain.cancelScheduledValues(now);
+    this.pad.gain.gain.setTargetAtTime(0, now, 0.1); // fade out ~0.3s
+
+    const { noteGroups, filter, gain } = this.pad;
+    setTimeout(() => {
+      for (const grp of noteGroups) {
+        for (const osc of grp.oscs) {
+          try { osc.stop(); } catch (_) {}
+          osc.disconnect();
+        }
+        grp.noteGain.disconnect();
+      }
+      filter.disconnect();
+      gain.disconnect();
+    }, 400);
+
+    this.pad.noteGroups = [];
+    this.pad.filter = null;
+    this.pad.gain = null;
+    this.pad.active = false;
+    this.pad.chordIdx = -1;
+  },
+
+  updatePad(scrollSpeed) {
+    if (!this.pad.active || !this.pad.gain) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    // Filter cutoff 400→1200Hz with speed
+    this.pad.filter.frequency.setTargetAtTime(400 + t * 800, now, 0.1);
+    // Volume 0.12→0.20 with speed
+    this.pad.gain.gain.setTargetAtTime(0.12 + t * 0.08, now, 0.1);
+  },
+
+  // Call from updateBeat — advances chord when beat index crosses a 4-beat bar boundary
+  updatePadChord(beatIndex) {
+    if (!this.pad.active || this.pad.noteGroups.length === 0) return;
+    const chordIdx = Math.floor(beatIndex / 4) % 4;
+    if (chordIdx === this.pad.chordIdx) return;
+
+    this.pad.chordIdx = chordIdx;
+    const now = this.ctx.currentTime;
+    const chordFreqs = this.PAD_CHORDS[chordIdx];
+    for (let n = 0; n < 3; n++) {
+      for (const osc of this.pad.noteGroups[n].oscs) {
+        osc.frequency.setTargetAtTime(chordFreqs[n], now, 0.05);
+      }
+    }
   },
 };
 
@@ -2741,6 +2850,7 @@ const playingState = {
     AudioManager.startEngine();
     AudioManager.startRoad();
     AudioManager.startBeat();
+    AudioManager.startPad();
   },
 
   onExit() {
@@ -2748,6 +2858,7 @@ const playingState = {
     AudioManager.stopBeat();
     AudioManager.stopEngine();
     AudioManager.stopRoad();
+    AudioManager.stopPad();
   },
 
   update(dt) {
@@ -2757,6 +2868,7 @@ const playingState = {
     AudioManager.updateRoad(gameState.scrollSpeed);
     AudioManager.updateNitro();
     AudioManager.updateBeat(gameState.scrollSpeed);
+    AudioManager.updatePad(gameState.scrollSpeed);
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
