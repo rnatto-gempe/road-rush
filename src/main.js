@@ -777,6 +777,50 @@ const AudioManager = {
       }
     }
   },
+
+  // Fuel warning beep state
+  fuelWarning: { timer: 0 },
+
+  // Play a single fuel warning beep: square wave ~800Hz, 0.08s
+  playFuelBeep() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(800, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + 0.07);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.08);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Update fuel warning beep timer — call from playingState.update after fuel drain
+  updateFuelWarning(dt, fuelPct) {
+    if (fuelPct >= 0.25) {
+      // Above threshold — reset timer so next beep is immediate when fuel drops
+      this.fuelWarning.timer = 0;
+      return;
+    }
+    // Determine beep interval based on fuel level
+    let interval;
+    if (fuelPct < 0.05) {
+      interval = 0.08 + 0.12; // 0.2s cycle (rapid)
+    } else if (fuelPct < 0.15) {
+      interval = 0.08 + 0.25; // 0.33s cycle (fast)
+    } else {
+      interval = 0.08 + 0.4;  // 0.48s cycle (normal)
+    }
+    this.fuelWarning.timer -= dt;
+    if (this.fuelWarning.timer <= 0) {
+      this.playFuelBeep();
+      this.fuelWarning.timer = interval;
+    }
+  },
 };
 
 // Survivor flash text state
@@ -1136,6 +1180,7 @@ function resetGameState() {
   // Reset fuel state
   gameState.fuel = FUEL_INITIAL;
   gameState.fuelItems = [];
+  AudioManager.fuelWarning.timer = 0;
   gameState.nextFuelSpawnDistance = FUEL_SPAWN_BASE_MIN + Math.random() * (FUEL_SPAWN_BASE_MAX - FUEL_SPAWN_BASE_MIN);
   // Reset scoring
   gameState.score = 0;
@@ -2411,6 +2456,9 @@ const playingState = {
       fsm.transition(gameOverState);
       return;
     }
+
+    // Fuel warning beep when low
+    AudioManager.updateFuelWarning(dt, gameState.fuel / FUEL_INITIAL);
 
     // Tick invulnerability timer
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
