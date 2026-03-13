@@ -358,7 +358,7 @@
         "Verify in browser: speed lines appear at high speed, collisions have visible feedback, death explosion is satisfying"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Particle system: array of {x, y, vx, vy, life, maxLife, color, size}. Update: move by velocity, reduce life. Render: draw circle with alpha = life/maxLife. Remove when life <= 0."
     }
   ]

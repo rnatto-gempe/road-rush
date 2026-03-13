@@ -1,3 +1,24 @@
+## 2026-03-13 - US-020
+- Added `speedLineData`: 16 speed lines (8 per margin) with random X within the 40px rumble strips and random Y phase, generated once at module init via IIFE
+- `renderSpeedLines(ctx)`: renders when `scrollSpeed > 500`; alpha fades in 0-1 over 500-700px/s range; line length scales 12-54px; lines scroll at 2× road speed for parallax blur effect; uses `scrollOffset * 2 % SPEED_LINE_PERIOD` for seamless wrap
+- Added `explosions[]` module-level array and `spawnExplosion(x, y)` / `updateExplosions(dt)` / `renderExplosions(ctx)` — 3 concentric rings expand outward over 0.5s, staggered 0.18s apart, from 40px/65px/90px max radius; rings fade with `(1-ringProgress)*0.85` alpha
+- Fatal collision branch now calls `spawnExplosion(sparkX, sparkY)` before `fsm.transition(gameOverState)`; explosion visible on game over screen via `renderExplosions()` call in `gameOverState.render()`
+- `updateExplosions(dt)` called in `gameOverState.update()` so rings animate during game over display
+- Lateral collision now calls `triggerShake(0.15, 2)` — 2px/0.15s shake for glancing blows (previously no shake)
+- Fatal collision uses `triggerShake(0.5, 10)` explicitly instead of default `triggerShake()`
+- Fixed shake exponential decay: `shake` now has `maxTime` field set by `triggerShake()`; game loop uses `progress = shake.time / shake.maxTime`, then `amount = intensity * progress * progress` (quadratic = visually exponential decay with correct initial intensity for all shake durations)
+- `resetGameState()` clears `explosions.length = 0`
+- Wired `renderSpeedLines(ctx)` into `playingState.render()` after `renderRoad()`
+- Verified in browser: game runs correctly, score 3269 NEW BEST at 51.1s, build 25.41 kB; speed lines require 60s+ gameplay (500px/s threshold) for visual confirmation; all other VFX (sparks, red flash, shake) working from prior stories
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Speed lines in margin strips: generate random positions once at module init (IIFE), use `(yPhase + scrollOffset * N) % PERIOD - lineLength` for seamless vertical wrap
+  - Explosion rings: stagger each ring start by a fraction (0.18) of total progress, then remap remaining range to 0-1 for that ring's expansion; `(1 - ringProgress)` alpha gives natural fade
+  - `shake.maxTime` field needed alongside `shake.time` for correct decay when custom durations are used — dividing by constant SHAKE_DURATION gave wrong initial intensities for short/long shakes
+  - `progress * progress` decay (quadratic) gives a perceptually "fast fall then slow" feel, much better than linear for screen shake
+  - Explosion renders in `gameOverState` (not `playingState`) because `fsm.transition` is called synchronously before the frame renders
+---
+
 ## 2026-03-13 - US-019
 - Added SHIELD_ITEM_RADIUS=11 (22px), SHIELD_SPAWN_MIN=5000, SHIELD_SPAWN_MAX=7500, SHIELD_COLLECT_ANIM_DURATION=0.2, SHIELD_BREAK_FLASH_DURATION=0.3 constants
 - Added module-level `shieldBreakFlash` timer; `gameState.player.hasShield` boolean; `gameState.shieldItems[]` + `nextShieldSpawnDistance`; reset in `resetGameState()`
@@ -263,6 +284,9 @@
 - `getEffectiveScrollSpeed()` = `scrollSpeed * speedPenaltyMultiplier * getNitroMultiplier()` — compose speed modifiers as separate multiplier functions
 - Shield pattern: check `player.hasShield` at TOP of `handleVehicleCollision` (before isLateral check) so it absorbs all collision types including fatal; set `shieldBreakFlash` + `invulnTimer`, skip all effects; same check in border-hit handler
 - Nitro: `nitroTimer` (3s boost) → `nitroEaseTimer` (0.5s ease); `getNitroMultiplier()` returns 1.3 during boost, linear 1.3→1.0 during ease; invulnTimer set to NITRO_BOOST_DURATION on collect
+- Speed lines: generated once at module init (IIFE, `speedLineData[]`); render only when `scrollSpeed > 500`; scroll at `scrollOffset * 2 % SPEED_LINE_PERIOD`; fade alpha 0→0.55 over 500-700px/s
+- `shake.maxTime` must be set alongside `shake.time` in `triggerShake()` for correct decay with custom durations; use `progress * progress` for exponential-feel decay
+- Explosion rings that appear in `gameOverState`: spawn in `handleVehicleCollision` BEFORE `fsm.transition`; update/render in `gameOverState` methods (not `playingState`)
 
 ---
 
