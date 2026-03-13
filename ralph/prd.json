@@ -340,7 +340,7 @@
         "Verify in browser: shield glows on car, absorbs a collision visually, then disappears"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "In collision handler: if player.hasShield, set hasShield=false, play shield-break VFX, skip all collision effects. Simple and impactful."
     },
     {

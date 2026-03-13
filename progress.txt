@@ -1,3 +1,24 @@
+## 2026-03-13 - US-019
+- Added SHIELD_ITEM_RADIUS=11 (22px), SHIELD_SPAWN_MIN=5000, SHIELD_SPAWN_MAX=7500, SHIELD_COLLECT_ANIM_DURATION=0.2, SHIELD_BREAK_FLASH_DURATION=0.3 constants
+- Added module-level `shieldBreakFlash` timer; `gameState.player.hasShield` boolean; `gameState.shieldItems[]` + `nextShieldSpawnDistance`; reset in `resetGameState()`
+- `spawnShieldItem()`: spawns at lane center above screen; sets next distance 5000-7500px ahead
+- `updateShieldItems(dt)`: road-fixed scroll; AABB collection; sets `player.hasShield = true` (only if no active shield); starts collect anim; removes items on exit
+- `drawHexagon(ctx, cx, cy, r)`: helper draws regular hexagon with 6 vertices, flat-top orientation
+- `renderShieldItems(ctx)`: radial glow aura + filled hexagon (#42A5F5) + white border + 'S' label; pulsing scale 0.9-1.1 over 0.6s cycle
+- `handleVehicleCollision()`: checks `player.hasShield` first — if true, absorbs hit, sets `shieldBreakFlash`, starts invuln, returns early (skipping all collision effects including fatal)
+- `updatePlayer()` border hit: same shield check — absorbs border collision, skips speed penalty and DDA reset
+- `renderPlayer()`: shield break flash (bright blue border + white outer glow, fades over 0.3s, renders even during blink); active shield glow (double-ring blue border around car when `hasShield`)
+- Wired `updateShieldItems`/`renderShieldItems` into `playingState`; debug overlay shows `SHIELD: active` when held
+- Verified in browser: game runs at 4.7s, build 24.38 kB; shield visual code confirmed functional
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Shield check at the VERY TOP of `handleVehicleCollision` before any other logic — ensures fatal collisions are also absorbed
+  - `drawHexagon`: angle offset `-Math.PI/6` gives pointy-top; `+0` gives flat-top (more readable as a shield icon)
+  - Shield break flash renders before the blink check so it's always visible even during invuln blink
+  - Shield absorbing a border hit should still give invulnTimer to prevent chain border-hits, but skip speed penalty and DDA reset (player was punished by the shield consumption)
+  - Only 1 shield at a time: check `!player.hasShield` before collecting — otherwise extra shields in collectAnim still exist on-screen
+---
+
 ## 2026-03-13 - US-018
 - Added NITRO_ITEM_HALF=10, NITRO_SPAWN_MIN=2500, NITRO_SPAWN_MAX=4000, NITRO_BOOST_FACTOR=1.3, NITRO_BOOST_DURATION=3.0, NITRO_EASE_DURATION=0.5, NITRO_COLLECT_ANIM_DURATION=0.2 constants
 - Added module-level `nitroTimer` and `nitroEaseTimer` state vars
@@ -240,6 +261,7 @@
 - Coin clusters: `spawnCoinCluster()` creates 3-5 coins with `y = -COIN_RADIUS - i*40` (first arrives first); patterns 'line'/'arc'/'zigzag'; road-fixed scroll like fuel items; `coinFloatTexts[]` module array for '+100' float effect
 - DDA: `ddaCleanTimer` + `ddaSpawnRate` (1.0–1.5); +5% per 10s clean play; partial reset on collision halves bonus: `1.0 + (rate - 1.0) * 0.5`; applied at spawn time by dividing raw interval; fuel distance x1.2 when fuel > 70%; fairness constraint unaffected
 - `getEffectiveScrollSpeed()` = `scrollSpeed * speedPenaltyMultiplier * getNitroMultiplier()` — compose speed modifiers as separate multiplier functions
+- Shield pattern: check `player.hasShield` at TOP of `handleVehicleCollision` (before isLateral check) so it absorbs all collision types including fatal; set `shieldBreakFlash` + `invulnTimer`, skip all effects; same check in border-hit handler
 - Nitro: `nitroTimer` (3s boost) → `nitroEaseTimer` (0.5s ease); `getNitroMultiplier()` returns 1.3 during boost, linear 1.3→1.0 during ease; invulnTimer set to NITRO_BOOST_DURATION on collect
 
 ---
