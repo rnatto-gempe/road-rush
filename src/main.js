@@ -190,6 +190,77 @@ const VEHICLE_TYPES = {
 // Debug mode
 let debugMode = false;
 
+// ─── Audio Manager (Web Audio API) ───
+const AudioManager = {
+  ctx: null,
+  masterGain: null,
+  muted: false,
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.connect(this.ctx.destination);
+  },
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  },
+
+  toggleMute() {
+    if (!this.ctx) return;
+    this.muted = !this.muted;
+    this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 1, this.ctx.currentTime, 0.01);
+  },
+
+  // Play a tone with gain envelope to avoid clicks
+  playTone(freq, duration, type, gainValue) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(gainValue || 0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + duration - 0.01);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + duration);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Create filtered noise burst
+  createNoise(duration, filterFreq, filterType) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = filterType || 'lowpass';
+    filter.frequency.setValueAtTime(filterFreq || 1000, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + duration - 0.01);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+};
+
 // Survivor flash text state
 let survivorFlash = null; // {timer: 2.0} when active
 
@@ -1681,6 +1752,8 @@ const titleState = {
   update(dt) {
     this.pulseTime += dt;
     if (consumeKey('Enter')) {
+      AudioManager.init();
+      AudioManager.resume();
       resetGameState();
       fsm.transition(playingState);
     }
