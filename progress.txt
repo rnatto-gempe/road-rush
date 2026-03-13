@@ -1,3 +1,21 @@
+## 2026-03-13 - US-013
+- Added scoring constants: SCORE_PER_PX=0.1 (1pt/10px), OVERTAKE_BONUS=25, SURVIVOR_BONUS=300, SURVIVOR_INTERVAL=30s, SCORE_LERP_RATE=8
+- `gameState.score` accumulates continuously; `gameState.displayedScore` lerps toward it each frame at rate 8/s
+- `gameState.survivorTimer` counts up, resets on any collision (vehicle or border hit); +300 + flash at 30s intervals
+- Added `collided: false` field to each spawned vehicle; set to `true` in `handleVehicleCollision`
+- Overtake bonus: when vehicle filtered out (y > 760), if `!v.collided` → +25 score
+- `renderScoreHUD(ctx)`: score at top-right with drop shadow; survivor flash text fades over 2s
+- `gameOverState`: saves finalScore, reads/writes `localStorage['roadrush_best_score']`, golden highlight + "NEW BEST!" if new record
+- Game over screen now shows Score, Best (or NEW BEST!), shifted retry text down to accommodate
+- Verified in browser: score "384" at 15.2s, Time text and fuel bar visible
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - `displayedScore` lerp: `+= (score - displayed) * min(1, rate * dt)` — clamp to avoid overshoot on large dt
+  - `survivorTimer -= SURVIVOR_INTERVAL` (not reset to 0) so partial time carries over correctly
+  - Game over screen layout: use y positions relative to `CANVAS_HEIGHT / 2` with explicit offsets; test all text fits when adding new lines
+  - `localStorage.getItem` returns null if missing; `parseInt(null, 10)` is NaN; use `|| '0'` fallback
+---
+
 ## 2026-03-13 - US-012
 - Added `renderFuelHUD(ctx)` function: 4px-tall fuel bar at canvas top (full 400px width), color-coded green/yellow/red by fuel level
 - Blink effect: when fuel < 20%, bar toggles off every 0.3s using `Math.floor(elapsedTime / 0.3) % 2 === 1` (no new state variable needed)

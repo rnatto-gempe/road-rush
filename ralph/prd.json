@@ -232,7 +232,7 @@
         "Verify in browser: score increases during gameplay, best score persists across page reloads"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Use displayed_score that lerps toward actual_score for smooth counter. Overtake tracking: tag each vehicle as 'collided' boolean, check on removal."
     },
     {
