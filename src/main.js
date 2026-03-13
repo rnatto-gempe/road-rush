@@ -39,6 +39,13 @@ const FUEL_SPAWN_BASE_MAX = 1400;     // px traveled max spawn interval
 const FUEL_SPAWN_INTERVAL_GROWTH = 5; // extra px per elapsed second (scarcity ramp)
 const FUEL_COLLECT_ANIM_DURATION = 0.2;
 
+// Scoring constants
+const SCORE_PER_PX = 0.1;       // 1 point per 10 px traveled
+const OVERTAKE_BONUS = 25;       // points for clean overtake
+const SURVIVOR_BONUS = 300;      // points every 30s without collision
+const SURVIVOR_INTERVAL = 30;    // seconds between survivor bonuses
+const SCORE_LERP_RATE = 8;       // display score lerp speed
+
 // Scroll speed ramp constants
 const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
 const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
@@ -90,6 +97,9 @@ const VEHICLE_TYPES = {
 
 // Debug mode
 let debugMode = false;
+
+// Survivor flash text state
+let survivorFlash = null; // {timer: 2.0} when active
 
 // Graded collision state
 let speedPenaltyMultiplier = 1.0; // multiplicative speed reduction factor (1.0 = no penalty)
@@ -257,6 +267,11 @@ function handleVehicleCollision(v) {
   const sparkX = player.x + PLAYER_WIDTH / 2;
   const sparkY = player.y + PLAYER_HEIGHT / 2;
 
+  // Tag vehicle as collided (disqualifies from clean overtake bonus)
+  v.collided = true;
+  // Any collision resets survivor timer
+  gameState.survivorTimer = 0;
+
   if (isLateral) {
     // Glancing blow: 20% speed reduction 0.8s + yellow sparks
     applySpeedPenalty(0.8, 0.8);
@@ -297,6 +312,10 @@ const gameState = {
   fuel: FUEL_INITIAL,
   fuelItems: [],
   nextFuelSpawnDistance: FUEL_SPAWN_BASE_MIN,
+  // Scoring
+  score: 0,
+  displayedScore: 0,
+  survivorTimer: 0,
 };
 
 function resetGameState() {
@@ -320,6 +339,11 @@ function resetGameState() {
   gameState.fuel = FUEL_INITIAL;
   gameState.fuelItems = [];
   gameState.nextFuelSpawnDistance = FUEL_SPAWN_BASE_MIN + Math.random() * (FUEL_SPAWN_BASE_MAX - FUEL_SPAWN_BASE_MIN);
+  // Reset scoring
+  gameState.score = 0;
+  gameState.displayedScore = 0;
+  gameState.survivorTimer = 0;
+  survivorFlash = null;
 }
 
 // --- Scroll Speed Ramp ---
@@ -451,6 +475,7 @@ function updatePlayer(dt) {
   if (borderHit && invulnTimer <= 0) {
     applySpeedPenalty(0.7, 1.0); // 30% speed reduction for 1s
     invulnTimer = INVULN_DURATION;
+    gameState.survivorTimer = 0;
   }
 }
 
@@ -667,6 +692,7 @@ function spawnVehicle(candidate) {
       ? candidate.type.laneChangeMin + Math.random() * (candidate.type.laneChangeMax - candidate.type.laneChangeMin)
       : Infinity,
     laneChanging: null, // {startX, targetX, progress} while changing
+    collided: false, // true if player hit this vehicle (tracks overtake bonus)
   });
 }
 
@@ -736,8 +762,14 @@ function updateTraffic(dt) {
     }
   }
 
-  // Remove vehicles that have scrolled past the bottom
-  gameState.traffic = gameState.traffic.filter((v) => v.y <= 760);
+  // Remove vehicles that have scrolled past the bottom; award clean overtake bonus
+  gameState.traffic = gameState.traffic.filter((v) => {
+    if (v.y > 760) {
+      if (!v.collided) gameState.score += OVERTAKE_BONUS;
+      return false;
+    }
+    return true;
+  });
 }
 
 function renderTraffic(ctx) {
@@ -922,6 +954,33 @@ function renderFuelHUD(ctx) {
   }
 }
 
+// --- Score HUD ---
+function renderScoreHUD(ctx) {
+  const scoreStr = Math.floor(gameState.displayedScore).toString();
+
+  ctx.font = 'bold 24px monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillText(scoreStr, CANVAS_WIDTH - 6, 10);
+  // Main score
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(scoreStr, CANVAS_WIDTH - 8, 8);
+
+  // Survivor flash
+  if (survivorFlash !== null) {
+    ctx.globalAlpha = Math.min(1, survivorFlash.timer) * Math.min(1, survivorFlash.timer / 0.3);
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFC107';
+    ctx.fillText('SURVIVOR +300', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
+    ctx.globalAlpha = 1;
+  }
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -979,6 +1038,26 @@ const playingState = {
     updateFuelItems(dt);
     updateParticles(dt);
 
+    // Distance score: 1 pt per 10 px traveled
+    gameState.score += effSpeed * dt * SCORE_PER_PX;
+
+    // Survivor bonus: +300 every 30s without collision
+    gameState.survivorTimer += dt;
+    if (gameState.survivorTimer >= SURVIVOR_INTERVAL) {
+      gameState.score += SURVIVOR_BONUS;
+      gameState.survivorTimer -= SURVIVOR_INTERVAL;
+      survivorFlash = { timer: 2.0 };
+    }
+
+    // Tick survivor flash
+    if (survivorFlash !== null) {
+      survivorFlash.timer -= dt;
+      if (survivorFlash.timer <= 0) survivorFlash = null;
+    }
+
+    // Lerp displayed score toward actual score
+    gameState.displayedScore += (gameState.score - gameState.displayedScore) * Math.min(1, SCORE_LERP_RATE * dt);
+
     // Drain fuel proportional to effective speed
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
     gameState.fuel = Math.max(0, gameState.fuel - fuelDrain);
@@ -1022,6 +1101,9 @@ const playingState = {
     // Fuel bar HUD (full-width bar at top + low-fuel vignette)
     renderFuelHUD(ctx);
 
+    // Score HUD (top-right)
+    renderScoreHUD(ctx);
+
     // Show elapsed time overlay
     ctx.font = '14px monospace';
     ctx.textAlign = 'left';
@@ -1056,12 +1138,20 @@ const gameOverState = {
   pulseTime: 0,
   finalTime: 0,
   finalDistance: 0,
+  finalScore: 0,
+  bestScore: 0,
+  isNewBest: false,
   causeOfDeath: '', // set by caller before transition; '' = collision
 
   onEnter() {
     this.pulseTime = 0;
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
+    this.finalScore = Math.floor(gameState.score);
+    const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
+    this.isNewBest = this.finalScore > stored;
+    this.bestScore = this.isNewBest ? this.finalScore : stored;
+    if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
   },
 
   update(dt) {
@@ -1098,11 +1188,27 @@ const gameOverState = {
     ctx.fillText(`Time: ${this.finalTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
     ctx.fillText(`Distance: ${meters}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
 
+    // Final score
+    ctx.fillStyle = this.isNewBest ? '#FFD700' : '#FFFFFF';
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText(`Score: ${this.finalScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 48);
+
+    // Best score
+    if (this.isNewBest) {
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('NEW BEST!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '14px monospace';
+      ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+    }
+
     // Pulsing retry text
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
     ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 75);
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 100);
     ctx.globalAlpha = 1;
   },
 };
