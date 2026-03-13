@@ -1740,6 +1740,29 @@ function renderShockwaveRings(ctx) {
   ctx.restore();
 }
 
+// Dynamic speed vignette — darkens screen edges progressively with speed (tunnel vision)
+// US-001: distinct from the red fuel-warning vignette; uses black/dark-grey
+function renderSpeedVignette(ctx) {
+  const speed = gameState.scrollSpeed;
+  let alpha;
+  if (speed < 300) {
+    return; // invisible below 300 px/s
+  } else if (speed < 600) {
+    alpha = ((speed - 300) / 300) * 0.25; // 0 → 0.25 over 300–600 px/s
+  } else {
+    alpha = 0.25 + ((speed - 600) / 200) * 0.30; // 0.25 → 0.55 over 600–800 px/s
+    alpha = Math.min(alpha, 0.55);
+  }
+  const vignette = ctx.createRadialGradient(
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.25,
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.85
+  );
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, `rgba(0,0,0,${alpha})`);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
 function renderSpeedLines(ctx) {
   const speed = gameState.scrollSpeed;
@@ -3294,6 +3317,9 @@ const playingState = {
       ctx.fillStyle = `rgba(255, 0, 0, ${redFlash.alpha})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
+
+    // Speed vignette — tunnel vision effect (darkens edges at high speed)
+    renderSpeedVignette(ctx);
 
     // Fuel bar HUD (full-width bar at top + low-fuel vignette)
     renderFuelHUD(ctx);
