@@ -358,6 +358,119 @@ function aabbOverlap(a, b) {
   );
 }
 
+// --- Fairness constraint (US-009) ---
+
+// Returns {minX, maxX} X extent of vehicle, accounting for projected lane changes over lookAheadS seconds
+function getVehicleXExtent(v, lookAheadS) {
+  let minX = v.x;
+  let maxX = v.x + v.width;
+
+  if (v.laneChanging) {
+    minX = Math.min(minX, v.laneChanging.targetX);
+    maxX = Math.max(maxX, v.laneChanging.targetX + v.width);
+  }
+
+  const type = VEHICLE_TYPES[v.type];
+  if (type.behavior !== 'none' && v.laneChangeTimer !== Infinity && v.laneChangeTimer <= lookAheadS) {
+    if (type.behavior === 'laneChange') {
+      for (const adj of [v.lane - 1, v.lane + 1]) {
+        if (adj >= 0 && adj < LANE_COUNT) {
+          const tx = ROAD_LEFT + adj * LANE_WIDTH + (LANE_WIDTH - v.width) / 2;
+          minX = Math.min(minX, tx);
+          maxX = Math.max(maxX, tx + v.width);
+        }
+      }
+    } else {
+      // Weave (moto) — can reach any lane
+      minX = ROAD_LEFT;
+      maxX = ROAD_RIGHT;
+    }
+  }
+
+  return { minX, maxX };
+}
+
+// Find the largest free horizontal gap in [roadLeft, roadRight] given occupied segments
+function findLargestGap(occupied, roadLeft, roadRight) {
+  if (occupied.length === 0) return roadRight - roadLeft;
+  const sorted = [...occupied].sort((a, b) => a.left - b.left);
+  let maxGap = 0;
+  let cursor = roadLeft;
+  for (const seg of sorted) {
+    if (seg.left > cursor) maxGap = Math.max(maxGap, seg.left - cursor);
+    if (seg.right > cursor) cursor = seg.right;
+  }
+  if (roadRight > cursor) maxGap = Math.max(maxGap, roadRight - cursor);
+  return maxGap;
+}
+
+// Check if spawning candidate would violate fairness constraint.
+// Returns true if safe to spawn (60px corridor exists in every 96px vertical band).
+function isFairToSpawn(candidate) {
+  const CORRIDOR_MIN = 60;
+  const BAND_HEIGHT = 96;
+  const LOOK_AHEAD = 1.0;
+
+  for (let bandTop = -BAND_HEIGHT; bandTop < CANVAS_HEIGHT; bandTop += BAND_HEIGHT / 2) {
+    const bandBottom = bandTop + BAND_HEIGHT;
+    const occupied = [];
+
+    for (const v of gameState.traffic) {
+      if (v.y < bandBottom && v.y + v.height > bandTop) {
+        const { minX, maxX } = getVehicleXExtent(v, LOOK_AHEAD);
+        occupied.push({
+          left: Math.max(ROAD_LEFT, minX),
+          right: Math.min(ROAD_RIGHT, maxX),
+        });
+      }
+    }
+
+    if (candidate.y < bandBottom && candidate.y + candidate.height > bandTop) {
+      occupied.push({ left: candidate.x, right: candidate.x + candidate.width });
+    }
+
+    if (findLargestGap(occupied, ROAD_LEFT, ROAD_RIGHT) < CORRIDOR_MIN) return false;
+  }
+
+  return true;
+}
+
+// Draw free corridor overlays for debug mode
+function renderFairnessDebug(ctx) {
+  const BAND_HEIGHT = 96;
+  const CORRIDOR_MIN = 60;
+  const LOOK_AHEAD = 1.0;
+
+  for (let bandTop = 0; bandTop < CANVAS_HEIGHT; bandTop += BAND_HEIGHT) {
+    const bandBottom = bandTop + BAND_HEIGHT;
+    const occupied = [];
+
+    for (const v of gameState.traffic) {
+      if (v.y < bandBottom && v.y + v.height > bandTop) {
+        const { minX, maxX } = getVehicleXExtent(v, LOOK_AHEAD);
+        occupied.push({ left: Math.max(ROAD_LEFT, minX), right: Math.min(ROAD_RIGHT, maxX) });
+      }
+    }
+
+    const sorted = [...occupied].sort((a, b) => a.left - b.left);
+    let cursor = ROAD_LEFT;
+
+    const drawGap = (gapLeft, gapRight) => {
+      const w = gapRight - gapLeft;
+      if (w > 0) {
+        ctx.fillStyle = w >= CORRIDOR_MIN ? 'rgba(0, 255, 0, 0.25)' : 'rgba(255, 0, 0, 0.25)';
+        ctx.fillRect(gapLeft, bandTop + 2, w, BAND_HEIGHT - 4);
+      }
+    };
+
+    for (const seg of sorted) {
+      if (seg.left > cursor) drawGap(cursor, seg.left);
+      if (seg.right > cursor) cursor = seg.right;
+    }
+    if (cursor < ROAD_RIGHT) drawGap(cursor, ROAD_RIGHT);
+  }
+}
+
 // Returns spawn config based on elapsed time
 function getSpawnConfig(elapsed) {
   if (elapsed < 20) return { maxCount: 2, spawnMin: 1200, spawnMax: 1600 };
@@ -391,25 +504,27 @@ function chooseVehicleType(elapsed) {
   return typeName;
 }
 
-function spawnVehicle() {
+function buildVehicleCandidate() {
   const elapsed = gameState.elapsedTime;
   const typeName = chooseVehicleType(elapsed);
   const type = VEHICLE_TYPES[typeName];
-
   const lane = Math.floor(Math.random() * LANE_COUNT);
   const x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - type.width) / 2;
+  return { typeName, type, lane, x, y: -type.height, width: type.width, height: type.height };
+}
 
+function spawnVehicle(candidate) {
   gameState.traffic.push({
-    type: typeName,
-    x,
-    y: -type.height,
-    lane,
-    width: type.width,
-    height: type.height,
-    ownSpeed: gameState.scrollSpeed * type.speedRatio,
+    type: candidate.typeName,
+    x: candidate.x,
+    y: candidate.y,
+    lane: candidate.lane,
+    width: candidate.width,
+    height: candidate.height,
+    ownSpeed: gameState.scrollSpeed * candidate.type.speedRatio,
     // Timer until next lane change (Infinity for non-changers)
-    laneChangeTimer: type.behavior !== 'none'
-      ? type.laneChangeMin + Math.random() * (type.laneChangeMax - type.laneChangeMin)
+    laneChangeTimer: candidate.type.behavior !== 'none'
+      ? candidate.type.laneChangeMin + Math.random() * (candidate.type.laneChangeMax - candidate.type.laneChangeMin)
       : Infinity,
     laneChanging: null, // {startX, targetX, progress} while changing
   });
@@ -419,14 +534,18 @@ function updateTraffic(dt) {
   const elapsed = gameState.elapsedTime;
   const { maxCount, spawnMin, spawnMax } = getSpawnConfig(elapsed);
 
-  // Try spawning
+  // Try spawning — only if fairness constraint is satisfied
   if (
     gameState.traffic.length < maxCount &&
     gameState.distanceTraveled >= gameState.nextSpawnDistance
   ) {
-    spawnVehicle();
-    gameState.nextSpawnDistance =
-      gameState.distanceTraveled + spawnMin + Math.random() * (spawnMax - spawnMin);
+    const candidate = buildVehicleCandidate();
+    if (isFairToSpawn(candidate)) {
+      spawnVehicle(candidate);
+      gameState.nextSpawnDistance =
+        gameState.distanceTraveled + spawnMin + Math.random() * (spawnMax - spawnMin);
+    }
+    // If not fair, skip this frame — will retry next frame with a fresh candidate
   }
 
   // Update each vehicle
@@ -597,6 +716,7 @@ const playingState = {
 
     // Debug overlay (toggle with D key)
     if (debugMode) {
+      renderFairnessDebug(ctx);
       ctx.fillStyle = 'rgba(255,255,0,0.85)';
       ctx.font = '12px monospace';
       ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s`, 8, 26);
