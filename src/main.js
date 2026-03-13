@@ -102,6 +102,14 @@ const NEAR_MISS_FLASH_DURATION = 0.3; // seconds for vehicle side flash
 const COMBO_RESET_TIME = 3.0;        // seconds without near miss before combo resets
 const COMBO_SCALE_DURATION = 0.2;    // scale-in animation duration
 
+// Coin constants
+const COIN_RADIUS = 8;                 // 16px diameter
+const COIN_POINTS = 100;               // points per coin collected
+const COIN_SPAWN_MIN = 600;            // px traveled min between cluster spawns
+const COIN_SPAWN_MAX = 1000;           // px traveled max between cluster spawns
+const COIN_COLLECT_ANIM_DURATION = 0.2;
+const COIN_FLOAT_DURATION = 0.8;       // float '+100' text duration
+
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
 
@@ -169,6 +177,9 @@ let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 // DDA (Dynamic Difficulty Adjustment) state
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
 let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, cap 1.5; halves on collision
+
+// Coin float text state (populated on coin collection, rendered over game elements)
+const coinFloatTexts = []; // {x, y, timer}
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -401,6 +412,9 @@ const gameState = {
   score: 0,
   displayedScore: 0,
   survivorTimer: 0,
+  // Coin collectibles
+  coins: [],
+  nextCoinSpawnDistance: COIN_SPAWN_MIN,
 };
 
 function resetGameState() {
@@ -437,6 +451,10 @@ function resetGameState() {
   // Reset DDA fully on game over / retry
   ddaCleanTimer = 0;
   ddaSpawnRate = 1.0;
+  // Reset coin state
+  gameState.coins = [];
+  gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
+  coinFloatTexts.length = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1078,6 +1096,129 @@ function renderFuelItems(ctx) {
   }
 }
 
+// --- Coin Collectibles ---
+
+function spawnCoinCluster() {
+  const count = 3 + Math.floor(Math.random() * 3); // 3–5 coins
+  const patterns = ['line', 'arc', 'zigzag'];
+  const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const centerX = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+
+  for (let i = 0; i < count; i++) {
+    let x;
+    // coins spawn above screen; first coin (i=0) arrives first at player
+    const y = -COIN_RADIUS - i * 40;
+
+    if (pattern === 'line') {
+      x = centerX;
+    } else if (pattern === 'arc') {
+      const t = count > 1 ? i / (count - 1) : 0.5;
+      x = centerX + Math.sin(t * Math.PI) * 24;
+    } else {
+      // zigzag
+      x = centerX + (i % 2 === 0 ? -20 : 20);
+    }
+
+    // Clamp to road interior
+    x = Math.max(ROAD_LEFT + COIN_RADIUS, Math.min(ROAD_RIGHT - COIN_RADIUS, x));
+    gameState.coins.push({ x, y, collectAnim: null });
+  }
+
+  gameState.nextCoinSpawnDistance =
+    gameState.distanceTraveled + COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
+}
+
+function updateCoins(dt) {
+  const effSpeed = getEffectiveScrollSpeed();
+
+  if (gameState.distanceTraveled >= gameState.nextCoinSpawnDistance) {
+    spawnCoinCluster();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.coins.length - 1; i >= 0; i--) {
+    const coin = gameState.coins[i];
+
+    if (coin.collectAnim !== null) {
+      coin.collectAnim.timer -= dt;
+      if (coin.collectAnim.timer <= 0) gameState.coins.splice(i, 1);
+      continue;
+    }
+
+    coin.y += effSpeed * dt;
+
+    if (coin.y > CANVAS_HEIGHT + COIN_RADIUS) {
+      gameState.coins.splice(i, 1);
+      continue;
+    }
+
+    // Collection: player 80% hitbox vs coin 100% hitbox (full circle bounding square)
+    const coinHb = {
+      x: coin.x - COIN_RADIUS,
+      y: coin.y - COIN_RADIUS,
+      w: COIN_RADIUS * 2,
+      h: COIN_RADIUS * 2,
+    };
+    if (aabbOverlap(ph, coinHb)) {
+      gameState.score += COIN_POINTS;
+      coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
+      coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
+    }
+  }
+
+  // Tick float texts
+  for (let i = coinFloatTexts.length - 1; i >= 0; i--) {
+    coinFloatTexts[i].y -= 60 * dt; // float upward at 60 px/s
+    coinFloatTexts[i].timer -= dt;
+    if (coinFloatTexts[i].timer <= 0) coinFloatTexts.splice(i, 1);
+  }
+}
+
+function renderCoins(ctx) {
+  for (const coin of gameState.coins) {
+    let scale = 1;
+    let alpha = 1;
+    if (coin.collectAnim !== null) {
+      const progress = 1 - coin.collectAnim.timer / COIN_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(coin.x, coin.y);
+    ctx.scale(scale, scale);
+
+    // Gold circle
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shine highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.beginPath();
+    ctx.arc(-2, -2, COIN_RADIUS * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Floating '+100' text
+  for (const ft of coinFloatTexts) {
+    const alpha = ft.timer / COIN_FLOAT_DURATION;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('+100', ft.x, ft.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
 // --- Fuel HUD ---
 function renderFuelHUD(ctx) {
   const fuelPct = gameState.fuel / FUEL_INITIAL;
@@ -1213,6 +1354,7 @@ const playingState = {
     updatePlayer(dt);
     updateTraffic(dt);
     updateFuelItems(dt);
+    updateCoins(dt);
     updateParticles(dt);
 
     // Distance score: 1 pt per 10 px traveled
@@ -1281,6 +1423,7 @@ const playingState = {
     renderRoad(ctx, gameState.scrollOffset);
     renderTraffic(ctx);
     renderFuelItems(ctx);
+    renderCoins(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
 
