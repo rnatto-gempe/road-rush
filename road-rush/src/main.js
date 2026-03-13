@@ -29,6 +29,10 @@ const SEDAN_MAX_COUNT = 2;
 const SEDAN_SPAWN_MIN = 1200; // px traveled between spawns (min)
 const SEDAN_SPAWN_MAX = 1600; // px traveled between spawns (max)
 
+// Screen shake constants
+const SHAKE_DURATION = 0.5; // seconds
+const SHAKE_INTENSITY = 10; // max px offset
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -114,6 +118,13 @@ const fsm = {
     }
   },
 };
+
+// --- Screen Shake ---
+const shake = { time: 0 };
+
+function triggerShake() {
+  shake.time = SHAKE_DURATION;
+}
 
 // --- Game State (shared) ---
 const gameState = {
@@ -279,6 +290,15 @@ function getVehicleHitbox(v) {
   };
 }
 
+function aabbOverlap(a, b) {
+  return !(
+    a.x + a.w < b.x ||
+    a.x > b.x + b.w ||
+    a.y + a.h < b.y ||
+    a.y > b.y + b.h
+  );
+}
+
 function spawnSedan() {
   const lane = Math.floor(Math.random() * LANE_COUNT);
   const x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - SEDAN_WIDTH) / 2;
@@ -380,9 +400,14 @@ const playingState = {
     updatePlayer(dt);
     updateTraffic(dt);
 
-    // Escape to simulate game over (for testing until collision is implemented)
-    if (consumeKey('Escape')) {
-      fsm.transition(gameOverState);
+    // AABB collision detection
+    const ph = getPlayerHitbox(gameState.player);
+    for (const v of gameState.traffic) {
+      if (aabbOverlap(ph, getVehicleHitbox(v))) {
+        triggerShake();
+        fsm.transition(gameOverState);
+        return;
+      }
     }
   },
 
@@ -403,9 +428,13 @@ const playingState = {
 // --- GameOver State ---
 const gameOverState = {
   pulseTime: 0,
+  finalTime: 0,
+  finalDistance: 0,
 
   onEnter() {
     this.pulseTime = 0;
+    this.finalTime = gameState.elapsedTime;
+    this.finalDistance = gameState.distanceTraveled;
   },
 
   update(dt) {
@@ -426,18 +455,20 @@ const gameOverState = {
     ctx.font = 'bold 44px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
+    ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
 
     // Stats
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '18px monospace';
-    ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+    const meters = (this.finalDistance / 100).toFixed(0);
+    ctx.fillText(`Time: ${this.finalTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+    ctx.fillText(`Distance: ${meters}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
 
     // Pulsing retry text
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
     ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60);
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 75);
     ctx.globalAlpha = 1;
   },
 };
@@ -460,11 +491,22 @@ function gameLoop(timestamp) {
   accumulator += frameTime;
 
   while (accumulator >= FIXED_DT) {
+    if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
     fsm.update(FIXED_DT);
     accumulator -= FIXED_DT;
   }
 
+  ctx.save();
+  if (shake.time > 0) {
+    const progress = shake.time / SHAKE_DURATION;
+    const amount = SHAKE_INTENSITY * progress;
+    ctx.translate(
+      (Math.random() * 2 - 1) * amount,
+      (Math.random() * 2 - 1) * amount
+    );
+  }
   fsm.render(ctx);
+  ctx.restore();
   requestAnimationFrame(gameLoop);
 }
 
