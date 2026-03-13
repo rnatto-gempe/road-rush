@@ -21,14 +21,6 @@ const PLAYER_ACCEL = 1200; // px/s²
 const PLAYER_DECEL = 1800; // px/s²
 const PLAYER_MAX_SPEED = 400; // px/s
 
-// Sedan (traffic) constants
-const SEDAN_WIDTH = 40;
-const SEDAN_HEIGHT = 60;
-const SEDAN_SPEED_RATIO = 0.6; // sedan own speed = 60% of scrollSpeed
-const SEDAN_MAX_COUNT = 2;
-const SEDAN_SPAWN_MIN = 1200; // px traveled between spawns (min)
-const SEDAN_SPAWN_MAX = 1600; // px traveled between spawns (max)
-
 // Screen shake constants
 const SHAKE_DURATION = 0.5; // seconds
 const SHAKE_INTENSITY = 10; // max px offset
@@ -38,6 +30,49 @@ const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
 const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
 const SPEED_RAMP_PHASE2_RATE = 1.5; // px/s per second in phase 2
 const SPEED_MAX = 800; // px/s hard cap
+
+// Lane change duration (seconds) for lane-changing vehicles
+const LANE_CHANGE_DURATION = 0.8;
+
+// Vehicle type definitions
+const VEHICLE_TYPES = {
+  sedan: {
+    color: '#1E88E5',
+    width: 40,
+    height: 60,
+    speedRatio: 0.6,
+    minTime: 0,
+    behavior: 'none',
+  },
+  truck: {
+    color: '#616161',
+    width: 60,
+    height: 72,
+    speedRatio: 0.4,
+    minTime: 0,
+    behavior: 'none',
+  },
+  sports: {
+    color: '#B71C1C',
+    width: 36,
+    height: 58,
+    speedRatio: 0.85,
+    minTime: 40,
+    behavior: 'laneChange',
+    laneChangeMin: 2,
+    laneChangeMax: 4,
+  },
+  moto: {
+    color: '#FFC107',
+    width: 20,
+    height: 48,
+    speedRatio: 0.7,
+    minTime: 60,
+    behavior: 'weave',
+    laneChangeMin: 1,
+    laneChangeMax: 2,
+  },
+};
 
 // Debug mode
 let debugMode = false;
@@ -149,7 +184,7 @@ const gameState = {
     vx: 0,
   },
   traffic: [],
-  nextSpawnDistance: SEDAN_SPAWN_MIN,
+  nextSpawnDistance: 1200,
 };
 
 function resetGameState() {
@@ -161,7 +196,8 @@ function resetGameState() {
   gameState.player.y = PLAYER_Y;
   gameState.player.vx = 0;
   gameState.traffic = [];
-  gameState.nextSpawnDistance = SEDAN_SPAWN_MIN + Math.random() * (SEDAN_SPAWN_MAX - SEDAN_SPAWN_MIN);
+  // Use t=0 spawn config: min=1200, max=1600
+  gameState.nextSpawnDistance = 1200 + Math.random() * 400;
 }
 
 // --- Scroll Speed Ramp ---
@@ -301,7 +337,7 @@ function renderPlayer(ctx, player) {
   ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
 }
 
-// --- Traffic (Sedans) ---
+// --- Traffic System ---
 function getVehicleHitbox(v) {
   const hbW = v.width * 0.8;
   const hbH = v.height * 0.8;
@@ -322,53 +358,163 @@ function aabbOverlap(a, b) {
   );
 }
 
-function spawnSedan() {
+// Returns spawn config based on elapsed time
+function getSpawnConfig(elapsed) {
+  if (elapsed < 20) return { maxCount: 2, spawnMin: 1200, spawnMax: 1600 };
+  if (elapsed < 40) return { maxCount: 3, spawnMin: 800, spawnMax: 1200 };
+  if (elapsed < 70) return { maxCount: 4, spawnMin: 600, spawnMax: 900 };
+  return { maxCount: 5, spawnMin: 400, spawnMax: 700 };
+}
+
+// Returns probability of picking an aggressive (lane-changing) vehicle type
+function getAggressiveWeight(elapsed) {
+  if (elapsed <= 0) return 0;
+  if (elapsed <= 30) return 0.15 * (elapsed / 30);
+  if (elapsed <= 60) return 0.15 + 0.20 * ((elapsed - 30) / 30);
+  if (elapsed <= 90) return 0.35 + 0.25 * ((elapsed - 60) / 30);
+  return 0.60;
+}
+
+function chooseVehicleType(elapsed) {
+  const available = Object.entries(VEHICLE_TYPES).filter(([, t]) => elapsed >= t.minTime);
+  const aggressive = available.filter(([, t]) => t.behavior !== 'none');
+  const passive = available.filter(([, t]) => t.behavior === 'none');
+
+  let pool;
+  if (aggressive.length > 0 && Math.random() < getAggressiveWeight(elapsed)) {
+    pool = aggressive;
+  } else {
+    pool = passive;
+  }
+
+  const [typeName] = pool[Math.floor(Math.random() * pool.length)];
+  return typeName;
+}
+
+function spawnVehicle() {
+  const elapsed = gameState.elapsedTime;
+  const typeName = chooseVehicleType(elapsed);
+  const type = VEHICLE_TYPES[typeName];
+
   const lane = Math.floor(Math.random() * LANE_COUNT);
-  const x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - SEDAN_WIDTH) / 2;
+  const x = ROAD_LEFT + lane * LANE_WIDTH + (LANE_WIDTH - type.width) / 2;
+
   gameState.traffic.push({
+    type: typeName,
     x,
-    y: -SEDAN_HEIGHT,
-    width: SEDAN_WIDTH,
-    height: SEDAN_HEIGHT,
-    ownSpeed: gameState.scrollSpeed * SEDAN_SPEED_RATIO,
+    y: -type.height,
+    lane,
+    width: type.width,
+    height: type.height,
+    ownSpeed: gameState.scrollSpeed * type.speedRatio,
+    // Timer until next lane change (Infinity for non-changers)
+    laneChangeTimer: type.behavior !== 'none'
+      ? type.laneChangeMin + Math.random() * (type.laneChangeMax - type.laneChangeMin)
+      : Infinity,
+    laneChanging: null, // {startX, targetX, progress} while changing
   });
 }
 
 function updateTraffic(dt) {
+  const elapsed = gameState.elapsedTime;
+  const { maxCount, spawnMin, spawnMax } = getSpawnConfig(elapsed);
+
   // Try spawning
   if (
-    gameState.traffic.length < SEDAN_MAX_COUNT &&
+    gameState.traffic.length < maxCount &&
     gameState.distanceTraveled >= gameState.nextSpawnDistance
   ) {
-    spawnSedan();
+    spawnVehicle();
     gameState.nextSpawnDistance =
-      gameState.distanceTraveled +
-      SEDAN_SPAWN_MIN +
-      Math.random() * (SEDAN_SPAWN_MAX - SEDAN_SPAWN_MIN);
+      gameState.distanceTraveled + spawnMin + Math.random() * (spawnMax - spawnMin);
   }
 
-  // Move sedans: visual speed = scrollSpeed - ownSpeed (downward on screen)
+  // Update each vehicle
   for (const v of gameState.traffic) {
+    const type = VEHICLE_TYPES[v.type];
     const visualSpeed = gameState.scrollSpeed - v.ownSpeed;
     v.y += visualSpeed * dt;
+
+    // Lane-change behavior for sports car and motorcycle
+    if (type.behavior !== 'none') {
+      if (v.laneChanging) {
+        // Continue active lane change using smoothstep
+        v.laneChanging.progress += dt / LANE_CHANGE_DURATION;
+        if (v.laneChanging.progress >= 1) {
+          v.x = v.laneChanging.targetX;
+          v.laneChanging = null;
+          v.laneChangeTimer =
+            type.laneChangeMin + Math.random() * (type.laneChangeMax - type.laneChangeMin);
+        } else {
+          const t = v.laneChanging.progress;
+          const smooth = t * t * (3 - 2 * t); // smoothstep
+          v.x = v.laneChanging.startX + (v.laneChanging.targetX - v.laneChanging.startX) * smooth;
+        }
+      } else {
+        v.laneChangeTimer -= dt;
+        if (v.laneChangeTimer <= 0) {
+          let newLane;
+          if (type.behavior === 'laneChange') {
+            // Sports car: adjacent lane only
+            const candidates = [];
+            if (v.lane > 0) candidates.push(v.lane - 1);
+            if (v.lane < LANE_COUNT - 1) candidates.push(v.lane + 1);
+            newLane = candidates[Math.floor(Math.random() * candidates.length)];
+          } else {
+            // Motorcycle: any other lane
+            const candidates = [];
+            for (let i = 0; i < LANE_COUNT; i++) {
+              if (i !== v.lane) candidates.push(i);
+            }
+            newLane = candidates[Math.floor(Math.random() * candidates.length)];
+          }
+
+          const targetX = ROAD_LEFT + newLane * LANE_WIDTH + (LANE_WIDTH - v.width) / 2;
+          v.laneChanging = { startX: v.x, targetX, progress: 0 };
+          v.lane = newLane;
+        }
+      }
+    }
   }
 
-  // Remove sedans that have scrolled past the bottom
+  // Remove vehicles that have scrolled past the bottom
   gameState.traffic = gameState.traffic.filter((v) => v.y <= 760);
 }
 
 function renderTraffic(ctx) {
   for (const v of gameState.traffic) {
-    // Car body
-    ctx.fillStyle = '#1E88E5';
-    ctx.fillRect(v.x, v.y, v.width, v.height);
-
-    // Windshield (front — top of sprite since sedan faces upward)
-    ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
-    ctx.fillRect(v.x + 5, v.y + 6, v.width - 10, 14);
-
-    // Rear window
-    ctx.fillRect(v.x + 5, v.y + v.height - 18, v.width - 10, 10);
+    if (v.type === 'truck') {
+      ctx.fillStyle = '#616161';
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 4);
+      ctx.fill();
+      // Cab windows
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+      ctx.fillRect(v.x + 8, v.y + 8, v.width - 16, 18);
+      ctx.fillRect(v.x + 8, v.y + v.height - 22, v.width - 16, 12);
+    } else if (v.type === 'sedan') {
+      ctx.fillStyle = '#1E88E5';
+      ctx.fillRect(v.x, v.y, v.width, v.height);
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+      ctx.fillRect(v.x + 5, v.y + 6, v.width - 10, 14);
+      ctx.fillRect(v.x + 5, v.y + v.height - 18, v.width - 10, 10);
+    } else if (v.type === 'sports') {
+      // Sleek dark-red with large windows
+      ctx.fillStyle = '#B71C1C';
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 8);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+      ctx.fillRect(v.x + 4, v.y + 7, v.width - 8, 12);
+      ctx.fillRect(v.x + 4, v.y + v.height - 17, v.width - 8, 10);
+    } else if (v.type === 'moto') {
+      // Narrow yellow motorcycle
+      ctx.fillStyle = '#FFC107';
+      ctx.fillRect(v.x, v.y, v.width, v.height);
+      // Rider silhouette
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+    }
   }
 }
 
@@ -456,6 +602,14 @@ const playingState = {
       ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s`, 8, 26);
       ctx.fillText(`Dist: ${(gameState.distanceTraveled / 100).toFixed(0)}m`, 8, 42);
       ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 58);
+      // Type breakdown
+      const counts = {};
+      for (const v of gameState.traffic) counts[v.type] = (counts[v.type] || 0) + 1;
+      let y = 74;
+      for (const [type, count] of Object.entries(counts)) {
+        ctx.fillText(`  ${type}: ${count}`, 8, y);
+        y += 14;
+      }
     }
   },
 };
