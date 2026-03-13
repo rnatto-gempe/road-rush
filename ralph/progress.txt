@@ -23,6 +23,7 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Title drone and state-specific ambient audio: start in onEnter (guard with ctx check), stop in onExit — follows same pattern as engine/road
 - Beat scheduler uses AudioContext.currentTime look-ahead pattern — schedule ~4 beats ahead, refill as time advances (never use setTimeout/setInterval for musical timing)
 - State-specific ambient audio (rumble, drone) follows onEnter/onExit pattern — start in onEnter, stop in onExit; cancelScheduledValues before new ramps on stop
+- Global HUD overlays (mute icon) render AFTER ctx.restore() in gameLoop, outside the shake transform, to stay stable in all states
 
 ---
 
@@ -166,4 +167,18 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Rumble buffer can be shared with game over drone noise (_rumbleBuffer on AudioManager) to avoid duplicate allocation
   - cancelScheduledValues(now) is needed before setTargetAtTime when stopping nodes that may still have pending ramps
   - Game over drone gains (0.15 osc, 0.04 noise) are subtle — sit below the volume hierarchy as ambient atmosphere
+---
+
+## 2026-03-13 - US-011
+- Added renderMuteIcon(ctx) function: canvas-drawn speaker icon with sound wave arcs (unmuted) or X mark (muted)
+- Added canvas click event listener with coordinate mapping (screen → canvas) for icon click detection
+- Added M key toggle using consumeKey('m')/consumeKey('M') in game loop (works in all states)
+- Mute icon renders after fsm.render() and ctx.restore() so it's visible in all states and unaffected by screen shake
+- Icon positioned at top-right (CANVAS_WIDTH - 28, 54), semi-transparent (0.5 alpha)
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Canvas click detection needs getBoundingClientRect + scale factor to map screen coords to canvas coords (letterbox scaling)
+  - Global overlays should render outside the shake ctx.save/restore block to stay stable
+  - consumeKey checks both lowercase and uppercase to handle caps lock state
+  - Browser verified: icon visible on title screen with correct speaker shape and wave arcs
 ---

@@ -193,7 +193,7 @@
         "Verify in browser that icon is visible, clickable, and mute/unmute works"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
