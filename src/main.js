@@ -126,6 +126,21 @@ const SHIELD_SPAWN_MAX = 7500;          // px traveled max between spawns
 const SHIELD_COLLECT_ANIM_DURATION = 0.2;
 const SHIELD_BREAK_FLASH_DURATION = 0.3; // bright flash when shield absorbs a hit
 
+// Speed lines: drawn in rumble-strip margins when scrollSpeed > 500
+const SPEED_LINE_PERIOD = CANVAS_HEIGHT + 80; // vertical wrap period
+const speedLineData = (() => {
+  const data = [];
+  for (let i = 0; i < 8; i++) {
+    // Left margin (x: 3–37), right margin (x: 363–397), random y phase
+    data.push({ x: 3 + Math.random() * 34,               yPhase: Math.random() * SPEED_LINE_PERIOD });
+    data.push({ x: ROAD_RIGHT + 3 + Math.random() * 34,  yPhase: Math.random() * SPEED_LINE_PERIOD });
+  }
+  return data;
+})();
+
+// Explosion effects for fatal death: 3 expanding rings
+const explosions = []; // {x, y, timer, maxTimer}
+
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
 
@@ -291,17 +306,14 @@ const fsm = {
 };
 
 // --- Screen Shake ---
-const shake = { time: 0, intensity: SHAKE_INTENSITY };
+const shake = { time: 0, maxTime: SHAKE_DURATION, intensity: SHAKE_INTENSITY };
 
 function triggerShake(duration, intensity) {
-  if (duration !== undefined) {
-    // Custom shake: borrow the shake object but track separately
-    shake.time = duration;
-    shake.intensity = intensity !== undefined ? intensity : SHAKE_INTENSITY;
-  } else {
-    shake.time = SHAKE_DURATION;
-    shake.intensity = SHAKE_INTENSITY;
-  }
+  const dur = duration !== undefined ? duration : SHAKE_DURATION;
+  const inten = intensity !== undefined ? intensity : SHAKE_INTENSITY;
+  shake.time = dur;
+  shake.maxTime = dur;
+  shake.intensity = inten;
 }
 
 // Returns the nitro speed multiplier (1.0 normally, 1.3 during boost, eases back to 1.0)
@@ -340,6 +352,65 @@ function spawnSparks(x, y, count) {
       size: 2 + Math.random() * 3,
     });
   }
+}
+
+function spawnExplosion(x, y) {
+  explosions.push({ x, y, timer: 0.5, maxTimer: 0.5 });
+}
+
+function updateExplosions(dt) {
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].timer -= dt;
+    if (explosions[i].timer <= 0) explosions.splice(i, 1);
+  }
+}
+
+// Three concentric rings expand outward from the blast center
+function renderExplosions(ctx) {
+  if (explosions.length === 0) return;
+  ctx.save();
+  for (const ex of explosions) {
+    const progress = 1 - ex.timer / ex.maxTimer; // 0→1 as rings expand
+    for (let ring = 0; ring < 3; ring++) {
+      const startAt = ring * 0.18; // stagger ring starts: 0, 0.18, 0.36
+      if (progress < startAt) continue;
+      const ringProgress = Math.min(1, (progress - startAt) / (1.0 - startAt));
+      const maxR = 40 + ring * 25; // 40, 65, 90px max radii
+      const radius = ringProgress * maxR;
+      const alpha = (1 - ringProgress) * 0.85;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 3 - ring * 0.5;
+      ctx.beginPath();
+      ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
+function renderSpeedLines(ctx) {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 500) return;
+  const intensityFrac = Math.min(1, (speed - 500) / 200); // 0 at 500, 1 at 700+
+  const alpha = intensityFrac * 0.55;
+  const lineLength = 12 + intensityFrac * 42; // 12px at 500, 54px at 700+
+  // Lines scroll 2× faster than the road for a parallax blur effect
+  const offset = (gameState.scrollOffset * 2) % SPEED_LINE_PERIOD;
+
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = alpha;
+  for (const line of speedLineData) {
+    const y = ((line.yPhase + offset) % SPEED_LINE_PERIOD) - 80;
+    ctx.beginPath();
+    ctx.moveTo(line.x, y);
+    ctx.lineTo(line.x, y + lineLength);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 1;
 }
 
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
@@ -412,13 +483,15 @@ function handleVehicleCollision(v) {
   ddaCleanTimer = 0;
 
   if (isLateral) {
-    // Glancing blow: 20% speed reduction 0.8s + yellow sparks
+    // Glancing blow: 20% speed reduction 0.8s + yellow sparks + light shake
     applySpeedPenalty(0.8, 0.8);
     spawnSparks(sparkX, sparkY, 4 + Math.floor(Math.random() * 5));
+    triggerShake(0.15, 2);
   } else {
     // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
     if (gameState.scrollSpeed > 600) {
-      triggerShake();
+      triggerShake(0.5, 10); // full death shake
+      spawnExplosion(sparkX, sparkY); // expanding rings on fatal death
       gameOverState.causeOfDeath = '';
       fsm.transition(gameOverState);
       return;
@@ -516,6 +589,8 @@ function resetGameState() {
   gameState.shieldItems = [];
   gameState.nextShieldSpawnDistance = SHIELD_SPAWN_MIN + Math.random() * (SHIELD_SPAWN_MAX - SHIELD_SPAWN_MIN);
   shieldBreakFlash = 0;
+  // Reset VFX
+  explosions.length = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1757,6 +1832,7 @@ const playingState = {
 
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
+    renderSpeedLines(ctx);
     renderTraffic(ctx);
     renderFuelItems(ctx);
     renderCoins(ctx);
@@ -1842,6 +1918,7 @@ const gameOverState = {
 
   update(dt) {
     this.pulseTime += dt;
+    updateExplosions(dt);
     if (consumeKey('Enter')) {
       resetGameState();
       fsm.transition(playingState);
@@ -1852,6 +1929,9 @@ const gameOverState = {
     // Dark background
     ctx.fillStyle = '#0A0A1A';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Explosion rings from fatal death (visible for 0.5s after transition)
+    renderExplosions(ctx);
 
     // GAME OVER text
     ctx.fillStyle = '#E53935';
@@ -1924,8 +2004,8 @@ function gameLoop(timestamp) {
 
   ctx.save();
   if (shake.time > 0) {
-    const progress = shake.time / SHAKE_DURATION;
-    const amount = shake.intensity * progress;
+    const progress = shake.maxTime > 0 ? shake.time / shake.maxTime : 0;
+    const amount = shake.intensity * progress * progress; // quadratic (exponential-ish) decay
     ctx.translate(
       (Math.random() * 2 - 1) * amount,
       (Math.random() * 2 - 1) * amount
