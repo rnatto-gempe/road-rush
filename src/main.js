@@ -590,33 +590,41 @@ const AudioManager = {
   // Coin cluster sequence counter (ascending pitch per rapid coin)
   coinSeq: { count: 0, resetTimer: 0 },
 
-  // Fuel pickup: warm ascending sine 400→800Hz over 0.15s
+  // Fuel pickup: quick major triad chord (~0.15s) derived from current chord root
   playFuelPickup() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(400, now);
-    osc.frequency.exponentialRampToValueAtTime(800, now + 0.15);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
-    gain.gain.linearRampToValueAtTime(0, now + 0.14);
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.15);
-    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const root = this.PAD_CHORDS[chordIdx][0]; // root note of current chord
+    // Major triad: root, major 3rd (+4 semitones), perfect 5th (+7 semitones)
+    const triadFreqs = [root, root * Math.pow(2, 4 / 12), root * Math.pow(2, 7 / 12)];
+    for (const freq of triadFreqs) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+      gain.gain.linearRampToValueAtTime(0, now + 0.14);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
   },
 
-  // Coin pickup: bright metallic ding, pitch rises +50Hz per rapid coin in cluster
+  // Coin pickup: note from A minor pentatonic (steps up one scale degree per consecutive coin)
   playCoinPickup() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     // Track rapid coin sequence
     this.coinSeq.count++;
     this.coinSeq.resetTimer = 0.4; // reset after 0.4s gap
-    const freq = 1200 + (this.coinSeq.count - 1) * 50;
+    // Use arp notes for current chord; step up one note per coin in cluster
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const arpNotes = this.ARPS_BY_CHORD[chordIdx];
+    const freq = arpNotes[(this.coinSeq.count - 1) % arpNotes.length];
     const osc = this.ctx.createOscillator();
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(freq, now);
@@ -630,14 +638,14 @@ const AudioManager = {
     osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   },
 
-  // Nitro pickup: aggressive sawtooth sweep 200→600Hz over 0.3s
+  // Nitro pickup: ascending sawtooth sweep ending on tonic A4 (440Hz) over 0.3s
   playNitroPickup() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(200, now);
-    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
+    osc.frequency.setValueAtTime(220, now); // A3 — start an octave below tonic
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.3); // A4 — tonic
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.35, now + 0.01);
@@ -649,79 +657,91 @@ const AudioManager = {
     osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   },
 
-  // Shield pickup: ethereal beat-frequency tone (two detuned sines ~500Hz/505Hz, 0.4s)
+  // Shield pickup: two notes a perfect 5th apart from current scale with tremolo (LFO ~8Hz), 0.4s
   playShieldPickup() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    // Oscillator 1 at 500Hz
-    const osc1 = this.ctx.createOscillator();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(500, now);
-    // Oscillator 2 at 505Hz (5Hz beat frequency)
-    const osc2 = this.ctx.createOscillator();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(505, now);
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const root = this.PAD_CHORDS[chordIdx][0]; // root note of current chord
+    const fifth = root * 1.5;                  // perfect 5th above
+
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.25, now + 0.1); // slow fade-in
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
     gain.gain.linearRampToValueAtTime(0, now + 0.39);
-    osc1.connect(gain);
-    osc2.connect(gain);
     gain.connect(this.masterGain);
-    osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + 0.4);
-    osc2.stop(now + 0.4);
-    osc1.onended = () => { osc1.disconnect(); };
-    osc2.onended = () => { osc2.disconnect(); gain.disconnect(); };
+
+    // LFO tremolo at 8Hz: oscillates gain by ±0.08
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(8, now);
+    const lfoDepth = this.ctx.createGain();
+    lfoDepth.gain.setValueAtTime(0.08, now);
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(gain.gain);
+    lfo.start(now);
+    lfo.stop(now + 0.4);
+    lfo.onended = () => { lfo.disconnect(); lfoDepth.disconnect(); };
+
+    let endedCount = 0;
+    for (const freq of [root, fifth]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.4);
+      osc.onended = () => {
+        osc.disconnect();
+        endedCount++;
+        if (endedCount === 2) gain.disconnect();
+      };
+    }
   },
 
   // ─── Near Miss, Combo, and Bonus SFX ───
 
-  // Near miss whoosh: band-passed noise burst 0.1s (~1-3kHz)
+  // Near miss: short chromatic grace note — one semitone below tonic A4 (G#4 = 415.3Hz), 0.05s
   playNearMiss() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    const sampleRate = this.ctx.sampleRate;
-    const len = Math.floor(sampleRate * 0.1);
-    const buf = this.ctx.createBuffer(1, len, sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(2000, now);
-    filter.Q.setValueAtTime(1.5, now);
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-    src.start(now);
-    src.stop(now + 0.1);
-    src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
-  },
-
-  // Combo multiplier stinger: ascending sine tone at 600Hz + combo×100Hz, 0.15s
-  playComboUp(combo) {
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    const freq = 600 + combo * 100;
+    // G#4/Ab4 = 440 / 2^(1/12) ≈ 415.3Hz — one semitone below tonic A4
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.setValueAtTime(415.3, now);
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     osc.connect(gain);
     gain.connect(this.masterGain);
     osc.start(now);
-    osc.stop(now + 0.15);
+    osc.stop(now + 0.05);
     osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Combo multiplier: power chord (root + 5th) where root rises with combo level, 0.15s
+  playComboUp(combo) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Root steps up through arp notes of current chord with each combo level
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const arpNotes = this.ARPS_BY_CHORD[chordIdx];
+    const root = arpNotes[(combo - 1) % arpNotes.length];
+    const fifth = root * 1.5; // perfect 5th
+    for (const freq of [root, fifth]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
   },
 
   // Survivor bonus: triumphant short major chord (400/500/600Hz sines, 0.3s)
