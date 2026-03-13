@@ -84,3 +84,23 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - Diminished chord resolving: linearRamp to peak then setTargetAtTime(0, peakTime, timeConstant) creates the "resolving" envelope
   - _scheduleKick() works without the beat scheduler running — can be called directly with AudioContext.currentTime + offset for drum fills
 ---
+
+## 2026-03-13 - US-006
+- Implemented player name input overlay on Game Over screen
+- HTML div overlay (position:fixed) with text input, error span, and Submit Score button appended to document.body
+- positionNameForm() uses canvas.getBoundingClientRect() + scale factor to place form at canvas logical y≈460
+- showNameForm()/hideNameForm() called in gameOverState.onEnter/onExit
+- Input keydown stopPropagation prevents arrow keys/Enter from reaching game key handlers
+- Enter in input calls handleNameSubmit(); Submit Score button click also calls handleNameSubmit()
+- Validation: name.trim().length < 2 shows "Name too short" inline error
+- localStorage key 'roadRushPlayerName' saves name on valid submit and pre-fills on next visit
+- Moved "Press Enter to Retry" text to canvas y=670 (CANVAS_HEIGHT-30) to avoid overlap with HTML form
+- Files changed: src/main.js
+- Browser verified: name input and Submit Score button visible on game over screen, correctly positioned
+- **Learnings for future iterations:**
+  - `let nameFormEl = null;` must be declared BEFORE resizeCanvas() is called, because resizeCanvas() calls positionNameForm() which references nameFormEl. Use `let x = null` + null guard, NOT `const` (TDZ would throw)
+  - positionNameForm() guard: `if (!nameFormEl || nameFormEl.style.display === 'none') return;`
+  - Use canvas.getBoundingClientRect() + scale (rect.width / CANVAS_WIDTH) to convert canvas logical coords to screen pixel position for HTML overlays
+  - input.addEventListener('keydown', e => e.stopPropagation()) is the correct way to prevent game controls while typing — window keydown listeners won't fire for that event
+  - page.evaluate() in Playwright MCP can navigate to about:blank on error; use browser_press_key + browser_take_screenshot for reliable browser testing of canvas games
+---

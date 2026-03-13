@@ -111,7 +111,7 @@
         "Verify in browser using dev-browser skill: text input visible on game over, typing works, name persists in localStorage"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
