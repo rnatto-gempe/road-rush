@@ -123,7 +123,7 @@
         "Verify in browser that beep starts at 25% fuel and accelerates as fuel drops"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

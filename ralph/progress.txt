@@ -104,3 +104,16 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Combo stinger uses the already-incremented comboMultiplier value, so at first near miss (combo goes 1→2) it plays at freq 800Hz
   - Volume hierarchy: explosion (0.8) > collision (0.5) > pickups (0.25-0.35) >= bonus SFX (0.2-0.3)
 ---
+
+## 2026-03-13 - US-007
+- Added playFuelBeep() SFX: square wave 800Hz, 0.08s with gain envelope to avoid clicks
+- Added updateFuelWarning(dt, fuelPct) timer-based beep scheduler with 3 tiers: <25% (0.48s cycle), <15% (0.33s cycle), <5% (0.2s rapid cycle)
+- Fuel warning state (fuelWarning.timer) stored on AudioManager, reset in resetGameState()
+- Wired updateFuelWarning into playingState.update after fuel drain logic
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Timer-based repeating SFX is cleanest as a decrementing timer checked per frame, not setInterval — stays in sync with game loop and pauses
+  - Fuel percentage is computed as gameState.fuel / FUEL_INITIAL — reused from renderFuelHUD pattern
+  - Warning beep gain (0.25) fits in the existing hierarchy below pickups but remains clearly audible
+  - Resetting fuelWarning.timer to 0 on fuel collect above threshold ensures immediate beep if fuel drops again
+---
