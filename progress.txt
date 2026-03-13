@@ -1,3 +1,22 @@
+## 2026-03-13 - US-008
+- Replaced sedan-only traffic with a 4-type vehicle system: sedan, truck, sports car, motorcycle
+- Added `VEHICLE_TYPES` config object with color, width, height, speedRatio, minTime, behavior per type
+- Added `getSpawnConfig(elapsed)`: returns {maxCount, spawnMin, spawnMax} with 4 tiers (0-20s, 20-40s, 40-70s, 70s+)
+- Added `getAggressiveWeight(elapsed)`: interpolates 0→0.15→0.35→0.60 at 0/30/60/90s
+- Added `chooseVehicleType(elapsed)`: picks from available types (minTime check), weighted toward aggressive
+- Added `spawnVehicle()` replacing `spawnSedan()`: creates vehicle with type-specific props + laneChangeTimer/laneChanging fields
+- Lane-change logic in `updateTraffic()`: smoothstep lerp over LANE_CHANGE_DURATION=0.8s; sports=adjacent lane, moto=any other lane
+- Updated `renderTraffic()` to render each type distinctly (truck=rounded gray, sedan=blue rect, sports=rounded dark-red, moto=narrow yellow+rider)
+- Debug overlay now shows per-type vehicle counts
+- Verified in browser: truck (gray, wider) visible at t=25s, debug shows "truck: 1"
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Vehicle `laneChanging` field: null at rest, {startX, targetX, progress} during change — smoothstep feels better than linear
+  - `chooseVehicleType` pattern: filter by minTime, then split into aggressive/passive pools, pick pool by weight
+  - `ownSpeed` is set at spawn time (snapshot of scrollSpeed) — doesn't auto-update with speed ramp; this is intentional to avoid vehicles accelerating mid-screen
+  - Truck (60px wide) extends slightly into adjacent lanes at lane centers — visually creates tight situations
+---
+
 ## Codebase Patterns
 - `debugMode` (module-level bool) toggled by D key in playingState.update() via consumeKey; rendered in playingState.render()
 - Speed ramp: phase 1 uses absolute formula `INITIAL + elapsed * RATE` (not incremental), phase 2 uses `speed += RATE2 * dt`; both capped with Math.min
@@ -15,9 +34,11 @@
 - Game loop uses fixed timestep accumulator at 1/60s (FIXED_DT)
 - scrollOffset scrolls indefinitely (no wrap needed in storage — only modulo at render time)
 - Canvas context state (lineDash, lineWidth, etc.) must be reset after use to avoid bleed-over
-- Traffic stored in `gameState.traffic[]` as {x, y, width, height, ownSpeed}
+- Traffic stored in `gameState.traffic[]` as {type, x, y, lane, width, height, ownSpeed, laneChangeTimer, laneChanging}
 - `getVehicleHitbox(v)` returns 80% centered hitbox — reusable for all vehicle types
-- Sedan visual speed = scrollSpeed - ownSpeed (downward on screen); ownSpeed = 0.6 * scrollSpeed
+- Visual screen speed = scrollSpeed - ownSpeed (downward on screen); ownSpeed set at spawn time, not updated with ramp
+- 4 vehicle types: sedan(blue,40x60,60%speed), truck(gray,60x72,40%speed), sports(darkred,36x58,85%speed,minTime=40s), moto(yellow,20x48,70%speed,minTime=60s)
+- Spawn config: `getSpawnConfig(elapsed)` returns {maxCount, spawnMin, spawnMax}; type selection via `chooseVehicleType(elapsed)`
 - Spawn tracking: `gameState.nextSpawnDistance` compared to `gameState.distanceTraveled`
 - `resetGameState()` must clear `gameState.traffic = []` and reset `nextSpawnDistance`
 

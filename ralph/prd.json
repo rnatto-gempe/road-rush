@@ -1,0 +1,365 @@
+{
+  "project": "Road Rush",
+  "branchName": "ralph/road-rush-mvp",
+  "description": "Road Rush MVP - Minimalist arcade vertical racing game inspired by Road Fighter. Core loop: drive, dodge traffic, collect fuel, die, retry instantly.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project setup with Vite and Canvas",
+      "description": "As a developer, I need the project scaffolded with Vite + vanilla JS, an HTML5 Canvas at 400x700 logical resolution with letterbox scaling, and a basic game loop using requestAnimationFrame with fixed timestep accumulator (1/60s).",
+      "acceptanceCriteria": [
+        "Vite project initialized with vanilla JS (npm create vite@latest -- --template vanilla)",
+        "index.html contains a canvas element, main.js initializes it",
+        "Canvas logical resolution is 400x700 pixels",
+        "Canvas scales to fill viewport while preserving aspect ratio (letterbox with black bars)",
+        "Game loop runs with requestAnimationFrame and fixed timestep accumulator at 1/60s",
+        "Canvas clears and redraws each frame (verify with a simple colored rectangle moving)",
+        "npm run dev starts the dev server successfully",
+        "npm run build produces a working production build"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "This is the foundation. All game values use logical pixels (400x700). Scaling is purely visual via canvas.style width/height."
+    },
+    {
+      "id": "US-002",
+      "title": "Finite State Machine (Title, Playing, GameOver)",
+      "description": "As a developer, I need a simple FSM to manage game states so that transitions between title screen, gameplay, and game over are clean.",
+      "acceptanceCriteria": [
+        "FSM with 3 states: Title, Playing, GameOver",
+        "Title state: renders 'Road Rush' centered text and 'Press Enter to Start' pulsing text (opacity oscillates)",
+        "Playing state: entered on Enter key from Title (placeholder: just show a colored background)",
+        "GameOver state: shows 'GAME OVER' text and 'Press Enter to Retry'",
+        "Enter key in GameOver transitions back to Playing with full state reset",
+        "Each state has its own update(dt) and render(ctx) functions",
+        "Typecheck passes (no errors in console)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Keep it simple: object with currentState and transition() method. States are plain objects with update/render/onEnter/onExit."
+    },
+    {
+      "id": "US-003",
+      "title": "Road rendering with scrolling lanes",
+      "description": "As a player, I want to see an infinite road scrolling downward with lane markers so that I feel the sensation of driving.",
+      "acceptanceCriteria": [
+        "Dark asphalt background with vertical gradient (#1A1A2E top to #16213E bottom)",
+        "Road area is 320px wide, centered (40px margin each side)",
+        "4 lanes, each 80px wide",
+        "3 white dashed lane markers (40% opacity) between lanes, scrolling downward",
+        "Solid white border lines on left and right road edges",
+        "Red/white alternating rumble strips in the 40px margins on each side, scrolling",
+        "Scroll speed starts at 200 px/s and is stored in a game state variable for later modification",
+        "Lane markers and rumble strips wrap seamlessly (infinite scroll illusion)",
+        "Verify in browser: road looks correct and scrolls smoothly"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Use modular offset for scroll wrapping. Road constants: ROAD_LEFT=40, ROAD_RIGHT=360, ROAD_WIDTH=320, LANE_WIDTH=80, LANE_COUNT=4."
+    },
+    {
+      "id": "US-004",
+      "title": "Player car rendering and keyboard movement",
+      "description": "As a player, I want to control a car with arrow keys that moves left and right on the road so that I can dodge obstacles.",
+      "acceptanceCriteria": [
+        "Player car: red rounded rectangle (#E53935), 40x64 px",
+        "Car positioned at Y=560 (bottom 20% of screen)",
+        "Arrow Left/Right moves car horizontally with progressive acceleration: 1200 px/s²",
+        "Deceleration when no key pressed: 1800 px/s² (quick stop)",
+        "Max lateral speed: 400 px/s",
+        "Car constrained within road borders (left edge X >= 40, right edge X <= 360)",
+        "Car has a hitbox property at 80% of sprite size (32x51 px, centered within sprite)",
+        "Movement feels responsive and smooth at 60 FPS",
+        "Verify in browser: car moves smoothly, stops quickly, cannot leave road"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Store player as object: {x, y, width, height, vx, hitbox}. Input via keydown/keyup tracking (not event-per-frame). Hitbox: {x: player.x + 4, y: player.y + 6.5, w: 32, h: 51}."
+    },
+    {
+      "id": "US-005",
+      "title": "Sedan traffic spawning and movement",
+      "description": "As a player, I want sedans to appear from the top of the screen and scroll downward so that I have something to dodge.",
+      "acceptanceCriteria": [
+        "Sedan: blue rectangle (#1E88E5), 40x60 px, spawns centered in a random lane",
+        "Sedan own speed = 60% of scroll speed (visual speed downward = 40% of scroll speed)",
+        "Spawns at Y=-60 (above screen), removed when Y > 760 (below screen)",
+        "Spawn interval: one sedan every 1200-1600 px of distance traveled (random within range)",
+        "Max 2 simultaneous sedans on screen",
+        "Sedans have hitbox at 80% of sprite size",
+        "Traffic stored in an array, updated and rendered each frame",
+        "Verify in browser: sedans appear from top, drift downward, disappear at bottom"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Track distance_traveled (accumulated scroll_speed * dt). Spawn when distance since last spawn exceeds random threshold. Same direction as player — they appear to move down because player is faster."
+    },
+    {
+      "id": "US-006",
+      "title": "AABB collision detection with game over",
+      "description": "As a player, I want to die when I hit a sedan so that the core drive-dodge-die-retry loop works.",
+      "acceptanceCriteria": [
+        "AABB collision detection between player hitbox (80%) and sedan hitbox (80%)",
+        "Any collision triggers GameOver state transition",
+        "Screen shake on death: canvas offset by random ±10px, decaying over 0.5s",
+        "Game over screen shows survival time (seconds) and distance traveled (in meters: px/100)",
+        "Enter key on game over restarts: all traffic cleared, player reset, timers reset, scroll speed reset",
+        "Retry transition takes < 300ms (no loading, instant reset)",
+        "No stale state between runs (verify by playing 3+ runs consecutively)",
+        "Verify in browser: collision feels fair (80% hitbox means visual near-misses survive)"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "AABB check: !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom). Reset function must zero ALL game state variables."
+    },
+    {
+      "id": "US-007",
+      "title": "Scroll speed ramping over time",
+      "description": "As a player, I want the road to get faster over time so that each run has escalating tension.",
+      "acceptanceCriteria": [
+        "Scroll speed formula: min(200 + elapsed_seconds * 5, 600) for first ~80s",
+        "After 600 px/s: ramp reduces to +1.5 px/s per second",
+        "Hard cap at 800 px/s (never exceeds)",
+        "Speed displayed in debug mode (optional small text, toggle with D key)",
+        "Traffic spawn interval still works correctly at high speeds",
+        "Verify in browser: game starts slow, builds to fast, never exceeds 800"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Formula: if speed < 600: speed = 200 + elapsed * 5; else: speed = min(speed + 1.5 * dt, 800). This makes the game progressively harder — the core difficulty driver."
+    },
+    {
+      "id": "US-008",
+      "title": "Full traffic system with 4 vehicle types",
+      "description": "As a player, I want to face trucks, sedans, sports cars, and motorcycles with different behaviors so that dodging stays varied and interesting.",
+      "acceptanceCriteria": [
+        "Truck: gray (#616161), 60x72 px, own speed 40% of scroll. Available from start",
+        "Sedan: blue (#1E88E5), 40x60 px, own speed 60% of scroll. Available from start",
+        "Sports car: dark red (#B71C1C), 36x58 px, own speed 85% of scroll. Appears after 40s. Changes to adjacent lane randomly (smooth interpolation over 0.8s, triggers every 2-4s)",
+        "Motorcycle: yellow (#FFC107), 20x48 px, own speed 70% of scroll. Appears after 60s. Weaves between lanes every 1-2s",
+        "All have 80% hitboxes",
+        "Spawn rate scales: 0-20s max 2/1200-1600px, 20-40s max 3/800-1200px, 40-70s max 4/600-900px, 70s+ max 5/400-700px",
+        "Type weighting: aggressive types 0% at 0s, 15% at 30s, 35% at 60s, 60% at 90s+",
+        "Verify in browser: each type looks distinct, sports car/moto visibly change lanes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Refactor traffic from US-005 to use a type system. Each type: {color, width, height, speedRatio, behavior, minTime}. Lane change: lerp(currentX, targetLaneX, t) over 0.8s."
+    },
+    {
+      "id": "US-009",
+      "title": "Fairness constraint for traffic spawning",
+      "description": "As a designer, I need to guarantee every death is the player's fault by ensuring there's always a passable gap in traffic.",
+      "acceptanceCriteria": [
+        "Before spawning traffic, validate: within any vertical band of 96px (1.5x player height), there exists a horizontal corridor of at least 60px (1.5x player width) free of obstacles",
+        "Corridor check accounts for projected positions of lane-changing vehicles over next 1.0s",
+        "If constraint would be violated, delay spawn until safe",
+        "Trucks (60px wide) in adjacent lanes must be caught as blocking (60+60=120 > lane, only 80-60=20px gap per lane)",
+        "Debug mode (D key): draws free corridors as green semi-transparent overlay",
+        "Verify in browser: toggle debug mode, confirm green corridors always visible during gameplay"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Scan algorithm: for each Y band, project all vehicles into X ranges (including future positions for lane-changers), find largest gap. If largest gap < 60px, reject spawn. This is the game's 'fairness promise'."
+    },
+    {
+      "id": "US-010",
+      "title": "Graded collision system (lateral vs frontal)",
+      "description": "As a player, I want glancing blows to slow me down instead of killing me so that not every touch is instant death.",
+      "acceptanceCriteria": [
+        "Collision classified by approach direction: if abs(player.vx) > abs(relative_vy) * 0.5 then lateral, else frontal",
+        "Lateral (glancing): 20% scroll speed reduction for 0.8s, yellow spark particles (4-8 particles, 0.2s life)",
+        "Frontal (hard hit): 40% scroll speed reduction for 1.5s, -15 fuel (only if fuel system exists, else skip), red flash overlay 20% opacity for 0.15s, screen shake 6px/0.3s",
+        "Border collision (car at road edge): 30% speed reduction for 1s",
+        "Fatal collision: instant game over when scroll_speed > 600 AND collision is frontal type",
+        "After any collision: 1.5s invulnerability window (player blinks, no further collisions)",
+        "Speed reduction is multiplicative on scroll_speed, auto-recovers after duration",
+        "Verify in browser: side-swiping a sedan = sparks + slowdown. Head-on at high speed = death"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "relative_vy = scroll_speed - vehicle.ownSpeed (how fast vehicle approaches on screen). Invulnerability prevents chain-death spiral. Blink effect: toggle visibility every 0.1s during invuln."
+    },
+    {
+      "id": "US-011",
+      "title": "Fuel system with drain and collection",
+      "description": "As a player, I want a fuel gauge that constantly drains and can be refilled by risky pickups so that sessions have a natural time limit.",
+      "acceptanceCriteria": [
+        "Initial fuel: 100 units",
+        "Consumption formula: 2.0 + (scroll_speed / 800) * 3.0 units/second (continuous, proportional to speed)",
+        "When slowed by collision, fuel consumption drops proportionally (hidden mercy mechanic)",
+        "Fuel item: green circle (#43A047) with subtle glow effect, 24px diameter",
+        "Fuel spawns every 900-1400 px traveled, interval increases +5px per second elapsed",
+        "Collecting fuel: +20 units at 0-59s, +18 at 60-89s, +15 at 90s+. Cap at 100",
+        "60% chance fuel spawns in lane adjacent to traffic (risky positioning)",
+        "Collection: player hitbox overlaps fuel item hitbox (100% of item size)",
+        "Item collect animation: scale to 120% then fade out over 0.2s",
+        "Game over when fuel reaches 0 (show 'Fuel Empty' as cause of death)",
+        "Verify in browser: fuel drains visibly, collecting fuel extends run, game ends when empty"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "At 200 px/s: 2.75 u/s (~36s to empty without collecting). At 500 px/s: 3.875 u/s. At 800 px/s: 5.0 u/s. This is the session timer — even perfect play eventually runs out."
+    },
+    {
+      "id": "US-012",
+      "title": "Fuel bar HUD element",
+      "description": "As a player, I want to see my fuel level at a glance so I know when to take risks for refills.",
+      "acceptanceCriteria": [
+        "Fuel bar at top of screen, full canvas width (400px), 4px tall",
+        "Color gradient based on fuel level: green (#43A047) above 50%, yellow (#FFC107) 20-50%, red (#E53935) below 20%",
+        "Bar width proportional to fuel (100 units = full width)",
+        "Bar flashes (blink on/off every 0.3s) when fuel below 20%",
+        "Red vignette effect at screen edges when fuel < 20% (subtle dark-to-red gradient at corners)",
+        "Verify in browser: fuel bar is visible, color changes are clear, flashing is noticeable but not annoying"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Render on top of everything. Vignette: draw radial gradient from transparent center to rgba(255,0,0,0.15) at corners."
+    },
+    {
+      "id": "US-013",
+      "title": "Distance scoring and HUD",
+      "description": "As a player, I want to see my score increase as I drive so that I feel progress.",
+      "acceptanceCriteria": [
+        "Distance score: 1 point per 10 px traveled (accumulated continuously)",
+        "Clean overtake bonus: +25 points when a traffic vehicle exits bottom of screen and player never collided with it",
+        "Survival bonus: +300 points every 30 seconds without collision, brief 'SURVIVOR +300' text flash",
+        "Score displayed at top-right: large white text (#FFFFFF) with subtle drop shadow",
+        "Score counter animates smoothly (lerps to target value, no jumps)",
+        "Best score persisted in localStorage key 'roadrush_best_score'",
+        "Game over screen shows: final score, best score (golden highlight if new best), survival time, cause of death",
+        "Verify in browser: score increases during gameplay, best score persists across page reloads"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Use displayed_score that lerps toward actual_score for smooth counter. Overtake tracking: tag each vehicle as 'collided' boolean, check on removal."
+    },
+    {
+      "id": "US-014",
+      "title": "Difficulty scaling (multi-axis ramp)",
+      "description": "As a player, I want difficulty to escalate across multiple dimensions so that each run has a dramatic arc with increasing tension.",
+      "acceptanceCriteria": [
+        "All scaling driven by elapsed_seconds as single source of truth",
+        "Scroll speed: already implemented in US-007",
+        "Traffic density: already implemented in US-008",
+        "Fuel scarcity: spawn interval grows, pickup amount shrinks, consumption rises (US-011)",
+        "After collision: 1.5s local spawn pause (no new traffic spawns within 200px above/below player Y)",
+        "Death spiral mitigation: collision slowdown reduces fuel consumption proportionally (already in US-011)",
+        "All difficulty parameters accessible from a single config/constants object for tuning",
+        "Verify in browser: play a full 90s+ run, confirm difficulty ramp feels like 4 acts (easy start → engagement → crisis → climax)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "This story is about wiring together existing systems and tuning. Create a DifficultyManager that reads elapsed_seconds and exposes current values for all axes. Spawn pause after collision is the key new mechanic here."
+    },
+    {
+      "id": "US-015",
+      "title": "Near miss detection and combo system",
+      "description": "As a player, I want to earn bonus points for narrowly dodging traffic and chain near misses into combos so that risky play is rewarded.",
+      "acceptanceCriteria": [
+        "Track minimum horizontal distance (sprite edge to sprite edge) between player and each vehicle during the entire vertical overlap period",
+        "When vehicle's sprite bottom passes below player's sprite top (fully overtaken): if min distance was < 20px AND no collision occurred, trigger near miss",
+        "One near miss per vehicle maximum (tracked per vehicle instance ID)",
+        "Near miss awards: 50 * combo_multiplier points",
+        "Combo multiplier starts at 1, +1 for each consecutive near miss",
+        "Combo resets to 0 on collision OR 3 seconds without a near miss",
+        "Combo counter at center-top: shows 'xN' only when combo >= 2, scale-in animation, fades 3s after last near miss",
+        "Brief white flash on the near-missed vehicle's side closest to player",
+        "Verify in browser: drive close to traffic, see near miss triggers, combo counter appears at x2+"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Per-vehicle tracking: add minDistX and nearMissChecked to each vehicle object. Measure during vertical overlap (vehicle.bottom > player.top && vehicle.top < player.bottom). Check on exit."
+    },
+    {
+      "id": "US-016",
+      "title": "Dynamic Difficulty Adjustment (DDA)",
+      "description": "As a designer, I want the game to subtly pressure skilled players while respecting fairness so that every run eventually ends.",
+      "acceptanceCriteria": [
+        "Every 10 seconds without collision: +5% traffic spawn rate (multiplicative)",
+        "Active near miss combo >= 3: enemies spawn 10% closer together",
+        "Fuel above 70%: next fuel spawns 20% further away",
+        "DDA cap: maximum +50% total adjustment to any single parameter",
+        "DDA partial reset on collision: reduce accumulated DDA bonuses by 50%",
+        "DDA fully resets on game over",
+        "DDA adjustments must respect fairness constraint (US-009) — fairness always wins",
+        "Debug mode (D key): show DDA multiplier values as text overlay",
+        "Verify in browser: toggle debug, confirm DDA values increase during clean play, partially reset on hit"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "DDA is the 'invisible hand' that ensures skilled players still die. Cap prevents it from creating impossible situations. Partial reset on collision gives breathing room without fully removing pressure."
+    },
+    {
+      "id": "US-017",
+      "title": "Coin collectibles",
+      "description": "As a player, I want to collect coins for bonus points so that there are more micro-decisions during a run.",
+      "acceptanceCriteria": [
+        "Coin: golden circle (#FFD700), 16px diameter",
+        "Coins spawn in clusters of 3-5 in an arc/line pattern every 600-1000 px traveled",
+        "Each coin awards +100 points on collection",
+        "Collection: player hitbox (80%) overlaps coin hitbox (100%)",
+        "Collect animation: scale to 120% then fade out 0.2s, '+100' text floats upward and fades",
+        "Coins scroll downward with the road (same as traffic relative movement)",
+        "Verify in browser: coin clusters appear regularly, collecting feels satisfying with popup"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Cluster patterns: line (same X, spaced 40px Y), arc (slight X offset per coin), zigzag. Pick randomly. Coins are low-risk reward — they don't need to be in dangerous positions."
+    },
+    {
+      "id": "US-018",
+      "title": "Nitro boost item",
+      "description": "As a player, I want to collect a rare nitro power-up that gives a temporary speed boost and invulnerability.",
+      "acceptanceCriteria": [
+        "Nitro item: yellow triangle (#FFD600), 20px, pulsing scale animation (0.9x to 1.1x, 0.5s cycle)",
+        "Rare spawn: every 2500-4000 px traveled",
+        "On collect: +30% scroll speed for 3 seconds + full invulnerability during boost",
+        "Blue particle trail behind car during nitro (4-6 particles per frame, 0.3s life, drift downward)",
+        "Speed returns to normal smoothly after 3s (ease-out over 0.5s)",
+        "Collect animation: scale to 120% then fade out 0.2s",
+        "Verify in browser: nitro is visually distinct, boost feels powerful, particles trail behind car"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "During nitro, skip collision checks entirely (invulnerable). Particles: spawn at car bottom-center, random spread ±10px X, velocity downward 50-100 px/s, color #42A5F5 fading to transparent."
+    },
+    {
+      "id": "US-019",
+      "title": "Shield item",
+      "description": "As a player, I want a very rare shield that absorbs one hit so that I get a second chance in critical moments.",
+      "acceptanceCriteria": [
+        "Shield item: blue hexagon (#42A5F5), 22px",
+        "Very rare spawn: every 5000+ px traveled",
+        "On collect: shield becomes active (stored as boolean on player state)",
+        "Active shield visual: subtle blue glow/border around player car sprite",
+        "Shield absorbs exactly 1 collision of any type (including what would be fatal), then disappears",
+        "When shield absorbs: flash the shield border brightly then fade out over 0.3s",
+        "Only 1 shield can be held at a time (collecting another while active does nothing)",
+        "Verify in browser: shield glows on car, absorbs a collision visually, then disappears"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "In collision handler: if player.hasShield, set hasShield=false, play shield-break VFX, skip all collision effects. Simple and impactful."
+    },
+    {
+      "id": "US-020",
+      "title": "Speed lines and final VFX polish",
+      "description": "As a player, I want visual effects that communicate speed and impact so that the game feels juicy without audio.",
+      "acceptanceCriteria": [
+        "Speed lines: white semi-transparent vertical lines on left/right road margins when scroll speed > 500 px/s",
+        "More lines and faster movement at higher speeds (scale count and speed with scroll_speed)",
+        "Spark particles on lateral collision: 4-8 yellow/orange particles with random velocity, 0.2s life",
+        "Red flash overlay on frontal collision: full-screen red at 20% opacity, fades over 0.15s",
+        "Screen shake respects budget: lateral 2px/0.15s, frontal 6px/0.3s, fatal 10px/0.5s (exponential decay)",
+        "Explosion on fatal death: 3 concentric circles expanding + fading over 0.5s (white to transparent)",
+        "All VFX use a shared particle/effect manager for clean update/render lifecycle",
+        "Verify in browser: speed lines appear at high speed, collisions have visible feedback, death explosion is satisfying"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Particle system: array of {x, y, vx, vy, life, maxLife, color, size}. Update: move by velocity, reduce life. Render: draw circle with alpha = life/maxLife. Remove when life <= 0."
+    }
+  ]
+}
