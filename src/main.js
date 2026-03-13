@@ -1012,6 +1012,126 @@ const AudioManager = {
       this.fuelWarning.timer = interval;
     }
   },
+
+  // ─── Explosion rumble (low ominous filtered noise during explosionState) ───
+  explosionRumble: { source: null, filter: null, gain: null },
+
+  startExplosionRumble() {
+    if (!this.ctx) return;
+    this.stopExplosionRumble();
+    const now = this.ctx.currentTime;
+    // Reuse or create noise buffer
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this._rumbleBuffer) {
+      this._rumbleBuffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this._rumbleBuffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = this._rumbleBuffer;
+    source.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(80, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 1.0); // slow fade-in over 1s
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    this.explosionRumble = { source, filter, gain };
+  },
+
+  stopExplosionRumble() {
+    const r = this.explosionRumble;
+    if (!r.source) return;
+    const now = this.ctx.currentTime;
+    r.gain.gain.cancelScheduledValues(now);
+    r.gain.gain.setTargetAtTime(0, now, 0.1); // ~0.3s fade
+    const { source, filter, gain } = r;
+    setTimeout(() => {
+      try { source.stop(); } catch (_) {}
+      source.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 400);
+    this.explosionRumble = { source: null, filter: null, gain: null };
+  },
+
+  // ─── Game over somber drone (two detuned low sines + filtered noise tail) ───
+  gameOverDrone: { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null },
+
+  startGameOverDrone() {
+    if (!this.ctx) return;
+    this.stopGameOverDrone();
+    const now = this.ctx.currentTime;
+
+    // Two detuned low sines creating dissonance (~48Hz and ~51Hz)
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(48, now);
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(51, now);
+
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0, now);
+    oscGain.gain.linearRampToValueAtTime(0.15, now + 0.8); // fade in
+
+    osc1.connect(oscGain);
+    osc2.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc1.start(now);
+    osc2.start(now);
+
+    // Very soft filtered noise tail
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this._rumbleBuffer) {
+      this._rumbleBuffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this._rumbleBuffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = this._rumbleBuffer;
+    noiseSource.loop = true;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(150, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.04, now + 1.0);
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSource.start(now);
+
+    this.gameOverDrone = { osc1, osc2, oscGain, noiseSource, noiseGain };
+  },
+
+  stopGameOverDrone() {
+    const d = this.gameOverDrone;
+    if (!d.osc1) return;
+    const now = this.ctx.currentTime;
+
+    d.oscGain.gain.cancelScheduledValues(now);
+    d.oscGain.gain.setTargetAtTime(0, now, 0.05);
+    if (d.noiseGain) {
+      d.noiseGain.gain.cancelScheduledValues(now);
+      d.noiseGain.gain.setTargetAtTime(0, now, 0.05);
+    }
+
+    const { osc1, osc2, oscGain, noiseSource, noiseGain } = d;
+    setTimeout(() => {
+      try { osc1.stop(); } catch (_) {}
+      try { osc2.stop(); } catch (_) {}
+      try { if (noiseSource) noiseSource.stop(); } catch (_) {}
+      osc1.disconnect(); osc2.disconnect(); oscGain.disconnect();
+      if (noiseSource) noiseSource.disconnect();
+      if (noiseGain) noiseGain.disconnect();
+    }, 300);
+    this.gameOverDrone = { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null };
+  },
 };
 
 // Survivor flash text state
@@ -2780,6 +2900,7 @@ const explosionState = {
     this.textAlpha = 0;
     playerVisible = false;
     AudioManager.playExplosion();
+    AudioManager.startExplosionRumble();
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
@@ -2845,6 +2966,10 @@ const explosionState = {
         v.scatterAlpha = 1.0;
       }
     }
+  },
+
+  onExit() {
+    AudioManager.stopExplosionRumble();
   },
 
   update(dt) {
@@ -2974,6 +3099,11 @@ const gameOverState = {
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    AudioManager.startGameOverDrone();
+  },
+
+  onExit() {
+    AudioManager.stopGameOverDrone();
   },
 
   update(dt) {
