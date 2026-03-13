@@ -95,6 +95,13 @@ const SURVIVOR_BONUS = 300;      // points every 30s without collision
 const SURVIVOR_INTERVAL = 30;    // seconds between survivor bonuses
 const SCORE_LERP_RATE = 8;       // display score lerp speed
 
+// Near miss / combo constants
+const NEAR_MISS_DIST = 20;           // px sprite-edge to sprite-edge threshold
+const NEAR_MISS_BASE_POINTS = 50;    // base points per near miss (× combo multiplier)
+const NEAR_MISS_FLASH_DURATION = 0.3; // seconds for vehicle side flash
+const COMBO_RESET_TIME = 3.0;        // seconds without near miss before combo resets
+const COMBO_SCALE_DURATION = 0.2;    // scale-in animation duration
+
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
 
@@ -153,6 +160,11 @@ const particles = [];             // spark particles
 
 // Post-collision spawn pause (US-014)
 let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
+
+// Near miss / combo state
+let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
+let comboResetTimer = 0;  // seconds until combo resets to 1
+let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -282,6 +294,23 @@ function spawnSparks(x, y, count) {
   }
 }
 
+// Trigger a near miss event for vehicle v (called when min distance < threshold)
+function triggerNearMiss(v) {
+  const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
+  gameState.score += pts;
+  comboMultiplier += 1;
+  comboResetTimer = COMBO_RESET_TIME;
+  comboScaleTimer = COMBO_SCALE_DURATION;
+
+  // White flash on the vehicle's side closest to the player
+  const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
+  const vCenterX = v.x + v.width / 2;
+  v.nearMissFlash = {
+    side: playerCenterX < vCenterX ? 'left' : 'right',
+    timer: NEAR_MISS_FLASH_DURATION,
+  };
+}
+
 function updateParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
@@ -313,10 +342,12 @@ function handleVehicleCollision(v) {
   const sparkX = player.x + PLAYER_WIDTH / 2;
   const sparkY = player.y + PLAYER_HEIGHT / 2;
 
-  // Tag vehicle as collided (disqualifies from clean overtake bonus)
+  // Tag vehicle as collided (disqualifies from clean overtake bonus and near miss)
   v.collided = true;
-  // Any collision resets survivor timer
+  // Any collision resets survivor timer and combo
   gameState.survivorTimer = 0;
+  comboMultiplier = 1;
+  comboResetTimer = 0;
 
   if (isLateral) {
     // Glancing blow: 20% speed reduction 0.8s + yellow sparks
@@ -392,6 +423,10 @@ function resetGameState() {
   gameState.displayedScore = 0;
   gameState.survivorTimer = 0;
   survivorFlash = null;
+  // Reset near miss / combo
+  comboMultiplier = 1;
+  comboResetTimer = 0;
+  comboScaleTimer = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -744,7 +779,10 @@ function spawnVehicle(candidate) {
       ? candidate.type.laneChangeMin + Math.random() * (candidate.type.laneChangeMax - candidate.type.laneChangeMin)
       : Infinity,
     laneChanging: null, // {startX, targetX, progress} while changing
-    collided: false, // true if player hit this vehicle (tracks overtake bonus)
+    collided: false,   // true if player hit this vehicle (tracks overtake bonus)
+    minDistX: Infinity, // min sprite-edge-to-edge horizontal dist during vertical overlap
+    nearMissChecked: false, // true once near miss check has been performed
+    nearMissFlash: null,    // {side: 'left'|'right', timer} when flashing
   });
 }
 
@@ -771,10 +809,34 @@ function updateTraffic(dt) {
   }
 
   // Update each vehicle
+  const nearMissPlayer = gameState.player;
   for (const v of gameState.traffic) {
     const type = VEHICLE_TYPES[v.type];
     const visualSpeed = getEffectiveScrollSpeed() - v.ownSpeed;
     v.y += visualSpeed * dt;
+
+    // Track minimum horizontal distance during vertical sprite overlap (near miss detection)
+    if (v.y + v.height > nearMissPlayer.y && v.y < nearMissPlayer.y + PLAYER_HEIGHT) {
+      // Sprites are vertically overlapping — measure edge-to-edge horizontal gap
+      const distRight = v.x - (nearMissPlayer.x + PLAYER_WIDTH); // positive = vehicle to the right
+      const distLeft = nearMissPlayer.x - (v.x + v.width);       // positive = vehicle to the left
+      const horizDist = Math.max(0, Math.max(distRight, distLeft));
+      if (horizDist < v.minDistX) v.minDistX = horizDist;
+    }
+
+    // Check near miss once the vehicle has fully passed the player
+    if (!v.nearMissChecked && v.y > nearMissPlayer.y + PLAYER_HEIGHT) {
+      v.nearMissChecked = true;
+      if (!v.collided && v.minDistX < NEAR_MISS_DIST) {
+        triggerNearMiss(v);
+      }
+    }
+
+    // Tick near miss flash timer
+    if (v.nearMissFlash !== null) {
+      v.nearMissFlash.timer -= dt;
+      if (v.nearMissFlash.timer <= 0) v.nearMissFlash = null;
+    }
 
     // Lane-change behavior for sports car and motorcycle
     if (type.behavior !== 'none') {
@@ -861,6 +923,20 @@ function renderTraffic(ctx) {
       // Rider silhouette
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+    }
+
+    // Near miss flash: white strip on the side closest to the player
+    if (v.nearMissFlash !== null) {
+      const flashAlpha = v.nearMissFlash.timer / NEAR_MISS_FLASH_DURATION;
+      ctx.globalAlpha = flashAlpha;
+      ctx.fillStyle = '#FFFFFF';
+      const flashW = Math.max(4, v.width * 0.15);
+      if (v.nearMissFlash.side === 'left') {
+        ctx.fillRect(v.x, v.y, flashW, v.height);
+      } else {
+        ctx.fillRect(v.x + v.width - flashW, v.y, flashW, v.height);
+      }
+      ctx.globalAlpha = 1;
     }
   }
 }
@@ -1038,6 +1114,32 @@ function renderScoreHUD(ctx) {
   }
 }
 
+// --- Combo HUD ---
+function renderComboHUD(ctx) {
+  if (comboMultiplier < 2) return; // only show at x2+
+
+  // Fade out in the last second before reset; full alpha for most of the window
+  const fadeAlpha = Math.min(1, comboResetTimer);
+  // Scale-in pop animation when a new near miss triggers
+  const scaleProgress = comboScaleTimer > 0 ? comboScaleTimer / COMBO_SCALE_DURATION : 0;
+  const scale = 1 + 0.35 * scaleProgress;
+
+  ctx.save();
+  ctx.globalAlpha = fadeAlpha;
+  ctx.translate(CANVAS_WIDTH / 2, 32);
+  ctx.scale(scale, scale);
+  ctx.font = 'bold 26px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Drop shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillText(`x${comboMultiplier}`, 1, 1);
+  // Gold text
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText(`x${comboMultiplier}`, 0, 0);
+  ctx.restore();
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -1127,6 +1229,14 @@ const playingState = {
     // Tick invulnerability timer
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
+    // Tick combo reset timer; expire combo when it runs out
+    if (comboResetTimer > 0) {
+      comboResetTimer = Math.max(0, comboResetTimer - dt);
+      if (comboResetTimer === 0) comboMultiplier = 1;
+    }
+    // Tick combo scale animation
+    if (comboScaleTimer > 0) comboScaleTimer = Math.max(0, comboScaleTimer - dt);
+
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
 
@@ -1161,6 +1271,9 @@ const playingState = {
     // Score HUD (top-right)
     renderScoreHUD(ctx);
 
+    // Combo counter (center-top, shown when combo >= 2)
+    renderComboHUD(ctx);
+
     // Show elapsed time overlay
     ctx.font = '14px monospace';
     ctx.textAlign = 'left';
@@ -1179,10 +1292,11 @@ const playingState = {
       ctx.fillText(`Invuln: ${invulnTimer.toFixed(1)}s`, 8, 86);
       ctx.fillText(`Fuel: ${gameState.fuel.toFixed(1)}`, 8, 100);
       if (spawnPauseTimer > 0) ctx.fillText(`SpawnPause: ${spawnPauseTimer.toFixed(1)}s`, 8, 114);
+      if (comboMultiplier > 1) ctx.fillText(`Combo: x${comboMultiplier} (${comboResetTimer.toFixed(1)}s)`, 8, 128);
       // Type breakdown
       const counts = {};
       for (const v of gameState.traffic) counts[v.type] = (counts[v.type] || 0) + 1;
-      let y = 128;
+      let y = 142;
       for (const [type, count] of Object.entries(counts)) {
         ctx.fillText(`  ${type}: ${count}`, 8, y);
         y += 14;
