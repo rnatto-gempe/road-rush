@@ -1687,6 +1687,8 @@ nameInputEl.addEventListener('keydown', (e) => {
   }
 });
 
+const SCORE_WEBHOOK_URL = 'https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0';
+
 function handleNameSubmit() {
   const name = nameInputEl.value.trim();
   if (name.length < 2) {
@@ -1695,7 +1697,33 @@ function handleNameSubmit() {
   }
   nameErrorEl.style.visibility = 'hidden';
   localStorage.setItem('roadRushPlayerName', name);
-  // Actual score POST is implemented in US-007
+
+  nameSubmitEl.textContent = 'Sending...';
+  nameSubmitEl.disabled = true;
+
+  const payload = {
+    name,
+    score: gameOverState.finalScore,
+    distance: Math.floor(gameOverState.finalDistance / 100), // meters
+    time: parseFloat(gameOverState.finalTime.toFixed(1)),
+    causeOfDeath: gameOverState.causeOfDeath || 'collision',
+    coinsCollected: gameOverState.coinsCollected,
+  };
+
+  fetch(SCORE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      nameSubmitEl.textContent = 'Score submitted! ✓';
+      nameSubmitEl.disabled = true;
+    })
+    .catch(() => {
+      nameSubmitEl.textContent = 'Failed to submit. Try again';
+      nameSubmitEl.disabled = false;
+    });
 }
 
 nameSubmitEl.addEventListener('click', handleNameSubmit);
@@ -1969,6 +1997,7 @@ const gameState = {
   // Coin collectibles
   coins: [],
   nextCoinSpawnDistance: COIN_SPAWN_MIN,
+  coinsCollected: 0,
   // Nitro items
   nitroItems: [],
   nextNitroSpawnDistance: NITRO_SPAWN_MIN,
@@ -2015,6 +2044,7 @@ function resetGameState() {
   // Reset coin state
   gameState.coins = [];
   gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
+  gameState.coinsCollected = 0;
   coinFloatTexts.length = 0;
   // Reset nitro state
   gameState.nitroItems = [];
@@ -2792,6 +2822,7 @@ function updateCoins(dt) {
     };
     if (aabbOverlap(ph, coinHb)) {
       gameState.score += COIN_POINTS;
+      gameState.coinsCollected++;
       coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
       AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
@@ -3336,7 +3367,7 @@ const playingState = {
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
     gameState.fuel = Math.max(0, gameState.fuel - fuelDrain);
     if (gameState.fuel <= 0) {
-      gameOverState.causeOfDeath = 'Fuel Empty';
+      gameOverState.causeOfDeath = 'fuel_empty';
       fsm.transition(gameOverState);
       return;
     }
@@ -3445,6 +3476,7 @@ const explosionState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   isNewBest: false,
   bestScore: 0,
   screenFlashAlpha: 0,
@@ -3464,6 +3496,7 @@ const explosionState = {
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
+    this.coinsCollected = gameState.coinsCollected;
     const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
     this.isNewBest = this.finalScore > stored;
     this.bestScore = this.isNewBest ? this.finalScore : stored;
@@ -3552,10 +3585,11 @@ const explosionState = {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
       gameOverState.finalScore = this.finalScore;
+      gameOverState.coinsCollected = this.coinsCollected;
       gameOverState.isNewBest = this.isNewBest;
       gameOverState.bestScore = this.bestScore;
       gameOverState.statsPreset = true;
-      gameOverState.causeOfDeath = '';
+      gameOverState.causeOfDeath = 'collision';
       fsm.transition(gameOverState);
     }
     // Fade in dark overlay and text after 1.0s elapsed (timer < 1.0)
@@ -3641,9 +3675,10 @@ const gameOverState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   bestScore: 0,
   isNewBest: false,
-  causeOfDeath: '', // set by caller before transition; '' = collision
+  causeOfDeath: '', // 'collision' or 'fuel_empty'
   statsPreset: false, // true when explosionState pre-sets final stats
 
   onEnter() {
@@ -3653,6 +3688,7 @@ const gameOverState = {
       this.finalTime = gameState.elapsedTime;
       this.finalDistance = gameState.distanceTraveled;
       this.finalScore = Math.floor(gameState.score);
+      this.coinsCollected = gameState.coinsCollected;
       const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
       this.isNewBest = this.finalScore > stored;
       this.bestScore = this.isNewBest ? this.finalScore : stored;
@@ -3693,7 +3729,8 @@ const gameOverState = {
     if (this.causeOfDeath) {
       ctx.fillStyle = '#FFC107';
       ctx.font = 'bold 16px monospace';
-      ctx.fillText(this.causeOfDeath, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
+      const codLabel = this.causeOfDeath === 'fuel_empty' ? 'Fuel Empty' : 'Collision';
+      ctx.fillText(codLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
     }
 
     // Stats
