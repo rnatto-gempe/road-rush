@@ -584,6 +584,7 @@ function resetGameState() {
   explosions.length = 0;
   shockwaveRings.length = 0;
   playerVisible = true;
+  explosionState.screenFlashAlpha = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1898,11 +1899,13 @@ const explosionState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  screenFlashAlpha: 0,
 
   onEnter() {
     this.originX = gameState.player.x + PLAYER_WIDTH / 2;
     this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
     this.timer = 2.0;
+    this.screenFlashAlpha = 1.0;
     playerVisible = false;
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
@@ -1951,6 +1954,9 @@ const explosionState = {
     this.timer -= dt;
     for (const ring of shockwaveRings) ring.elapsed += dt;
     updateParticles(dt);
+    if (this.screenFlashAlpha > 0) {
+      this.screenFlashAlpha = Math.max(0, this.screenFlashAlpha - dt / 0.2);
+    }
     if (this.timer <= 0) {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
@@ -1967,6 +1973,13 @@ const explosionState = {
     // No renderPlayer (car hidden), no collectibles
     renderShockwaveRings(ctx);
     renderParticles(ctx);
+    // Screen flash: white overlay fading over ~0.2s
+    if (this.screenFlashAlpha > 0) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.globalAlpha = this.screenFlashAlpha;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.globalAlpha = 1;
+    }
   },
 };
 
