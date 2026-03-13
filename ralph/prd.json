@@ -1,22 +1,20 @@
 {
   "project": "Road Rush",
-  "branchName": "ralph/musical-audio-ranking",
-  "description": "Musical Audio Enhancement & Online Ranking — EDM/DnB procedural music with chord pad, arpeggio, bass line, musical SFX, and online score ranking via webhook.",
+  "branchName": "ralph/immersive-ui-effects",
+  "description": "Immersive UI Effects — screen-space effects, environmental reactions, audio-reactive HUD, and cinematic visual polish inspired by Burnout, F-Zero, NFS Underground, and Geometry Dash.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Harmonic chord pad (supersaw)",
-      "description": "As a player, I want a harmonic chord pad playing during gameplay so that the audio feels musical and immersive like an EDM track.",
+      "title": "Dynamic speed vignette (tunnel vision)",
+      "description": "As a player, I want the edges of the screen to darken progressively as I go faster so that I feel tunnel vision pulling me into the road.",
       "acceptanceCriteria": [
-        "Pad synthesized with 3-4 simultaneous notes forming chords (Am → F → C → G progression in A minor)",
-        "Chord progression loops (4-8 bars) synchronized to the existing BPM beat scheduler",
-        "'Supersaw' timbre using 3 detuned sawtooth oscillators per note with a low-pass filter",
-        "Filter cutoff and volume increase gradually with scrollSpeed (200→800 px/s)",
-        "Smooth fade-in when entering playingState, fade-out on explosion/game over (0.3s)",
-        "Frequencies chosen to not clash with engine drone (engine ~60-180Hz, pad notes above 200Hz)",
-        "Pad starts/stops via playingState onEnter/onExit, follows same pattern as engine/road",
-        "All oscillators connect through AudioManager.masterGain",
-        "Verify in browser using dev-browser skill: continuous harmonic pad audible during gameplay"
+        "A full-canvas radial gradient overlay is drawn each frame (separate from the existing fuel-warning vignette)",
+        "At scrollSpeed < 300 px/s: vignette alpha = 0 (invisible)",
+        "At scrollSpeed 300→600 px/s: alpha interpolates from 0 → 0.25 (soft dark edges)",
+        "At scrollSpeed 600→800 px/s: alpha interpolates from 0.25 → 0.55 (strong tunnel vision)",
+        "Color is dark grey/black (rgba(0,0,0,alpha)) — distinct from the red fuel vignette",
+        "Drawn after road and traffic layers, before HUD, so it doesn't darken the UI",
+        "Verify in browser using dev-browser skill: vignette visibly intensifies as speed increases"
       ],
       "priority": 1,
       "passes": true,
@@ -24,91 +22,81 @@
     },
     {
       "id": "US-002",
-      "title": "Procedural arpeggio melody",
-      "description": "As a player, I want a procedural arpeggio melody that evolves with game speed so that the music feels dynamic and exciting like a DnB track.",
+      "title": "Chromatic aberration on impact and nitro",
+      "description": "As a player, I want the screen to split into colored ghost images on impact and nitro activation so that intense moments feel physically jarring.",
       "acceptanceCriteria": [
-        "Arpeggiator plays notes from A minor pentatonic scale (A, C, D, E, G) in sync with the beat scheduler",
-        "Note speed adapts to scrollSpeed: slow (~200 px/s) = quarter notes (1/4), fast (~800 px/s) = sixteenth notes (1/16)",
-        "Notes derived from current chord of the pad (US-001) to maintain harmony",
-        "Lead synth timbre: square wave with slight detune + band-pass filter",
-        "Every 8 bars, arpeggio pattern changes subtly (inversion or octave shift)",
-        "Volume lower than beat and pad (gain ~0.15) so it does not dominate the mix",
-        "Arpeggiator uses AudioContext.currentTime scheduling, not setTimeout",
-        "Starts/stops with playingState onEnter/onExit",
-        "Verify in browser using dev-browser skill: arpeggio melody audible and note speed changes with speed"
+        "On collision entry (explosionState transition): chromatic aberration activates for 0.4s",
+        "On nitro activation: activates for 0.25s at reduced intensity",
+        "Effect: draw the current frame tinted red with offset (+3px, 0) and blue with offset (-3px, 0) at globalAlpha 0.4 using globalCompositeOperation = 'screen', on top of the normal frame",
+        "Intensity decays linearly over the duration (from full to 0)",
+        "Uses an offscreen canvas to capture the frame before applying the split",
+        "Does NOT run during normal gameplay (zero cost when inactive)",
+        "Verify in browser using dev-browser skill: RGB split visible on explosion start and nitro boost"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Synchronized DnB bass line",
-      "description": "As a player, I want a rhythmic bass line synced with the beat so that the music has the driving low-end energy of EDM/DnB.",
+      "title": "Motion blur / frame ghosting at high speed",
+      "description": "As a player, I want fast-moving traffic and the road to leave subtle ghost trails when I'm at top speed so that the game feels like it's on the edge of control.",
       "acceptanceCriteria": [
-        "Bass synth uses filtered sawtooth (low-pass ~200Hz) playing root notes of current chord",
-        "DnB rhythmic pattern: note on beat 1, syncopated ghost notes on beats 2.5 and 3.5",
-        "Frequency range 40-100Hz with short attack (<0.01s) and medium decay (~0.15s) envelope",
-        "Sidechain-like duck: bass gain briefly reduces (to 0.3x) for 0.05s when kick drum fires",
-        "Synchronized with existing beat scheduler via AudioContext.currentTime",
-        "Starts/stops with playingState onEnter/onExit",
-        "Volume in mix: below kick/hat, above pad (gain ~0.3)",
-        "Verify in browser using dev-browser skill: bass line audible and complements the kick"
+        "An offscreen canvas retains the previous frame",
+        "At scrollSpeed > 600 px/s: composite previous frame at globalAlpha 0.18 before drawing current frame",
+        "At scrollSpeed > 700 px/s: increase ghost alpha to 0.28",
+        "Effect only active above 600 px/s — zero performance cost below that threshold",
+        "Ghost is drawn only on the road/traffic layer, not on HUD elements (HUD drawn on top after ghost)",
+        "Verify in browser using dev-browser skill: ghosting trails visible on vehicles at high speed"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Musical pickup SFX using current scale",
-      "description": "As a player, I want pickup sounds to be musical notes that harmonize with the current music so that collecting items feels satisfying and part of the soundtrack.",
+      "title": "Bloom / glow on collectibles and nitro exhaust",
+      "description": "As a player, I want collectible items and nitro flames to emit light so that they look like they glow and are visually distinct from traffic.",
       "acceptanceCriteria": [
-        "Coin pickup: plays a note from A minor pentatonic scale; each consecutive coin in cluster steps up one scale degree (ascending arpeggio)",
-        "Fuel pickup: quick major triad chord (3 simultaneous notes, ~0.15s) derived from current chord root",
-        "Nitro pickup: ascending sweep ending on the tonic (A) of the current scale",
-        "Shield pickup: two notes a perfect 5th apart from the current scale with tremolo (LFO amplitude mod at ~8Hz)",
-        "Near miss: short chromatic grace note (one semitone below current tonic, quick 0.05s)",
-        "Combo multiplier: power chord (root + 5th) where root pitch rises with combo level",
-        "All SFX still trigger at same code locations as before — only frequencies change to use musical scale",
-        "SFX remain harmonious when music is playing (no atonal clashes)",
-        "Verify in browser using dev-browser skill: pickups sound musical and in harmony with the track"
+        "Collectibles (coin, fuel, nitro, shield) have a colored halo: draw item a second time at 2x scale with filter: blur(8px) and globalCompositeOperation = 'lighter' at globalAlpha 0.5",
+        "Nitro exhaust particles already rendered with 'lighter' compositing — boost particle radius by 30% and increase alpha by 0.15 when scrollSpeed > 600",
+        "Player car headlights (front two white circles) rendered with blur glow when active",
+        "Bloom uses an offscreen canvas: render bloom targets there, then composite onto main canvas",
+        "No bloom on traffic vehicles (performance constraint)",
+        "Verify in browser using dev-browser skill: collectibles visibly glow; nitro trail is brighter at high speed"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Musical state transitions",
-      "description": "As a player, I want smooth musical transitions between game states so that the audio experience feels polished and cinematic.",
+      "title": "Dynamic FOV — road perspective convergence with speed",
+      "description": "As a player, I want the road to appear to narrow and accelerate toward a vanishing point as I go faster so that I feel the perspective crushing in on me.",
       "acceptanceCriteria": [
-        "Title → Playing: 1s riser (white noise sweep ascending + volume crescendo) plays before beat drops",
-        "Collision/Explosion: all musical elements (pad, arpeggio, bass) stop with 'tape stop' effect (pitch drops rapidly to ~20% over 0.3s then silence)",
-        "Game Over: existing somber drone enhanced — add a diminished minor chord resolving slowly over 2s",
-        "Retry (game over → playing): short drum roll fill (4 rapid kicks over 0.3s) before beat restarts",
-        "All transitions use AudioContext.currentTime scheduling for precise timing",
-        "No clicks, pops, or silent gaps during transitions",
-        "Verify in browser using dev-browser skill: all state transitions have distinct audible musical changes"
+        "The road drawing function uses a fixed trapezoid (left/right edge coordinates) — make the top edge width (near vanishing point) dynamically narrower at high speed",
+        "At base speed: road top width = current value (no change)",
+        "At scrollSpeed 600 px/s: top width reduces by 15%",
+        "At scrollSpeed 800 px/s: top width reduces by 30% (maximum convergence)",
+        "Road lane markings and edges interpolate smoothly (no jumps)",
+        "Change applies only to the drawn road geometry — player car position and traffic lanes are unaffected",
+        "Verify in browser using dev-browser skill: road visibly narrows at high speed; traffic/player position unchanged"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Player name input on Game Over screen",
-      "description": "As a player, I want to enter my name on the Game Over screen so that my score can be identified in the ranking.",
+      "title": "Camera roll on lateral movement",
+      "description": "As a player, I want the canvas to tilt slightly when I swerve left or right so that the car feels like it has physical weight and momentum.",
       "acceptanceCriteria": [
-        "HTML text input element appears as overlay above canvas on gameOverState (positioned absolutely over canvas)",
-        "Placeholder text 'Enter your name' with 15 character limit (maxlength attribute)",
-        "Keyboard input into field does not trigger game controls (arrows, space, enter for retry)",
-        "Player name saved to localStorage key 'roadRushPlayerName' and pre-filled on subsequent visits",
-        "Submit button labeled 'Submit Score' below the input field",
-        "Pressing Enter in the name input submits the score (same as clicking Submit Score button)",
-        "Validation: name must be at least 2 characters; show inline error 'Name too short' if not",
-        "Input and button hidden/removed when transitioning out of gameOverState",
-        "Verify in browser using dev-browser skill: text input visible on game over, typing works, name persists in localStorage"
+        "Track lateral input: left key → target roll = +2.5°, right key → target roll = -2.5°, no key → target roll = 0°",
+        "Actual roll eases toward target using spring interpolation: roll += (target - roll) * 0.12 per frame",
+        "Apply ctx.rotate(roll * Math.PI / 180) around canvas center before all world rendering",
+        "Roll does NOT apply to HUD elements (save/restore ctx around world render, draw HUD after)",
+        "Maximum roll capped at ±3° to prevent disorientation",
+        "Verify in browser using dev-browser skill: visible screen tilt when pressing left/right; HUD stays level"
       ],
       "priority": 6,
       "passes": false,
@@ -116,19 +104,15 @@
     },
     {
       "id": "US-007",
-      "title": "Score submission via webhook POST",
-      "description": "As a player, I want my score automatically submitted to the online ranking so that I can compete with other players.",
+      "title": "Heat haze / road shimmer at high speed",
+      "description": "As a player, I want the road surface to shimmer and distort at high speed so that the game feels like the asphalt is burning up beneath you.",
       "acceptanceCriteria": [
-        "POST to https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0 on Submit Score",
-        "Payload JSON: { name, score, distance, time, causeOfDeath, coinsCollected }",
-        "Track coinsCollected in gameState (increment on each coin pickup, reset in resetGameState)",
-        "causeOfDeath is either 'collision' or 'fuel_empty' depending on how game ended",
-        "Visual feedback: Submit button shows 'Sending...' while awaiting response",
-        "Success state: button replaced with 'Score submitted! ✓' (non-clickable)",
-        "Error state: shows 'Failed to submit. Try again' with button re-enabled for retry",
-        "Submit button disabled after successful submission to prevent duplicates",
-        "Game retry (Enter key) still works even if submission fails or is pending",
-        "Verify in browser using dev-browser skill: score POST succeeds and feedback updates correctly"
+        "At scrollSpeed > 500 px/s: animated horizontal wavy distortion applied to the lower 40% of the canvas (road surface area)",
+        "Implemented by rendering road to offscreen canvas then drawing back with per-band y-offset: sinOffset = Math.sin(time * 3 + y * 0.08) * intensity",
+        "Intensity: 0 below 500 px/s, ramps to max 3px offset at 800 px/s",
+        "The distortion applies only to the road layer — traffic and player are drawn normally on top",
+        "No shimmer during explosionState or gameOverState",
+        "Verify in browser using dev-browser skill: road surface wavy distortion visible at max speed"
       ],
       "priority": 7,
       "passes": false,
@@ -136,19 +120,17 @@
     },
     {
       "id": "US-008",
-      "title": "Ranking display via webhook GET",
-      "description": "As a player, I want to see the top scores from all players on the Game Over screen so that I know how I compare.",
+      "title": "Beat-pulse HUD elements (audio-reactive)",
+      "description": "As a player, I want HUD elements to visually pulse in sync with the music beat so that the game feels unified between audio and visual.",
       "acceptanceCriteria": [
-        "GET to same webhook endpoint to fetch ranking after score submission (or in parallel)",
-        "Ranking rendered on canvas in gameOverState below the stats section",
-        "Displays: rank position, player name, score, distance — for top 10 entries visible initially",
-        "Scroll up/down with arrow keys to see more entries (if more than 10)",
-        "Current player's entry highlighted with a different color (e.g., yellow) based on name match",
-        "Loading state: shows 'Loading ranking...' with animated dots while fetching",
-        "Error state: shows 'Could not load ranking' with a retry option",
-        "Handles empty or malformed GET response gracefully (no crash, shows 'No scores yet')",
-        "Ranking list limited to top 50 entries displayed maximum",
-        "Verify in browser using dev-browser skill: ranking table visible on game over with correct data"
+        "Beat scheduler (already in codebase) fires a beatPulse event or sets a flag lastBeatTime on each kick drum beat",
+        "Score counter and speed indicator scale to 1.08x for 80ms then ease back to 1.0x on each beat",
+        "Nitro meter glows brighter (alpha +0.3 for 80ms) on each beat when nitro is active",
+        "Coin counter bounces scale 1.15x for 60ms when a coin is collected (regardless of beat)",
+        "All pulse animations use exponential decay (not linear) for snappy feel",
+        "Pulse only active during playingState — no pulse on title/game over screens",
+        "Beat sync relies on the AudioContext.currentTime beat scheduler from the musical audio branch — this story adds the visual response hook, not the audio scheduler itself",
+        "Verify in browser using dev-browser skill: HUD elements visibly pulse with the music beat"
       ],
       "priority": 8,
       "passes": false,
@@ -156,18 +138,69 @@
     },
     {
       "id": "US-009",
-      "title": "Audio mix and master bus balancing",
-      "description": "As a player, I want the audio mix to be well-balanced so that no element overpowers another and the overall experience is pleasant.",
+      "title": "Floating pickup text",
+      "description": "As a player, I want to see floating text rise from the point where I collect items so that every pickup feels acknowledged and satisfying.",
       "acceptanceCriteria": [
-        "Volume hierarchy enforced: Beat (kick 0.35/hat 0.12) > Bass (~0.30) > Pad (~0.20) > Arpeggio (~0.15) > SFX (0.25-0.35) > Engine/Road (~0.10 when music playing)",
-        "Crash/explosion SFX duck all musical elements to 0.3x gain for 0.5s using setTargetAtTime",
-        "Add a DynamicsCompressorNode on masterGain → destination as a limiter (threshold -6dB, ratio 10:1, knee 3dB)",
-        "Engine drone volume reduced to ~0.1 (from current level) when musical elements (pad/bass/arpeggio) are active",
-        "All new elements added in US-001–US-005 verified to go through AudioManager.masterGain (mute works)",
-        "No clipping or distortion with all elements playing simultaneously",
-        "Verify in browser using dev-browser skill: full mix sounds balanced with no dominant or inaudible elements"
+        "On coin collect: spawn '+1' (or '+5' for coin clusters) in yellow at the coin's canvas position",
+        "On fuel collect: spawn '+FUEL' in green",
+        "On nitro collect: spawn '+NITRO' in cyan",
+        "On shield collect: spawn '+SHIELD' in blue",
+        "On near-miss (existing system): spawn 'NEAR MISS!' in orange",
+        "Text floats upward 60px over 0.9s, fading from alpha 1.0 to 0 over that duration",
+        "Font: bold 16px, same font family as HUD",
+        "Text is drawn on top of all world elements but below the main HUD panel",
+        "Max 8 simultaneous floating texts (oldest removed if exceeded)",
+        "Verify in browser using dev-browser skill: text visibly rises from collected items and fades out"
       ],
       "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Screen-edge danger flash",
+      "description": "As a player, I want the screen edges to flash red when a dangerous vehicle is approaching so that I get a visceral off-screen threat warning.",
+      "acceptanceCriteria": [
+        "When any traffic vehicle is within 120px of the player's y-position (near-miss proximity): trigger a red edge flash",
+        "Flash: draw a red radial gradient from screen edges inward (rgba(255,0,0,0) center to rgba(255,0,0,0.35) edges) that decays over 0.3s",
+        "Multiple simultaneous vehicles can stack flashes (alpha adds, max 0.5 total)",
+        "Flash does NOT trigger during explosionState (already in explosion, no need)",
+        "Distinct from the existing fuel-warning vignette (this is red with rapid onset, the fuel vignette is slow pulse)",
+        "Verify in browser using dev-browser skill: screen edges flash red when traffic passes close to the player"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Hit stop on major collision",
+      "description": "As a player, I want the game to freeze for a few frames when I crash so that the collision feels heavy and impactful, not instant.",
+      "acceptanceCriteria": [
+        "On transition to explosionState: freeze the game loop update for exactly 3 frames (approx 50ms at 60fps)",
+        "During freeze: update(dt) is not called, but render() continues (screen does not blank)",
+        "After freeze: normal explosionState animation proceeds",
+        "Hit stop is implemented as a hitStopFrames counter: set to 3 on explosion entry, decremented each frame in gameLoop, updates skipped while > 0",
+        "Does NOT affect audio playback (AudioContext continues normally)",
+        "Verify in browser using dev-browser skill: brief freeze visible at moment of explosion before explosion animation plays"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Adaptive HUD opacity",
+      "description": "As a player, I want the HUD to be subtle during normal play and visible only when values are changing so that the road stays my focus.",
+      "acceptanceCriteria": [
+        "All HUD elements (score, speed, fuel, coins) render at 65% opacity during steady state",
+        "When a value changes: that element's opacity ramps to 100% over 100ms, stays for 1.5s, then fades back to 65% over 500ms",
+        "Fuel bar always at 100% opacity when below 30% fuel (critical state override)",
+        "Implemented per-element with hudOpacity trackers that store {value, lastChanged, currentAlpha}",
+        "ctx.globalAlpha is saved/restored around each HUD element draw",
+        "Verify in browser using dev-browser skill: HUD elements are subdued at steady state, brighten when score/fuel changes"
+      ],
+      "priority": 12,
       "passes": false,
       "notes": ""
     }

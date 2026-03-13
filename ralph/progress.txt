@@ -1,86 +1,23 @@
 # Ralph Progress Log
-Started: Fri Mar 13 19:15:22 -03 2026
+Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
 ## Codebase Patterns
-- AudioManager uses long-lived nodes stored as properties (engine, road, nitro, pad, etc.) — start/stop/update triplets follow the same pattern
-- playingState.onEnter/onExit are the canonical hooks for starting/stopping gameplay audio
-- updateBeat() is called every frame in playingState.update; it schedules beats ahead using AudioContext.currentTime (look-ahead scheduling pattern)
-- beat.beatIndex increments once per scheduled beat — use Math.floor(beatIndex / 4) % N for bar-level events
-- All audio nodes must connect through AudioManager.masterGain for mute to work
-- Pad oscillators use `osc.detune` (Web Audio API) to apply cents offset without touching frequency directly
+- gameState is module-scoped (not on window) — browser evaluate can't access it; use screenshots or debug mode (D key) to verify game state
+- ctx.createRadialGradient(cx, cy, r1, cx, cy, r2) is the pattern for vignette overlays — both fuel and speed vignettes use this
+- All visual overlays (vignettes, flashes) use fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT) after setting fillStyle to the gradient
+- Render order in playingState.render(): road → traffic/items → player → particles → overlays → HUD (draw HUD last so overlays don't darken it)
+- The game runs at 60fps fixed timestep (FIXED_DT = 1/60); scrollSpeed ramps from 200 to 800 px/s over the run
 
-## 2026-03-13 - US-001
-- Implemented harmonic chord pad using supersaw timbre (3 detuned sawtooth oscillators per note)
-- Am → F → C → G progression in A minor, chord changes every 4 beats (1 bar), 4-bar loop
-- 3 notes per chord × 3 detuned oscillators = 9 oscillators total, all routed through shared lowpass filter → pad gain → masterGain
-- Chord frequencies placed above 200Hz (A4=440, C5=523, E5=659 etc.) to avoid clashing with engine drone (60-180Hz)
-- Filter cutoff (400→1200Hz) and volume (0.12→0.20) scale with scrollSpeed via updatePad()
-- Chord changes driven by updateBeat() — calls updatePadChord(beatIndex) on each newly scheduled beat
+## 2026-03-13 22:48 - US-001
+- Implemented renderSpeedVignette(ctx): full-canvas radial gradient darkening edges at high speed
+- Alpha: 0 below 300 px/s, linear 0→0.25 from 300–600 px/s, linear 0.25→0.55 from 600–800 px/s
+- Gradient inner radius: CANVAS_HEIGHT*0.25, outer radius: CANVAS_HEIGHT*0.85 (dark edges only)
+- Color: rgba(0,0,0,alpha) — distinct from red fuel-warning vignette in renderFuelHUD()
+- Called in playingState.render() after renderParticles(), before renderFuelHUD() (after world, before HUD)
 - Files changed: src/main.js
 - **Learnings for future iterations:**
-  - The `beat.beatIndex` is incremented inside the while-loop in `updateBeat()` — call `updatePadChord` after the increment to get the latest index
-  - AudioManager is module-level (not exported to window), so browser evaluate can't access it directly; use screenshot to verify visual game state instead
-  - `osc.detune.setValueAtTime(cents, now)` is the correct API for supersaw detuning — no need to compute frequency manually
----
-
-## 2026-03-13 - US-002
-- Implemented procedural arpeggio melody using A minor pentatonic notes matched to each chord in the progression
-- Square wave oscillator + bandpass filter (Q=3, centered at 1.5× fundamental) for lead synth timbre
-- Sub-division adapts to scrollSpeed: t<0.33 → quarter notes (1/beat), t<0.67 → eighth notes (2/beat), else sixteenth notes (4/beat)
-- Pattern type rotates every 8 bars (32 beats): ascending → descending → offset-ascending
-- startArp() syncs scheduledUpTo to beat.scheduledUpTo for tight beat alignment
-- Volume gain ~0.15, lower than kick (0.35) and pad (0.12-0.20)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - The arp scheduler follows the same look-ahead pattern as updateBeat() — maintain a separate scheduledUpTo and noteIndex, schedule inside a while-loop
-  - pad.chordIdx is -1 before the first bar change; guard with `chordIdx < 0 ? 0 : chordIdx` when reading ARPS_BY_CHORD
-  - beat.beatIndex is the global beat counter (not reset per bar), so use Math.floor(beatIndex / 4) to get bar index
-  - subDiv as a stepped value (1/2/4) gives cleaner musical feel than continuous interpolation
----
-
-## 2026-03-13 - US-003
-- Implemented DnB bass line: sawtooth oscillators through lowpass filter (~200Hz) playing chord root notes
-- BASS_ROOTS: [55.0, 87.3, 65.4, 98.0] Hz (A1, F2, C2, G2) — all in 40–100Hz range
-- DnB pattern: main note on bar beat-1, syncopated ghost notes at 2.5 and 3.5 beats (via _scheduleBassBeat called when idx%4===0)
-- Chord index computed as Math.floor(idx/4)%4 (using idx before increment) for correct bar-chord alignment
-- Sidechain duck: setValueAtTime(0.3) + setTargetAtTime(1.0) on bass.gain on every kick beat
-- Per-note gain: 0.3 for main (vel=1.0×0.3), 0.15 for ghosts (vel=0.5×0.3), matching "gain ~0.3" spec
-- bass.gain is master passthrough node for sidechain automation; per-note gains hold the ADSR envelope
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Bass chord index must be computed with Math.floor(idx/4)%4 (not this.pad.chordIdx) because pad.chordIdx updates after the increment
-  - setValueAtTime + setTargetAtTime on a shared gain node enables sidechain ducking without extra nodes
-  - _scheduleBassNote guards on this.bass.gain to safely ignore notes scheduled after stopBass()
----
-
-## 2026-03-13 - US-004
-- Implemented musical pickup SFX using current chord/scale for all pickup types
-- Coin: steps through ARPS_BY_CHORD[chordIdx] notes using coinSeq.count as index (ascending arpeggio per cluster)
-- Fuel: major triad chord — root + major 3rd (+4 semitones) + 5th (+7 semitones) from PAD_CHORDS[chordIdx][0]
-- Nitro: sawtooth sweep from A3 (220Hz) to A4 (440Hz, the tonic) — always resolves to tonic
-- Shield: two sines at root and perfect 5th (root × 1.5) from current chord, with 8Hz LFO tremolo via gainNode modulation
-- Near miss: short sine at G#4 (415.3Hz, one semitone below tonic A4), 0.05s
-- Combo: power chord (root + 5th) using arp notes by chord, stepping up per combo level
-- All SFX reference this.pad.chordIdx for harmonic alignment; guard with `chordIdx < 0 ? 0 : chordIdx`
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - LFO tremolo: connect LFO oscillator → gainNode (depth) → target AudioParam (e.g. gain.gain) to modulate
-  - When multiple oscillators share a gain node, track endedCount to disconnect gain only after all oscs end
-  - PAD_CHORDS[chordIdx][0] is the chord root frequency (A4, F4, C4, G4 for Am/F/C/G)
-  - ARPS_BY_CHORD[chordIdx] gives harmonically correct pentatonic notes for the current chord — use for SFX note selection
----
-
-## 2026-03-13 - US-005
-- Implemented 4 musical state transitions:
-  1. Title→Playing riser: 1s white noise sweep (highpass 200→8000Hz) + crescendo (0→0.15 gain), called in titleState.update() before transition
-  2. Collision tape-stop: pad oscillator frequencies ramp to 20% over 0.3s, gain fades out; beat/arp/bass stop immediately; called before fsm.transition(explosionState)
-  3. Game Over dim chord: A diminished chord (A2=110Hz, C3=130.8Hz, Eb3=155.6Hz) added to startGameOverDrone(), fades in 0.3s then resolves over ~2s via setTargetAtTime
-  4. Retry drum roll: 4 rapid kicks at 75ms intervals (0.3s total), called in gameOverState.update() before fsm.transition(playingState)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - playTapeStop() must null out pad.noteGroups/filter/gain and set pad.active=false so stopPad() in playingState.onExit() becomes a no-op (guard: `if (!this.pad.active) return`)
-  - osc.frequency.value gives current frequency at the moment of the call — use this to start an exponentialRamp from the current playback frequency
-  - Diminished chord resolving: linearRamp to peak then setTargetAtTime(0, peakTime, timeConstant) creates the "resolving" envelope
-  - _scheduleKick() works without the beat scheduler running — can be called directly with AudioContext.currentTime + offset for drum fills
+  - renderFuelHUD() already contains a red radial vignette for low fuel — the speed vignette is additive on top of it
+  - gameState.scrollSpeed (not getEffectiveScrollSpeed()) is used for the vignette to reflect base road speed, not nitro-boosted speed
+  - Browser MCP context can close unexpectedly during keyboard interactions; retry navigation if this occurs
 ---
