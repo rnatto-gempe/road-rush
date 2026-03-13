@@ -25,6 +25,10 @@ const PLAYER_MAX_SPEED = 400; // px/s
 const SHAKE_DURATION = 0.5; // seconds
 const SHAKE_INTENSITY = 10; // max px offset
 
+// Graded collision constants
+const INVULN_DURATION = 1.5; // seconds of invulnerability after any collision
+const BLINK_INTERVAL = 0.1; // seconds per blink toggle during invulnerability
+
 // Scroll speed ramp constants
 const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
 const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
@@ -76,6 +80,13 @@ const VEHICLE_TYPES = {
 
 // Debug mode
 let debugMode = false;
+
+// Graded collision state
+let speedPenaltyMultiplier = 1.0; // multiplicative speed reduction factor (1.0 = no penalty)
+let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
+let invulnTimer = 0;              // remaining invulnerability seconds after collision
+let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
+const particles = [];             // spark particles
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -164,10 +175,96 @@ const fsm = {
 };
 
 // --- Screen Shake ---
-const shake = { time: 0 };
+const shake = { time: 0, intensity: SHAKE_INTENSITY };
 
-function triggerShake() {
-  shake.time = SHAKE_DURATION;
+function triggerShake(duration, intensity) {
+  if (duration !== undefined) {
+    // Custom shake: borrow the shake object but track separately
+    shake.time = duration;
+    shake.intensity = intensity !== undefined ? intensity : SHAKE_INTENSITY;
+  } else {
+    shake.time = SHAKE_DURATION;
+    shake.intensity = SHAKE_INTENSITY;
+  }
+}
+
+// Returns scroll speed with active penalty applied
+function getEffectiveScrollSpeed() {
+  return gameState.scrollSpeed * speedPenaltyMultiplier;
+}
+
+// Apply a multiplicative speed penalty; overwrites if the new penalty is stronger
+function applySpeedPenalty(factor, duration) {
+  if (factor < speedPenaltyMultiplier || speedPenaltyTimer <= 0) {
+    speedPenaltyMultiplier = factor;
+    speedPenaltyTimer = duration;
+  }
+}
+
+// Spawn spark particles at (x, y), count 4-8
+function spawnSparks(x, y, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() * 2 - 1) * 180,
+      vy: (Math.random() * 2 - 1) * 120,
+      life: 0.2,
+      maxLife: 0.2,
+      color: Math.random() < 0.5 ? '#FFC107' : '#FF6F00',
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function renderParticles(ctx) {
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Handle a vehicle collision — classify lateral vs frontal, apply graded effects
+function handleVehicleCollision(v) {
+  const player = gameState.player;
+  const relativeVy = getEffectiveScrollSpeed() - v.ownSpeed; // approach speed on screen
+  const isLateral = Math.abs(player.vx) > Math.abs(relativeVy) * 0.5;
+
+  // Spark position: center of the overlap area
+  const sparkX = player.x + PLAYER_WIDTH / 2;
+  const sparkY = player.y + PLAYER_HEIGHT / 2;
+
+  if (isLateral) {
+    // Glancing blow: 20% speed reduction 0.8s + yellow sparks
+    applySpeedPenalty(0.8, 0.8);
+    spawnSparks(sparkX, sparkY, 4 + Math.floor(Math.random() * 5));
+  } else {
+    // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
+    if (gameState.scrollSpeed > 600) {
+      triggerShake();
+      fsm.transition(gameOverState);
+      return;
+    }
+    applySpeedPenalty(0.6, 1.5);
+    redFlash.alpha = 0.2;
+    triggerShake(0.3, 6);
+  }
+
+  // Start invulnerability window
+  invulnTimer = INVULN_DURATION;
 }
 
 // --- Game State (shared) ---
@@ -198,6 +295,12 @@ function resetGameState() {
   gameState.traffic = [];
   // Use t=0 spawn config: min=1200, max=1600
   gameState.nextSpawnDistance = 1200 + Math.random() * 400;
+  // Reset collision state
+  speedPenaltyMultiplier = 1.0;
+  speedPenaltyTimer = 0;
+  invulnTimer = 0;
+  redFlash.alpha = 0;
+  particles.length = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -211,6 +314,12 @@ function updateScrollSpeed(dt) {
   } else {
     // Phase 2: incremental ramp
     gameState.scrollSpeed = Math.min(gameState.scrollSpeed + SPEED_RAMP_PHASE2_RATE * dt, SPEED_MAX);
+  }
+
+  // Tick speed penalty timer
+  if (speedPenaltyTimer > 0) {
+    speedPenaltyTimer = Math.max(0, speedPenaltyTimer - dt);
+    if (speedPenaltyTimer === 0) speedPenaltyMultiplier = 1.0;
   }
 }
 
@@ -309,18 +418,30 @@ function updatePlayer(dt) {
 
   player.x += player.vx * dt;
 
-  // Constrain within road borders
+  // Constrain within road borders — detect border collision
+  let borderHit = false;
   if (player.x < ROAD_LEFT) {
     player.x = ROAD_LEFT;
-    player.vx = 0;
+    if (player.vx < 0) { player.vx = 0; borderHit = true; }
   }
   if (player.x + PLAYER_WIDTH > ROAD_RIGHT) {
     player.x = ROAD_RIGHT - PLAYER_WIDTH;
-    player.vx = 0;
+    if (player.vx > 0) { player.vx = 0; borderHit = true; }
+  }
+
+  if (borderHit && invulnTimer <= 0) {
+    applySpeedPenalty(0.7, 1.0); // 30% speed reduction for 1s
+    invulnTimer = INVULN_DURATION;
   }
 }
 
 function renderPlayer(ctx, player) {
+  // Blink every BLINK_INTERVAL seconds during invulnerability
+  if (invulnTimer > 0) {
+    const blinkPhase = Math.floor(invulnTimer / BLINK_INTERVAL) % 2;
+    if (blinkPhase === 1) return; // skip rendering this blink frame
+  }
+
   const { x, y, width, height } = player;
 
   // Car body
@@ -551,7 +672,7 @@ function updateTraffic(dt) {
   // Update each vehicle
   for (const v of gameState.traffic) {
     const type = VEHICLE_TYPES[v.type];
-    const visualSpeed = gameState.scrollSpeed - v.ownSpeed;
+    const visualSpeed = getEffectiveScrollSpeed() - v.ownSpeed;
     v.y += visualSpeed * dt;
 
     // Lane-change behavior for sports car and motorcycle
@@ -683,21 +804,30 @@ const playingState = {
   update(dt) {
     gameState.elapsedTime += dt;
     updateScrollSpeed(dt);
-    gameState.scrollOffset += gameState.scrollSpeed * dt;
-    gameState.distanceTraveled += gameState.scrollSpeed * dt;
+    const effSpeed = getEffectiveScrollSpeed();
+    gameState.scrollOffset += effSpeed * dt;
+    gameState.distanceTraveled += effSpeed * dt;
 
     if (consumeKey('d') || consumeKey('D')) debugMode = !debugMode;
 
     updatePlayer(dt);
     updateTraffic(dt);
+    updateParticles(dt);
 
-    // AABB collision detection
-    const ph = getPlayerHitbox(gameState.player);
-    for (const v of gameState.traffic) {
-      if (aabbOverlap(ph, getVehicleHitbox(v))) {
-        triggerShake();
-        fsm.transition(gameOverState);
-        return;
+    // Tick invulnerability timer
+    if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
+
+    // Fade red flash
+    if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
+
+    // AABB collision detection — only when not invulnerable
+    if (invulnTimer <= 0) {
+      const ph = getPlayerHitbox(gameState.player);
+      for (const v of gameState.traffic) {
+        if (aabbOverlap(ph, getVehicleHitbox(v))) {
+          handleVehicleCollision(v);
+          return;
+        }
       }
     }
   },
@@ -706,6 +836,13 @@ const playingState = {
     renderRoad(ctx, gameState.scrollOffset);
     renderTraffic(ctx);
     renderPlayer(ctx, gameState.player);
+    renderParticles(ctx);
+
+    // Red flash overlay on frontal collision
+    if (redFlash.alpha > 0) {
+      ctx.fillStyle = `rgba(255, 0, 0, ${redFlash.alpha})`;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
 
     // Show elapsed time overlay
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -719,13 +856,14 @@ const playingState = {
       renderFairnessDebug(ctx);
       ctx.fillStyle = 'rgba(255,255,0,0.85)';
       ctx.font = '12px monospace';
-      ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s`, 8, 26);
+      ctx.fillText(`Speed: ${gameState.scrollSpeed.toFixed(0)} px/s (eff: ${getEffectiveScrollSpeed().toFixed(0)})`, 8, 26);
       ctx.fillText(`Dist: ${(gameState.distanceTraveled / 100).toFixed(0)}m`, 8, 42);
       ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 58);
+      ctx.fillText(`Invuln: ${invulnTimer.toFixed(1)}s`, 8, 74);
       // Type breakdown
       const counts = {};
       for (const v of gameState.traffic) counts[v.type] = (counts[v.type] || 0) + 1;
-      let y = 74;
+      let y = 90;
       for (const [type, count] of Object.entries(counts)) {
         ctx.fillText(`  ${type}: ${count}`, 8, y);
         y += 14;
@@ -808,7 +946,7 @@ function gameLoop(timestamp) {
   ctx.save();
   if (shake.time > 0) {
     const progress = shake.time / SHAKE_DURATION;
-    const amount = SHAKE_INTENSITY * progress;
+    const amount = shake.intensity * progress;
     ctx.translate(
       (Math.random() * 2 - 1) * amount,
       (Math.random() * 2 - 1) * amount
