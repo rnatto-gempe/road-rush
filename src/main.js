@@ -138,8 +138,11 @@ const speedLineData = (() => {
   return data;
 })();
 
-// Explosion effects for fatal death: 3 expanding rings
-const explosions = []; // {x, y, timer, maxTimer}
+// Explosion effects (deprecated — kept for array cleanup in resetGameState)
+const explosions = []; // no longer used; shockwaveRings replaces this
+
+// Shockwave ring system for cinematic explosion
+const shockwaveRings = []; // {x, y, elapsed, duration, maxRadius, startOffset}
 
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
@@ -355,37 +358,26 @@ function spawnSparks(x, y, count) {
   }
 }
 
-function spawnExplosion(x, y) {
-  explosions.push({ x, y, timer: 0.5, maxTimer: 0.5 });
-}
+function spawnExplosion(x, y) {} // deprecated — replaced by shockwave ring system
 
-function updateExplosions(dt) {
-  for (let i = explosions.length - 1; i >= 0; i--) {
-    explosions[i].timer -= dt;
-    if (explosions[i].timer <= 0) explosions.splice(i, 1);
-  }
-}
-
-// Three concentric rings expand outward from the blast center
-function renderExplosions(ctx) {
-  if (explosions.length === 0) return;
+function renderShockwaveRings(ctx) {
+  if (shockwaveRings.length === 0) return;
+  const ringColors = ['#FFFFFF', '#FFF176', '#FF7043', '#E53935'];
   ctx.save();
-  for (const ex of explosions) {
-    const progress = 1 - ex.timer / ex.maxTimer; // 0→1 as rings expand
-    for (let ring = 0; ring < 3; ring++) {
-      const startAt = ring * 0.18; // stagger ring starts: 0, 0.18, 0.36
-      if (progress < startAt) continue;
-      const ringProgress = Math.min(1, (progress - startAt) / (1.0 - startAt));
-      const maxR = 40 + ring * 25; // 40, 65, 90px max radii
-      const radius = ringProgress * maxR;
-      const alpha = (1 - ringProgress) * 0.85;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3 - ring * 0.5;
-      ctx.beginPath();
-      ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+  for (const ring of shockwaveRings) {
+    const rawProgress = (ring.elapsed - ring.startOffset) / ring.duration;
+    if (rawProgress <= 0) continue;
+    const p = Math.min(1, rawProgress);
+    const radius = p * ring.maxRadius;
+    const alpha = 1 - p;
+    const lineWidth = Math.max(1, 4 * (1 - p));
+    const colorIdx = Math.min(3, Math.floor(p * ringColors.length));
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = ringColors[colorIdx];
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -590,6 +582,7 @@ function resetGameState() {
   shieldBreakFlash = 0;
   // Reset VFX
   explosions.length = 0;
+  shockwaveRings.length = 0;
   playerVisible = true;
 }
 
@@ -1938,10 +1931,25 @@ const explosionState = {
         size: 2 + Math.random() * 6,
       });
     }
+    // Initialize shockwave rings (4 concentric, staggered start offsets)
+    shockwaveRings.length = 0;
+    const maxRadii = [120, 140, 160, 180];
+    const startOffsets = [0, 0.25, 0.5, 0.75];
+    for (let i = 0; i < 4; i++) {
+      shockwaveRings.push({
+        x: this.originX,
+        y: this.originY,
+        elapsed: 0,
+        duration: 1.2,
+        maxRadius: maxRadii[i],
+        startOffset: startOffsets[i],
+      });
+    }
   },
 
   update(dt) {
     this.timer -= dt;
+    for (const ring of shockwaveRings) ring.elapsed += dt;
     updateParticles(dt);
     if (this.timer <= 0) {
       gameOverState.finalTime = this.finalTime;
@@ -1957,6 +1965,7 @@ const explosionState = {
     renderRoad(ctx, gameState.scrollOffset);
     renderTraffic(ctx);
     // No renderPlayer (car hidden), no collectibles
+    renderShockwaveRings(ctx);
     renderParticles(ctx);
   },
 };
@@ -1989,7 +1998,6 @@ const gameOverState = {
 
   update(dt) {
     this.pulseTime += dt;
-    updateExplosions(dt);
     if (consumeKey('Enter')) {
       resetGameState();
       fsm.transition(playingState);
@@ -2000,9 +2008,6 @@ const gameOverState = {
     // Dark background
     ctx.fillStyle = '#0A0A1A';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Explosion rings from fatal death (visible for 0.5s after transition)
-    renderExplosions(ctx);
 
     // GAME OVER text
     ctx.fillStyle = '#E53935';
