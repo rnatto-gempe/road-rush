@@ -1,3 +1,22 @@
+## 2026-03-13 - US-016
+- Added module-level `ddaCleanTimer` (secs since last collision) and `ddaSpawnRate` (1.0→1.5 cap) state vars
+- `ddaCleanTimer += dt` in `playingState.update()` with while-loop: every 10s → `ddaSpawnRate = min(1.5, rate + 0.05)`
+- Partial reset on any collision (vehicle or border hit): `ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5; ddaCleanTimer = 0`
+- Full reset in `resetGameState()` on game over / retry
+- Traffic spawn distance: `rawInterval / (ddaSpawnRate * ddaComboMul)` where `ddaComboMul = 0.9` when `comboMultiplier >= 3`
+- Fuel spawn distance: multiplied by `ddaFuelMul = 1.2` when `gameState.fuel > 70`
+- Fairness constraint (US-009) unaffected — DDA only adjusts spawn interval, `isFairToSpawn` still gates every spawn
+- Debug overlay: `DDA rate: x1.XX (Ns clean)` always shown; `DDA combo: x0.9` when combo >= 3; `DDA fuel: x1.2` when fuel > 70
+- Verified in browser: at t=24.2s debug shows `x1.01 (6s clean)` and fuel multiplier active at fuel=80; build 18.47 kB
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - DDA clean timer resets on collision (not pauses) — ensures the "+5% per 10s" measures true collision-free stretches
+  - `while (ddaCleanTimer >= 10) { ddaCleanTimer -= 10; ddaSpawnRate += 0.05 }` handles rare edge case of skipped frames accumulating >20s in one tick
+  - DDA partial reset formula: `1.0 + (current - 1.0) * 0.5` preserves baseline of 1.0 while halving accumulated bonus
+  - Fairness constraint naturally "wins" since DDA only changes interval — if fairness blocks a spawn, the interval still moves forward on next fair opportunity
+  - Combo DDA effect (`ddaComboMul`) is stateless (computed inline from `comboMultiplier`) — no extra state needed
+---
+
 ## 2026-03-13 - US-015
 - Added `NEAR_MISS_DIST=20`, `NEAR_MISS_BASE_POINTS=50`, `NEAR_MISS_FLASH_DURATION=0.3`, `COMBO_RESET_TIME=3.0`, `COMBO_SCALE_DURATION=0.2` constants
 - Added module-level `comboMultiplier`, `comboResetTimer`, `comboScaleTimer` state
@@ -179,6 +198,7 @@
 - `gameOverState.causeOfDeath` must be set BEFORE `fsm.transition(gameOverState)`
 - Near miss tracking: add `minDistX: Infinity, nearMissChecked: false, nearMissFlash: null` to each vehicle; track horiz gap during vertical sprite overlap; check once when `v.y > player.y + PLAYER_HEIGHT`; gate with `nearMissChecked` flag
 - Combo system: `comboMultiplier` starts at 1, increments on near miss; display only when >= 2; `comboResetTimer` countdown for 3s timeout + fade; reset to 1 on collision or timeout
+- DDA: `ddaCleanTimer` + `ddaSpawnRate` (1.0–1.5); +5% per 10s clean play; partial reset on collision halves bonus: `1.0 + (rate - 1.0) * 0.5`; applied at spawn time by dividing raw interval; fuel distance x1.2 when fuel > 70%; fairness constraint unaffected
 
 ---
 

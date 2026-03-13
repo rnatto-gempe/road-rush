@@ -288,7 +288,7 @@
         "Verify in browser: toggle debug, confirm DDA values increase during clean play, partially reset on hit"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "DDA is the 'invisible hand' that ensures skilled players still die. Cap prevents it from creating impossible situations. Partial reset on collision gives breathing room without fully removing pressure."
     },
     {
