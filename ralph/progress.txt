@@ -1,0 +1,42 @@
+# Ralph Progress Log
+Started: Fri Mar 13 15:11:23 -03 2026
+
+## Codebase Patterns
+- Single-file pure JS + HTML5 Canvas game in `src/main.js` (~2019 lines)
+- FSM states are `const` objects with `onEnter()`, `update(dt)`, `render(ctx)` methods
+- States reference each other via closure (forward references work since methods are called at runtime)
+- Module-level variables hold game state (particles[], traffic[], gameState, etc.)
+- `resetGameState()` must reset ALL module-level state introduced by new features
+
+---
+
+## 2026-03-13T18:19:31 - US-001
+- Implemented `explosionState` FSM state object before `gameOverState` in src/main.js
+- Wired fatal collision (`scrollSpeed > 600`) in `handleVehicleCollision()` to transition to `explosionState` instead of `gameOverState`; removed old `spawnExplosion()` call
+- `explosionState.onEnter()` captures origin, saves final stats, sets timer=2.0s, sets `playerVisible=false`
+- `explosionState.update(dt)` decrements timer; on 0, pre-sets stats on `gameOverState` and transitions
+- `explosionState.render(ctx)` renders frozen world (road + traffic only, no player, no collectibles)
+- Added `playerVisible` module-level variable; reset to `true` in `resetGameState()`
+- Added `statsPreset` flag to `gameOverState`; `onEnter()` skips stat capture if preset (collision death), resets flag after use
+- Fuel empty death path unchanged: transitions directly to `gameOverState` which captures stats normally
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `explosionState` is at ~line 1901, `gameOverState` at ~line 1938 in the updated file
+  - `playerVisible` flag is module-level (line ~199); `explosionState.onEnter()` sets it false, `resetGameState()` sets it true
+  - US-002 should clear `particles[]` in `explosionState.onEnter()` and spawn fire/debris particles
+  - US-003 should add `shockwaveRings[]` and remove old `spawnExplosion()`/`updateExplosions()`/`renderExplosions()` functions + `gameOverState` calls to them
+
+## 2026-03-13T18:23:55 - US-002 through US-007
+- US-002: Spawned 40 fire/debris particles in explosionState.onEnter() (30% debris, 70% fire colors), cleared pre-existing particles. Added updateParticles/renderParticles calls to explosionState.
+- US-003: Added shockwaveRings[] array; implemented renderShockwaveRings(); deprecated old spawnExplosion/updateExplosions/renderExplosions; removed those calls from gameOverState; added shockwaveRings reset in resetGameState.
+- US-004: Added screenFlashAlpha to explosionState; fades from 1.0 over 0.2s; white fullscreen rect rendered after all effects; reset in resetGameState.
+- US-005: In onEnter(), vehicles within 120px marked as scattered with outward velocity, spin rate, alpha=1.0. In update(), scattered vehicles move/spin/fade over 1.5s. Modified renderTraffic() to skip scattered vehicles; added separate scattered vehicle render pass with ctx.save/translate/rotate.
+- US-006: Added fadeInAlpha and textAlpha to explosionState. fadeIn starts at 1.0s elapsed (0.9s ramp); text starts at 1.2s elapsed (0.8s ramp). Added dark overlay + game over text render in explosionState.render(). isNewBest/bestScore computed in onEnter() and passed to gameOverState. gameOverState.onEnter() skips best score computation when statsPreset.
+- US-007: Added resetGameState() resets for shockwaveRings, playerVisible, screenFlashAlpha, fadeInAlpha, textAlpha, timer. traffic=[] already clears scattered flags. Verified all state properly cleaned on retry.
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - vehicles don't have a `color` property — color is type-based; use `typeColors` lookup for custom renders
+  - `renderTraffic()` now skips vehicles with `v.scattered = true`
+  - explosionState.onEnter() both computes best score and stores to localStorage (gameOverState.onEnter() skips this when statsPreset)
+  - resetGameState() references explosionState by name — works because it's called at runtime, not parse time
+---

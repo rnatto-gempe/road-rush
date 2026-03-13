@@ -138,8 +138,11 @@ const speedLineData = (() => {
   return data;
 })();
 
-// Explosion effects for fatal death: 3 expanding rings
-const explosions = []; // {x, y, timer, maxTimer}
+// Explosion effects (deprecated — kept for array cleanup in resetGameState)
+const explosions = []; // no longer used; shockwaveRings replaces this
+
+// Shockwave ring system for cinematic explosion
+const shockwaveRings = []; // {x, y, elapsed, duration, maxRadius, startOffset}
 
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
@@ -196,6 +199,7 @@ let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
 const particles = [];             // spark particles
+let playerVisible = true;         // set to false during explosion sequence
 
 // Post-collision spawn pause (US-014)
 let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
@@ -354,37 +358,26 @@ function spawnSparks(x, y, count) {
   }
 }
 
-function spawnExplosion(x, y) {
-  explosions.push({ x, y, timer: 0.5, maxTimer: 0.5 });
-}
+function spawnExplosion(x, y) {} // deprecated — replaced by shockwave ring system
 
-function updateExplosions(dt) {
-  for (let i = explosions.length - 1; i >= 0; i--) {
-    explosions[i].timer -= dt;
-    if (explosions[i].timer <= 0) explosions.splice(i, 1);
-  }
-}
-
-// Three concentric rings expand outward from the blast center
-function renderExplosions(ctx) {
-  if (explosions.length === 0) return;
+function renderShockwaveRings(ctx) {
+  if (shockwaveRings.length === 0) return;
+  const ringColors = ['#FFFFFF', '#FFF176', '#FF7043', '#E53935'];
   ctx.save();
-  for (const ex of explosions) {
-    const progress = 1 - ex.timer / ex.maxTimer; // 0→1 as rings expand
-    for (let ring = 0; ring < 3; ring++) {
-      const startAt = ring * 0.18; // stagger ring starts: 0, 0.18, 0.36
-      if (progress < startAt) continue;
-      const ringProgress = Math.min(1, (progress - startAt) / (1.0 - startAt));
-      const maxR = 40 + ring * 25; // 40, 65, 90px max radii
-      const radius = ringProgress * maxR;
-      const alpha = (1 - ringProgress) * 0.85;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3 - ring * 0.5;
-      ctx.beginPath();
-      ctx.arc(ex.x, ex.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+  for (const ring of shockwaveRings) {
+    const rawProgress = (ring.elapsed - ring.startOffset) / ring.duration;
+    if (rawProgress <= 0) continue;
+    const p = Math.min(1, rawProgress);
+    const radius = p * ring.maxRadius;
+    const alpha = 1 - p;
+    const lineWidth = Math.max(1, 4 * (1 - p));
+    const colorIdx = Math.min(3, Math.floor(p * ringColors.length));
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = ringColors[colorIdx];
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -482,24 +475,10 @@ function handleVehicleCollision(v) {
   ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
   ddaCleanTimer = 0;
 
-  if (isLateral) {
-    // Glancing blow: 20% speed reduction 0.8s + yellow sparks + light shake
-    applySpeedPenalty(0.8, 0.8);
-    spawnSparks(sparkX, sparkY, 4 + Math.floor(Math.random() * 5));
-    triggerShake(0.15, 2);
-  } else {
-    // Frontal: fatal at speed > 600, else 40% reduction 1.5s + red flash + shake
-    if (gameState.scrollSpeed > 600) {
-      triggerShake(0.5, 10); // full death shake
-      spawnExplosion(sparkX, sparkY); // expanding rings on fatal death
-      gameOverState.causeOfDeath = '';
-      fsm.transition(gameOverState);
-      return;
-    }
-    applySpeedPenalty(0.6, 1.5);
-    redFlash.alpha = 0.2;
-    triggerShake(0.3, 6);
-  }
+  // Any collision is fatal — trigger explosion immediately
+  triggerShake(0.5, 10);
+  fsm.transition(explosionState);
+  return;
 
   // Start invulnerability window + spawn pause
   invulnTimer = INVULN_DURATION;
@@ -591,6 +570,12 @@ function resetGameState() {
   shieldBreakFlash = 0;
   // Reset VFX
   explosions.length = 0;
+  shockwaveRings.length = 0;
+  playerVisible = true;
+  explosionState.screenFlashAlpha = 0;
+  explosionState.fadeInAlpha = 0;
+  explosionState.textAlpha = 0;
+  explosionState.timer = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1106,6 +1091,7 @@ function updateTraffic(dt) {
 
 function renderTraffic(ctx) {
   for (const v of gameState.traffic) {
+    if (v.scattered) continue; // scattered vehicles rendered separately with rotation
     if (v.type === 'truck') {
       ctx.fillStyle = '#616161';
       ctx.beginPath();
@@ -1895,6 +1881,200 @@ const playingState = {
   },
 };
 
+// --- Explosion State ---
+// Orchestrates the cinematic explosion sequence after a fatal collision.
+// Renders the frozen game world for 2.0s before transitioning to gameOverState.
+const explosionState = {
+  originX: 0,
+  originY: 0,
+  timer: 0,
+  finalTime: 0,
+  finalDistance: 0,
+  finalScore: 0,
+  isNewBest: false,
+  bestScore: 0,
+  screenFlashAlpha: 0,
+  fadeInAlpha: 0,
+  textAlpha: 0,
+
+  onEnter() {
+    this.originX = gameState.player.x + PLAYER_WIDTH / 2;
+    this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
+    this.timer = 2.0;
+    this.screenFlashAlpha = 1.0;
+    this.fadeInAlpha = 0;
+    this.textAlpha = 0;
+    playerVisible = false;
+    this.finalTime = gameState.elapsedTime;
+    this.finalDistance = gameState.distanceTraveled;
+    this.finalScore = Math.floor(gameState.score);
+    const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
+    this.isNewBest = this.finalScore > stored;
+    this.bestScore = this.isNewBest ? this.finalScore : stored;
+    if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
+    // Clear any pre-existing particles (e.g. nitro trail)
+    particles.length = 0;
+    // Spawn 40 fire/debris particles from explosion origin
+    const fireColors = ['#FFF176', '#FFB74D', '#FF7043', '#E53935'];
+    const debrisColors = ['#757575', '#4E342E'];
+    for (let i = 0; i < 40; i++) {
+      const isDebris = Math.random() < 0.3;
+      const color = isDebris
+        ? debrisColors[Math.floor(Math.random() * debrisColors.length)]
+        : fireColors[Math.floor(Math.random() * fireColors.length)];
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 200 + Math.random() * 200;
+      const maxLife = 0.8 + Math.random() * 0.7;
+      particles.push({
+        x: this.originX,
+        y: this.originY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: maxLife,
+        maxLife,
+        color,
+        size: 2 + Math.random() * 6,
+      });
+    }
+    // Initialize shockwave rings (4 concentric, staggered start offsets)
+    shockwaveRings.length = 0;
+    const maxRadii = [120, 140, 160, 180];
+    const startOffsets = [0, 0.25, 0.5, 0.75];
+    for (let i = 0; i < 4; i++) {
+      shockwaveRings.push({
+        x: this.originX,
+        y: this.originY,
+        elapsed: 0,
+        duration: 1.2,
+        maxRadius: maxRadii[i],
+        startOffset: startOffsets[i],
+      });
+    }
+    // Mark nearby traffic vehicles as scattered
+    const scatterRadius = 120;
+    for (const v of gameState.traffic) {
+      const vcx = v.x + v.width / 2;
+      const vcy = v.y + v.height / 2;
+      const dx = vcx - this.originX;
+      const dy = vcy - this.originY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < scatterRadius) {
+        const proximity = 1 - dist / scatterRadius; // 1 = closest, 0 = edge
+        const speed = 150 + proximity * 150; // 150-300 px/s
+        const len = dist < 1 ? 1 : dist;
+        v.scattered = true;
+        v.scatterVx = (dx / len) * speed;
+        v.scatterVy = (dy / len) * speed;
+        v.scatterRotation = 0;
+        v.scatterSpinRate = (Math.random() - 0.5) * 8; // radians/s
+        v.scatterAlpha = 1.0;
+      }
+    }
+  },
+
+  update(dt) {
+    this.timer -= dt;
+    for (const ring of shockwaveRings) ring.elapsed += dt;
+    updateParticles(dt);
+    if (this.screenFlashAlpha > 0) {
+      this.screenFlashAlpha = Math.max(0, this.screenFlashAlpha - dt / 0.2);
+    }
+    // Update scattered vehicles
+    for (const v of gameState.traffic) {
+      if (v.scattered) {
+        v.x += v.scatterVx * dt;
+        v.y += v.scatterVy * dt;
+        v.scatterRotation += v.scatterSpinRate * dt;
+        v.scatterAlpha = Math.max(0, v.scatterAlpha - dt / 1.5);
+      }
+    }
+    if (this.timer <= 0) {
+      gameOverState.finalTime = this.finalTime;
+      gameOverState.finalDistance = this.finalDistance;
+      gameOverState.finalScore = this.finalScore;
+      gameOverState.isNewBest = this.isNewBest;
+      gameOverState.bestScore = this.bestScore;
+      gameOverState.statsPreset = true;
+      gameOverState.causeOfDeath = '';
+      fsm.transition(gameOverState);
+    }
+    // Fade in dark overlay and text after 1.0s elapsed (timer < 1.0)
+    const elapsed = 2.0 - this.timer;
+    if (elapsed >= 1.0) {
+      this.fadeInAlpha = Math.min(1, this.fadeInAlpha + dt / 0.9);
+    }
+    if (elapsed >= 1.2) {
+      this.textAlpha = Math.min(1, this.textAlpha + dt / 0.8);
+    }
+  },
+
+  render(ctx) {
+    renderRoad(ctx, gameState.scrollOffset);
+    // Render non-scattered traffic normally
+    renderTraffic(ctx);
+    // Render scattered vehicles with rotation and alpha on top
+    ctx.save();
+    for (const v of gameState.traffic) {
+      if (!v.scattered) continue;
+      const cx = v.x + v.width / 2;
+      const cy = v.y + v.height / 2;
+      const typeColors = { truck: '#616161', sedan: '#1E88E5', sports: '#B71C1C', moto: '#FFC107' };
+      ctx.save();
+      ctx.globalAlpha = v.scatterAlpha;
+      ctx.translate(cx, cy);
+      ctx.rotate(v.scatterRotation);
+      ctx.fillStyle = typeColors[v.type] || '#888888';
+      ctx.fillRect(-v.width / 2, -v.height / 2, v.width, v.height);
+      ctx.restore();
+    }
+    ctx.restore();
+    // No renderPlayer (car hidden), no collectibles
+    renderShockwaveRings(ctx);
+    renderParticles(ctx);
+    // Screen flash: white overlay fading over ~0.2s
+    if (this.screenFlashAlpha > 0) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.globalAlpha = this.screenFlashAlpha;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.globalAlpha = 1;
+    }
+    // Dark overlay fading in from 1.0s elapsed
+    if (this.fadeInAlpha > 0) {
+      ctx.fillStyle = '#0A0A1A';
+      ctx.globalAlpha = this.fadeInAlpha;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.globalAlpha = 1;
+    }
+    // Game over text fading in from 1.2s elapsed
+    if (this.textAlpha > 0) {
+      ctx.globalAlpha = this.textAlpha;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#E53935';
+      ctx.font = 'bold 44px monospace';
+      ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '18px monospace';
+      const meters = (this.finalDistance / 100).toFixed(0);
+      ctx.fillText(`Time: ${this.finalTime.toFixed(1)}s`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+      ctx.fillText(`Distance: ${meters}m`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 14);
+      ctx.fillStyle = this.isNewBest ? '#FFD700' : '#FFFFFF';
+      ctx.font = 'bold 22px monospace';
+      ctx.fillText(`Score: ${this.finalScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 48);
+      if (this.isNewBest) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillText('NEW BEST!', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '14px monospace';
+        ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
+      }
+      ctx.globalAlpha = 1;
+    }
+  },
+};
+
 // --- GameOver State ---
 const gameOverState = {
   pulseTime: 0,
@@ -1904,21 +2084,25 @@ const gameOverState = {
   bestScore: 0,
   isNewBest: false,
   causeOfDeath: '', // set by caller before transition; '' = collision
+  statsPreset: false, // true when explosionState pre-sets final stats
 
   onEnter() {
     this.pulseTime = 0;
-    this.finalTime = gameState.elapsedTime;
-    this.finalDistance = gameState.distanceTraveled;
-    this.finalScore = Math.floor(gameState.score);
-    const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
-    this.isNewBest = this.finalScore > stored;
-    this.bestScore = this.isNewBest ? this.finalScore : stored;
-    if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
+    if (!this.statsPreset) {
+      // Fuel empty or other non-collision death: capture stats now
+      this.finalTime = gameState.elapsedTime;
+      this.finalDistance = gameState.distanceTraveled;
+      this.finalScore = Math.floor(gameState.score);
+      const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
+      this.isNewBest = this.finalScore > stored;
+      this.bestScore = this.isNewBest ? this.finalScore : stored;
+      if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
+    }
+    this.statsPreset = false;
   },
 
   update(dt) {
     this.pulseTime += dt;
-    updateExplosions(dt);
     if (consumeKey('Enter')) {
       resetGameState();
       fsm.transition(playingState);
@@ -1929,9 +2113,6 @@ const gameOverState = {
     // Dark background
     ctx.fillStyle = '#0A0A1A';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-    // Explosion rings from fatal death (visible for 0.5s after transition)
-    renderExplosions(ctx);
 
     // GAME OVER text
     ctx.fillStyle = '#E53935';

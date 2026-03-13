@@ -1,0 +1,140 @@
+{
+  "project": "Road Rush",
+  "branchName": "ralph/explosion-game-over",
+  "description": "Cinematic explosion VFX on fatal collision game over — fire/debris particles, shockwave rings, screen flash, traffic scatter, and gradual fade-in to game over screen",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create explosionState FSM state and wire fatal collision to it",
+      "description": "As a developer, I need a dedicated explosionState in the FSM to orchestrate the cinematic explosion sequence, keeping it cleanly separated from gameOverState logic.",
+      "acceptanceCriteria": [
+        "New explosionState object with onEnter(), update(dt), render(ctx) methods added to src/main.js",
+        "In handleVehicleCollision(), fatal collision (scrollSpeed > 600) transitions to explosionState instead of gameOverState",
+        "Remove the old spawnExplosion() call from handleVehicleCollision() for fatal collisions",
+        "explosionState.onEnter() captures explosion origin (player car center x/y), saves final stats (elapsedTime, distanceTraveled, score), and initializes an explosion timer to 2.0s",
+        "explosionState.onEnter() sets a player car visibility flag to false so the car is hidden during explosion",
+        "explosionState.render() calls renderRoad(), renderTraffic() to show the frozen game world as background (no position updates)",
+        "explosionState.render() does NOT call renderPlayer() (car is hidden)",
+        "explosionState.render() does NOT render collectible items (fuel, coins, nitro, shields) during explosion",
+        "explosionState.update() decrements the explosion timer; when timer reaches 0, transitions to gameOverState",
+        "gameOverState receives final stats from explosionState (finalTime, finalDistance, finalScore) — no stat capture logic duplicated in gameOverState.onEnter() for collision deaths",
+        "Fuel empty death still transitions directly to gameOverState (skips explosionState), and gameOverState.onEnter() still captures stats for fuel empty deaths",
+        "Typecheck/lint passes"
+      ],
+      "priority": 1,
+      "passes": true
+    },
+    {
+      "id": "US-002",
+      "title": "Fire and debris particle burst on explosion",
+      "description": "As a player, I want to see fire and debris particles burst outward from the car on fatal collision so that the crash feels dramatic and visceral.",
+      "acceptanceCriteria": [
+        "In explosionState.onEnter(), clear the existing particles[] array to remove any pre-existing particles (e.g. nitro trail blue particles)",
+        "Spawn 30-50 fire/debris particles from the explosion origin point",
+        "Fire particles use colors: #FFF176 (bright yellow), #FFB74D (orange), #FF7043 (red-orange), #E53935 (red)",
+        "Debris particles use colors: #757575 (gray), #4E342E (dark brown), mixed in at ~30% ratio",
+        "Particles spread outward in all directions with random velocities (200-400 px/s)",
+        "Particles have varied sizes (2-8px) and lifetimes (0.8-1.5s)",
+        "Particles fade out over their lifetime using the existing alpha = life/maxLife pattern",
+        "explosionState.update() calls updateParticles(dt) to tick particle positions and lifetimes",
+        "explosionState.render() calls renderParticles(ctx) after rendering the frozen world",
+        "Typecheck/lint passes"
+      ],
+      "priority": 2,
+      "passes": true
+    },
+    {
+      "id": "US-003",
+      "title": "Expanding shockwave rings replacing old explosion system",
+      "description": "As a player, I want to see large expanding shockwave rings emanate from the crash point so that the explosion feels powerful and layered.",
+      "acceptanceCriteria": [
+        "New shockwave ring system with its own data array (e.g. shockwaveRings[]) storing ring state",
+        "On explosion start, initialize 3-4 concentric rings from the explosion origin",
+        "Rings have staggered start times (e.g. 0, 0.25, 0.5, 0.75 progress offsets) for cascading effect",
+        "Max radii are 120px, 140px, 160px, 180px (much larger than old 40-90px)",
+        "Ring colors shift from white/yellow (#FFFFFF, #FFF176) at small radius to orange/red (#FF7043, #E53935) as they expand",
+        "Rings fade in alpha as they expand (alpha = 1 - ringProgress)",
+        "Total ring animation duration ~1.2s",
+        "Ring line width starts at 4px and decreases as rings expand",
+        "explosionState.update() updates ring progress based on elapsed time",
+        "explosionState.render() renders rings after frozen world but before particles",
+        "Remove or deprecate old explosions[] array, spawnExplosion(), updateExplosions(), and renderExplosions() functions — they are fully replaced",
+        "Remove the updateExplosions(dt) call from gameOverState.update() and renderExplosions(ctx) call from gameOverState.render()",
+        "Typecheck/lint passes"
+      ],
+      "priority": 3,
+      "passes": true
+    },
+    {
+      "id": "US-004",
+      "title": "Screen flash on impact",
+      "description": "As a player, I want to see a bright screen flash at the moment of collision so that the impact feels immediate and intense.",
+      "acceptanceCriteria": [
+        "New screenFlashAlpha variable initialized to 1.0 in explosionState.onEnter()",
+        "explosionState.update() fades screenFlashAlpha from 1.0 to 0 over 0.2s (decrement by dt/0.2)",
+        "explosionState.render() draws a full-canvas white rectangle with globalAlpha = screenFlashAlpha after all other explosion effects",
+        "Flash is only visible for the first ~0.2s of the explosion, then fully transparent",
+        "Flash does not render when screenFlashAlpha <= 0",
+        "Typecheck/lint passes"
+      ],
+      "priority": 4,
+      "passes": true
+    },
+    {
+      "id": "US-005",
+      "title": "Nearby traffic reacts to explosion (scatter)",
+      "description": "As a player, I want nearby traffic vehicles to react to the explosion so that the crash feels like it has real impact on the world.",
+      "acceptanceCriteria": [
+        "In explosionState.onEnter(), mark traffic vehicles within ~120px of explosion center as scattered",
+        "Scattered vehicles get new properties: scatterVx, scatterVy (outward velocity), scatterRotation (spin rate), scatterAlpha (starts at 1.0)",
+        "Outward velocity is proportional to proximity — closer vehicles are pushed harder (e.g. 150-300 px/s)",
+        "Scatter direction is calculated as vector from explosion center to vehicle center",
+        "explosionState.update() updates scattered vehicles: position += velocity*dt, rotation += spinRate*dt, alpha decreases over time",
+        "Non-scattered vehicles remain frozen (no position/rotation updates)",
+        "Scattered vehicles fade out completely within ~1.5s",
+        "explosionState.render() renders scattered vehicles with their current rotation and alpha (use ctx.save/translate/rotate/restore)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 5,
+      "passes": true
+    },
+    {
+      "id": "US-006",
+      "title": "Gradual game over screen fade-in over explosion",
+      "description": "As a player, I want the game over screen to fade in gradually over the explosion so that the transition feels smooth and cinematic.",
+      "acceptanceCriteria": [
+        "New fadeInAlpha variable tracked in explosionState, starts at 0",
+        "After explosion timer passes ~1.0s (60-70% of 2.0s total), fadeInAlpha begins increasing",
+        "fadeInAlpha increases from 0 to 1.0 over ~0.8-1.0s",
+        "explosionState.render() draws a dark overlay (fillStyle #0A0A1A with globalAlpha = fadeInAlpha) over everything",
+        "Game over text (GAME OVER title, stats, retry prompt) renders on top of the dark overlay with a separate textAlpha that starts increasing ~0.2s after fadeInAlpha starts",
+        "Game over text content matches existing gameOverState layout: GAME OVER in red 44px, stats in white 18px, score in bold 22px, best score, pulsing retry text",
+        "Enter key is blocked during explosionState — retry only works after transition to gameOverState",
+        "When explosionState transitions to gameOverState, the game over screen is already fully visible (no visual pop or flash)",
+        "Typecheck/lint passes"
+      ],
+      "priority": 6,
+      "passes": true
+    },
+    {
+      "id": "US-007",
+      "title": "Clean state reset on retry",
+      "description": "As a developer, I need all new explosion-related state to be properly cleaned up when the player retries, to prevent visual glitches or stale state in the next game.",
+      "acceptanceCriteria": [
+        "resetGameState() clears particles[] array (already done, verify it still works)",
+        "resetGameState() clears the new shockwave rings array",
+        "resetGameState() resets player car visibility flag to true",
+        "resetGameState() resets screenFlashAlpha to 0",
+        "resetGameState() resets fadeInAlpha to 0",
+        "resetGameState() resets explosion timer to 0",
+        "Traffic array is already emptied in resetGameState() (gameState.traffic = []), which clears scattered flags — verify this",
+        "After retry from a collision death, the new game starts clean with no explosion artifacts visible",
+        "After retry from a fuel empty death, the new game starts clean as well",
+        "The old explosions[] array cleanup (explosions.length = 0) can be removed if the old system was fully replaced",
+        "Typecheck/lint passes"
+      ],
+      "priority": 7,
+      "passes": true
+    }
+  ]
+}
