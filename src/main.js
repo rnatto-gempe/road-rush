@@ -676,6 +676,98 @@ const AudioManager = {
     osc2.onended = () => { osc2.disconnect(); gain.disconnect(); };
   },
 
+  // ─── Near Miss, Combo, and Bonus SFX ───
+
+  // Near miss whoosh: band-passed noise burst 0.1s (~1-3kHz)
+  playNearMiss() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const sampleRate = this.ctx.sampleRate;
+    const len = Math.floor(sampleRate * 0.1);
+    const buf = this.ctx.createBuffer(1, len, sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2000, now);
+    filter.Q.setValueAtTime(1.5, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + 0.1);
+    src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Combo multiplier stinger: ascending sine tone at 600Hz + combo×100Hz, 0.15s
+  playComboUp(combo) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const freq = 600 + combo * 100;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Survivor bonus: triumphant short major chord (400/500/600Hz sines, 0.3s)
+  playSurvivorBonus() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const freqs = [400, 500, 600];
+    for (const freq of freqs) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.3);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Overtake bonus: subtle low filtered sawtooth vroom, 0.15s
+  playOvertake() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + 0.15);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(300, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
   // Update coin sequence timer (call from game update loop)
   updateCoinSeq(dt) {
     if (this.coinSeq.count > 0) {
@@ -910,6 +1002,10 @@ function triggerNearMiss(v) {
   comboMultiplier += 1;
   comboResetTimer = COMBO_RESET_TIME;
   comboScaleTimer = COMBO_SCALE_DURATION;
+
+  // Near miss whoosh + combo stinger
+  AudioManager.playNearMiss();
+  if (comboMultiplier >= 2) AudioManager.playComboUp(comboMultiplier);
 
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
@@ -1582,7 +1678,10 @@ function updateTraffic(dt) {
   // Remove vehicles that have scrolled past the bottom; award clean overtake bonus
   gameState.traffic = gameState.traffic.filter((v) => {
     if (v.y > 760) {
-      if (!v.collided) gameState.score += OVERTAKE_BONUS;
+      if (!v.collided) {
+        gameState.score += OVERTAKE_BONUS;
+        AudioManager.playOvertake();
+      }
       return false;
     }
     return true;
@@ -2285,6 +2384,7 @@ const playingState = {
       gameState.score += SURVIVOR_BONUS;
       gameState.survivorTimer -= SURVIVOR_INTERVAL;
       survivorFlash = { timer: 2.0 };
+      AudioManager.playSurvivorBonus();
     }
 
     // Tick survivor flash
