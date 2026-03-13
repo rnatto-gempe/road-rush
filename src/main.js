@@ -587,6 +587,7 @@ function resetGameState() {
   explosionState.screenFlashAlpha = 0;
   explosionState.fadeInAlpha = 0;
   explosionState.textAlpha = 0;
+  explosionState.timer = 0;
 }
 
 // --- Scroll Speed Ramp ---
