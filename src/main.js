@@ -778,6 +778,93 @@ const AudioManager = {
     }
   },
 
+  // --- Title screen ambient drone ---
+  titleDrone: { osc: null, lfo: null, lfoGain: null, noiseSource: null, noiseGain: null, gain: null },
+
+  startTitleDrone() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Low sine drone (~55Hz) with LFO amplitude modulation (~0.3Hz)
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(55, now);
+
+    const droneGain = this.ctx.createGain();
+    droneGain.gain.setValueAtTime(0, now);
+    droneGain.gain.linearRampToValueAtTime(0.15, now + 0.5); // slow fade-in
+
+    // LFO for amplitude modulation
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(0.3, now);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(0.06, now); // modulation depth
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(droneGain.gain); // modulates the drone gain
+
+    osc.connect(droneGain);
+    droneGain.connect(this.masterGain);
+
+    osc.start(now);
+    lfo.start(now);
+
+    // Soft filtered noise pad (low-pass ~200Hz, very low gain)
+    const noiseDur = 60; // long buffer
+    const bufferSize = this.ctx.sampleRate * noiseDur;
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    noiseSource.loop = true;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(200, now);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.04, now + 0.5);
+
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSource.start(now);
+
+    this.titleDrone.osc = osc;
+    this.titleDrone.lfo = lfo;
+    this.titleDrone.lfoGain = lfoGain;
+    this.titleDrone.noiseSource = noiseSource;
+    this.titleDrone.noiseGain = noiseGain;
+    this.titleDrone.gain = droneGain;
+  },
+
+  stopTitleDrone() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const d = this.titleDrone;
+
+    if (d.gain) {
+      d.gain.gain.cancelScheduledValues(now);
+      d.gain.gain.setTargetAtTime(0, now, 0.1); // ~0.3s crossfade
+    }
+    if (d.noiseGain) {
+      d.noiseGain.gain.cancelScheduledValues(now);
+      d.noiseGain.gain.setTargetAtTime(0, now, 0.1);
+    }
+
+    // Stop nodes after crossfade completes
+    const stopTime = now + 0.4;
+    if (d.osc) { try { d.osc.stop(stopTime); } catch(e) {} d.osc.onended = () => { d.osc.disconnect(); d.gain.disconnect(); }; }
+    if (d.lfo) { try { d.lfo.stop(stopTime); } catch(e) {} d.lfo.onended = () => { d.lfo.disconnect(); d.lfoGain.disconnect(); }; }
+    if (d.noiseSource) { try { d.noiseSource.stop(stopTime); } catch(e) {} d.noiseSource.onended = () => { d.noiseSource.disconnect(); d.noiseGain.disconnect(); }; }
+
+    this.titleDrone = { osc: null, lfo: null, lfoGain: null, noiseSource: null, noiseGain: null, gain: null };
+  },
+
   // Fuel warning beep state
   fuelWarning: { timer: 0 },
 
@@ -2324,6 +2411,14 @@ const titleState = {
 
   onEnter() {
     this.pulseTime = 0;
+    // Start drone if AudioContext already exists (return visits)
+    if (AudioManager.ctx) {
+      AudioManager.startTitleDrone();
+    }
+  },
+
+  onExit() {
+    AudioManager.stopTitleDrone();
   },
 
   update(dt) {
@@ -2331,6 +2426,8 @@ const titleState = {
     if (consumeKey('Enter')) {
       AudioManager.init();
       AudioManager.resume();
+      // Start drone briefly — it will crossfade out via onExit
+      AudioManager.startTitleDrone();
       resetGameState();
       fsm.transition(playingState);
     }

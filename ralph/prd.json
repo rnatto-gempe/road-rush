@@ -139,7 +139,7 @@
         "Verify in browser that title screen has a calm, mysterious ambient sound"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

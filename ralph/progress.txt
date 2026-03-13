@@ -20,6 +20,7 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Near miss/combo/bonus SFX gains (0.2-0.3) sit at or below pickup SFX hierarchy — maintain volume ordering: explosion > collision > pickups >= bonus SFX
 - triggerNearMiss() is the single trigger point for near miss whoosh + combo stinger — no need to wire multiple locations
 - Overtake bonus SFX is in the traffic filter callback (v.y > 760 && !v.collided) — fires frequently, keep it subtle
+- Title drone and state-specific ambient audio: start in onEnter (guard with ctx check), stop in onExit — follows same pattern as engine/road
 
 ---
 
@@ -116,4 +117,18 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - Fuel percentage is computed as gameState.fuel / FUEL_INITIAL — reused from renderFuelHUD pattern
   - Warning beep gain (0.25) fits in the existing hierarchy below pickups but remains clearly audible
   - Resetting fuelWarning.timer to 0 on fuel collect above threshold ensures immediate beep if fuel drops again
+---
+
+## 2026-03-13 - US-008
+- Added startTitleDrone() method: low sine drone (~55Hz) with LFO amplitude modulation (~0.3Hz) + soft filtered noise pad (low-pass ~200Hz)
+- Added stopTitleDrone() method: 0.3s crossfade out, then disconnects all nodes
+- Wired titleState.onEnter to start drone if AudioContext already exists (return visits)
+- Wired titleState.onExit to stop drone with crossfade
+- On first Enter press: drone starts briefly then crossfades as we transition to playingState
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - AudioContext doesn't exist on first titleState visit (created on Enter press) — must guard startTitleDrone with ctx check
+  - Title drone on first play is very brief (starts on Enter, immediately transitions) — the real payoff is on return visits to title
+  - titleState had no onExit before — FSM calls it automatically, use for audio cleanup
+  - LFO amplitude modulation connects to gain.gain AudioParam directly — modulation depth controlled by LFO gain node
 ---
