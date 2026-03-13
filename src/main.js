@@ -956,12 +956,23 @@ const AudioManager = {
       // Kick on every beat
       this._scheduleKick(beatTime);
 
+      // Sidechain-like duck: briefly reduce bass gain when kick fires
+      if (this.bass.running && this.bass.gain) {
+        this.bass.gain.gain.setValueAtTime(0.3, beatTime);
+        this.bass.gain.gain.setTargetAtTime(1.0, beatTime + 0.05, 0.02);
+      }
+
       // Hi-hat on off-beats (halfway between beats)
       this._scheduleHiHat(beatTime + halfBeat);
 
       // Sub bass on every 4th beat
       if (idx % 4 === 0) {
         this._scheduleSubBass(beatTime);
+        // DnB bass pattern: root + syncopated ghosts at 2.5 and 3.5
+        if (this.bass.running) {
+          const bassChordIdx = Math.floor(idx / 4) % 4;
+          this._scheduleBassBeat(beatTime, beatInterval, bassChordIdx);
+        }
       }
 
       this.beat.scheduledUpTo += beatInterval;
@@ -1240,6 +1251,64 @@ const AudioManager = {
         osc.frequency.setTargetAtTime(chordFreqs[n], now, 0.05);
       }
     }
+  },
+
+  // ─── Synchronized DnB bass line ───
+  // Root notes for Am→F→C→G progression, 40–100 Hz range
+  BASS_ROOTS: [55.0, 87.3, 65.4, 98.0], // A1, F2, C2, G2 (Hz)
+  bass: { running: false, gain: null },
+
+  startBass() {
+    if (!this.ctx) return;
+    this.stopBass();
+    const now = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(1.0, now, 0.1); // fade-in ~0.3s
+    gain.connect(this.masterGain);
+    this.bass.gain = gain;
+    this.bass.running = true;
+  },
+
+  stopBass() {
+    if (!this.bass.running) return;
+    const now = this.ctx.currentTime;
+    this.bass.gain.gain.cancelScheduledValues(now);
+    this.bass.gain.gain.setTargetAtTime(0, now, 0.1); // fade-out ~0.3s
+    const gain = this.bass.gain;
+    setTimeout(() => { gain.disconnect(); }, 400);
+    this.bass.gain = null;
+    this.bass.running = false;
+  },
+
+  // Schedule a single bass note: sawtooth → lowpass ~200 Hz → per-note envelope
+  _scheduleBassNote(time, freq, vel) {
+    if (!this.ctx || !this.bass.gain) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, time);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(200, time);
+    filter.Q.setValueAtTime(0.5, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(vel * 0.3, time + 0.008); // attack <0.01s
+    gain.gain.setTargetAtTime(0, time + 0.02, 0.05);            // decay ~0.15s
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bass.gain);
+    osc.start(time);
+    osc.stop(time + 0.5);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Schedule DnB bass pattern for one bar: beat-1 root + syncopated ghost notes at 2.5 and 3.5
+  _scheduleBassBeat(beatTime, beatInterval, chordIdx) {
+    const root = this.BASS_ROOTS[chordIdx];
+    this._scheduleBassNote(beatTime,                          root, 1.0);  // beat 1: full
+    this._scheduleBassNote(beatTime + 1.5 * beatInterval,    root, 0.5);  // beat 2.5: ghost
+    this._scheduleBassNote(beatTime + 2.5 * beatInterval,    root, 0.5);  // beat 3.5: ghost
   },
 
   // ─── Procedural arpeggio melody ───
@@ -2946,12 +3015,14 @@ const playingState = {
     AudioManager.startBeat();
     AudioManager.startPad();
     AudioManager.startArp();
+    AudioManager.startBass();
   },
 
   onExit() {
     AudioManager.stopNitro();
     AudioManager.stopBeat();
     AudioManager.stopArp();
+    AudioManager.stopBass();
     AudioManager.stopEngine();
     AudioManager.stopRoad();
     AudioManager.stopPad();
