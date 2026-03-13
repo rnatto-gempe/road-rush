@@ -119,6 +119,13 @@ const NITRO_BOOST_DURATION = 3.0;      // seconds of active boost
 const NITRO_EASE_DURATION = 0.5;       // seconds to ease speed back to normal after boost
 const NITRO_COLLECT_ANIM_DURATION = 0.2;
 
+// Shield item constants
+const SHIELD_ITEM_RADIUS = 11;          // 22px bounding circle (hexagon)
+const SHIELD_SPAWN_MIN = 5000;          // px traveled min between spawns (very rare)
+const SHIELD_SPAWN_MAX = 7500;          // px traveled max between spawns
+const SHIELD_COLLECT_ANIM_DURATION = 0.2;
+const SHIELD_BREAK_FLASH_DURATION = 0.3; // bright flash when shield absorbs a hit
+
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
 
@@ -193,6 +200,9 @@ const coinFloatTexts = []; // {x, y, timer}
 // Nitro state
 let nitroTimer = 0;      // countdown during active boost (3s → 0)
 let nitroEaseTimer = 0;  // countdown during ease-out (0.5s → 0)
+
+// Shield state
+let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -373,6 +383,17 @@ function renderParticles(ctx) {
 // Handle a vehicle collision — classify lateral vs frontal, apply graded effects
 function handleVehicleCollision(v) {
   const player = gameState.player;
+
+  // Shield absorbs any collision (including fatal), skipping all effects
+  if (player.hasShield) {
+    player.hasShield = false;
+    shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+    v.collided = true; // tag vehicle so overtake bonus is skipped
+    invulnTimer = Math.max(invulnTimer, INVULN_DURATION);
+    spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
+    return;
+  }
+
   const relativeVy = getEffectiveScrollSpeed() - v.ownSpeed; // approach speed on screen
   const isLateral = Math.abs(player.vx) > Math.abs(relativeVy) * 0.5;
 
@@ -424,6 +445,7 @@ const gameState = {
     width: PLAYER_WIDTH,
     height: PLAYER_HEIGHT,
     vx: 0,
+    hasShield: false,
   },
   traffic: [],
   nextSpawnDistance: 1200,
@@ -441,6 +463,9 @@ const gameState = {
   // Nitro items
   nitroItems: [],
   nextNitroSpawnDistance: NITRO_SPAWN_MIN,
+  // Shield items
+  shieldItems: [],
+  nextShieldSpawnDistance: SHIELD_SPAWN_MIN,
 };
 
 function resetGameState() {
@@ -486,6 +511,11 @@ function resetGameState() {
   gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
   nitroTimer = 0;
   nitroEaseTimer = 0;
+  // Reset shield state
+  gameState.player.hasShield = false;
+  gameState.shieldItems = [];
+  gameState.nextShieldSpawnDistance = SHIELD_SPAWN_MIN + Math.random() * (SHIELD_SPAWN_MAX - SHIELD_SPAWN_MIN);
+  shieldBreakFlash = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -615,17 +645,45 @@ function updatePlayer(dt) {
   }
 
   if (borderHit && invulnTimer <= 0) {
-    applySpeedPenalty(0.7, 1.0); // 30% speed reduction for 1s
-    invulnTimer = INVULN_DURATION;
-    spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
-    gameState.survivorTimer = 0;
-    // DDA partial reset on border hit
-    ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
-    ddaCleanTimer = 0;
+    // Shield absorbs border collision
+    if (player.hasShield) {
+      player.hasShield = false;
+      shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+      invulnTimer = INVULN_DURATION;
+      spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
+    } else {
+      applySpeedPenalty(0.7, 1.0); // 30% speed reduction for 1s
+      invulnTimer = INVULN_DURATION;
+      spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
+      gameState.survivorTimer = 0;
+      // DDA partial reset on border hit
+      ddaSpawnRate = 1.0 + (ddaSpawnRate - 1.0) * 0.5;
+      ddaCleanTimer = 0;
+    }
   }
 }
 
 function renderPlayer(ctx, player) {
+  // Shield break flash renders even when car is blinking (always visible)
+  if (shieldBreakFlash > 0) {
+    const flashProgress = shieldBreakFlash / SHIELD_BREAK_FLASH_DURATION;
+    ctx.save();
+    ctx.globalAlpha = flashProgress;
+    ctx.strokeStyle = '#42A5F5';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.roundRect(player.x - 5, player.y - 5, player.width + 10, player.height + 10, 9);
+    ctx.stroke();
+    // Outer soft glow
+    ctx.globalAlpha = flashProgress * 0.4;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.roundRect(player.x - 8, player.y - 8, player.width + 16, player.height + 16, 12);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Blink every BLINK_INTERVAL seconds during invulnerability
   if (invulnTimer > 0) {
     const blinkPhase = Math.floor(invulnTimer / BLINK_INTERVAL) % 2;
@@ -633,6 +691,22 @@ function renderPlayer(ctx, player) {
   }
 
   const { x, y, width, height } = player;
+
+  // Active shield: subtle blue border/glow around car
+  if (player.hasShield) {
+    // Inner border
+    ctx.strokeStyle = 'rgba(66, 165, 245, 0.9)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.roundRect(x - 4, y - 4, width + 8, height + 8, 8);
+    ctx.stroke();
+    // Outer soft glow
+    ctx.strokeStyle = 'rgba(66, 165, 245, 0.3)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.roundRect(x - 7, y - 7, width + 14, height + 14, 11);
+    ctx.stroke();
+  }
 
   // Car body
   ctx.fillStyle = '#E53935';
@@ -1341,6 +1415,120 @@ function renderNitroItems(ctx) {
   }
 }
 
+// --- Shield Item ---
+
+function spawnShieldItem() {
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const x = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+  gameState.shieldItems.push({ x, y: -SHIELD_ITEM_RADIUS * 2, collectAnim: null });
+  gameState.nextShieldSpawnDistance =
+    gameState.distanceTraveled + SHIELD_SPAWN_MIN + Math.random() * (SHIELD_SPAWN_MAX - SHIELD_SPAWN_MIN);
+}
+
+function updateShieldItems(dt) {
+  const effSpeed = getEffectiveScrollSpeed();
+
+  if (gameState.distanceTraveled >= gameState.nextShieldSpawnDistance) {
+    spawnShieldItem();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.shieldItems.length - 1; i >= 0; i--) {
+    const item = gameState.shieldItems[i];
+
+    if (item.collectAnim !== null) {
+      item.collectAnim.timer -= dt;
+      if (item.collectAnim.timer <= 0) gameState.shieldItems.splice(i, 1);
+      continue;
+    }
+
+    item.y += effSpeed * dt;
+
+    if (item.y > CANVAS_HEIGHT + SHIELD_ITEM_RADIUS * 2) {
+      gameState.shieldItems.splice(i, 1);
+      continue;
+    }
+
+    // Collection: player 80% hitbox vs item full bounding box
+    const itemHb = {
+      x: item.x - SHIELD_ITEM_RADIUS,
+      y: item.y - SHIELD_ITEM_RADIUS,
+      w: SHIELD_ITEM_RADIUS * 2,
+      h: SHIELD_ITEM_RADIUS * 2,
+    };
+    if (aabbOverlap(ph, itemHb)) {
+      // Only 1 shield at a time — collecting another while active does nothing
+      if (!gameState.player.hasShield) {
+        gameState.player.hasShield = true;
+      }
+      item.collectAnim = { timer: SHIELD_COLLECT_ANIM_DURATION };
+    }
+  }
+}
+
+// Draw a regular hexagon at (cx, cy) with bounding radius r
+function drawHexagon(ctx, cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 6;
+    const px = cx + r * Math.cos(angle);
+    const py = cy + r * Math.sin(angle);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+function renderShieldItems(ctx) {
+  // Pulsing scale: 0.9 to 1.1 over a 0.6s cycle
+  const pulseScale = 1.0 + 0.1 * Math.sin(gameState.elapsedTime * (2 * Math.PI / 0.6));
+
+  for (const item of gameState.shieldItems) {
+    let scale = pulseScale;
+    let alpha = 1;
+    if (item.collectAnim !== null) {
+      const progress = 1 - item.collectAnim.timer / SHIELD_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(item.x, item.y);
+    ctx.scale(scale, scale);
+
+    // Outer glow
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, SHIELD_ITEM_RADIUS * 1.8);
+    glow.addColorStop(0, 'rgba(66, 165, 245, 0.4)');
+    glow.addColorStop(1, 'rgba(66, 165, 245, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, SHIELD_ITEM_RADIUS * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hexagon fill
+    ctx.fillStyle = '#42A5F5';
+    drawHexagon(ctx, 0, 0, SHIELD_ITEM_RADIUS);
+    ctx.fill();
+
+    // Hexagon border
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    drawHexagon(ctx, 0, 0, SHIELD_ITEM_RADIUS);
+    ctx.stroke();
+
+    // 'S' label
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold ${Math.floor(SHIELD_ITEM_RADIUS * 1.1)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('S', 0, 0);
+
+    ctx.restore();
+  }
+}
+
 // --- Fuel HUD ---
 function renderFuelHUD(ctx) {
   const fuelPct = gameState.fuel / FUEL_INITIAL;
@@ -1478,6 +1666,7 @@ const playingState = {
     updateFuelItems(dt);
     updateCoins(dt);
     updateNitroItems(dt);
+    updateShieldItems(dt);
     updateParticles(dt);
 
     // Tick nitro boost and ease-out timers; spawn blue particle trail during active boost
@@ -1500,6 +1689,9 @@ const playingState = {
       }
     }
     if (nitroEaseTimer > 0) nitroEaseTimer = Math.max(0, nitroEaseTimer - dt);
+
+    // Tick shield break flash
+    if (shieldBreakFlash > 0) shieldBreakFlash = Math.max(0, shieldBreakFlash - dt);
 
     // Distance score: 1 pt per 10 px traveled
     gameState.score += effSpeed * dt * SCORE_PER_PX;
@@ -1569,6 +1761,7 @@ const playingState = {
     renderFuelItems(ctx);
     renderCoins(ctx);
     renderNitroItems(ctx);
+    renderShieldItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
 
@@ -1621,6 +1814,7 @@ const playingState = {
       if (gameState.fuel > 70) { ctx.fillText(`DDA fuel: x1.2 (fuel ${gameState.fuel.toFixed(0)})`, 8, y); y += 14; }
       if (nitroTimer > 0) { ctx.fillText(`NITRO: ${nitroTimer.toFixed(1)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
       else if (nitroEaseTimer > 0) { ctx.fillText(`Nitro ease: ${nitroEaseTimer.toFixed(2)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
+      if (gameState.player.hasShield) { ctx.fillText('SHIELD: active', 8, y); y += 14; }
     }
   },
 };
