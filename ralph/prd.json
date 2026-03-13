@@ -34,7 +34,7 @@
         "Verify in browser using dev-browser skill: RGB split visible on explosion start and nitro boost"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -3,6 +3,10 @@ Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
 ## Codebase Patterns
+- Offscreen canvas for effects: initialize at module level (not lazily) with `document.createElement('canvas')` — avoids per-frame allocation overhead
+- For chromatic aberration with canvas 2D: snapshot via `drawImage(canvas, 0, 0)`, then extract color channel using `globalCompositeOperation = 'multiply'` + solid color fill, then composite back with `'screen'` at globalAlpha
+- Effect state variables follow pattern: `fooTimer` (countdown), `fooDuration` (initial duration for t=timer/duration ratio), `fooIntensity` (peak scale)
+- When an effect timer spans state transitions (e.g., explosion entry → explosion state), decrement the timer in BOTH `playingState.update()` and `explosionState.update()`, and render in both `render()` functions
 - gameState is module-scoped (not on window) — browser evaluate can't access it; use screenshots or debug mode (D key) to verify game state
 - ctx.createRadialGradient(cx, cy, r1, cx, cy, r2) is the pattern for vignette overlays — both fuel and speed vignettes use this
 - All visual overlays (vignettes, flashes) use fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT) after setting fillStyle to the gradient
@@ -20,4 +24,20 @@ Started: Fri Mar 13 19:37:51 -03 2026
   - renderFuelHUD() already contains a red radial vignette for low fuel — the speed vignette is additive on top of it
   - gameState.scrollSpeed (not getEffectiveScrollSpeed()) is used for the vignette to reflect base road speed, not nitro-boosted speed
   - Browser MCP context can close unexpectedly during keyboard interactions; retry navigation if this occurs
+---
+
+## 2026-03-13 - US-002
+- Implemented chromatic aberration (RGB split) effect triggered on collision and nitro activation
+- Added `chromaTimer`, `chromaDuration`, `chromaIntensity` state variables near nitroTimer (~line 1565)
+- Added two offscreen canvases (`chromaCanvasR`, `chromaCanvasB`) initialized at module level for zero per-frame allocation
+- `renderChromaticAberration()`: snapshots canvas, extracts red/blue channels via `multiply` composite, re-draws at ±offset with `screen` composite at decayed alpha
+- Triggers: `explosionState.onEnter()` sets 0.4s / intensity 1.0; nitro pickup sets 0.25s / intensity 0.6
+- Timer decremented in both `playingState.update()` and `explosionState.update()` to handle the state transition
+- Called in both `playingState.render()` and `explosionState.render()` after particles, before HUD
+- Reset in `initGame()` when game restarts
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Canvas `multiply` composite with a solid color extracts that color channel from the destination pixels — useful for per-channel effects without WebGL
+  - Two separate offscreen canvases are cleaner than re-snapshotting the main canvas between red and blue draws (avoids capturing the first chroma pass into the second)
+  - `renderChromaticAberration()` takes no arguments — it reads module-level `canvas`, `ctx`, and chroma state directly, consistent with other render functions
 ---
