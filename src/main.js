@@ -1100,6 +1100,7 @@ function updateTraffic(dt) {
 
 function renderTraffic(ctx) {
   for (const v of gameState.traffic) {
+    if (v.scattered) continue; // scattered vehicles rendered separately with rotation
     if (v.type === 'truck') {
       ctx.fillStyle = '#616161';
       ctx.beginPath();
@@ -1948,6 +1949,26 @@ const explosionState = {
         startOffset: startOffsets[i],
       });
     }
+    // Mark nearby traffic vehicles as scattered
+    const scatterRadius = 120;
+    for (const v of gameState.traffic) {
+      const vcx = v.x + v.width / 2;
+      const vcy = v.y + v.height / 2;
+      const dx = vcx - this.originX;
+      const dy = vcy - this.originY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < scatterRadius) {
+        const proximity = 1 - dist / scatterRadius; // 1 = closest, 0 = edge
+        const speed = 150 + proximity * 150; // 150-300 px/s
+        const len = dist < 1 ? 1 : dist;
+        v.scattered = true;
+        v.scatterVx = (dx / len) * speed;
+        v.scatterVy = (dy / len) * speed;
+        v.scatterRotation = 0;
+        v.scatterSpinRate = (Math.random() - 0.5) * 8; // radians/s
+        v.scatterAlpha = 1.0;
+      }
+    }
   },
 
   update(dt) {
@@ -1956,6 +1977,15 @@ const explosionState = {
     updateParticles(dt);
     if (this.screenFlashAlpha > 0) {
       this.screenFlashAlpha = Math.max(0, this.screenFlashAlpha - dt / 0.2);
+    }
+    // Update scattered vehicles
+    for (const v of gameState.traffic) {
+      if (v.scattered) {
+        v.x += v.scatterVx * dt;
+        v.y += v.scatterVy * dt;
+        v.scatterRotation += v.scatterSpinRate * dt;
+        v.scatterAlpha = Math.max(0, v.scatterAlpha - dt / 1.5);
+      }
     }
     if (this.timer <= 0) {
       gameOverState.finalTime = this.finalTime;
@@ -1969,7 +1999,24 @@ const explosionState = {
 
   render(ctx) {
     renderRoad(ctx, gameState.scrollOffset);
+    // Render non-scattered traffic normally
     renderTraffic(ctx);
+    // Render scattered vehicles with rotation and alpha on top
+    ctx.save();
+    for (const v of gameState.traffic) {
+      if (!v.scattered) continue;
+      const cx = v.x + v.width / 2;
+      const cy = v.y + v.height / 2;
+      const typeColors = { truck: '#616161', sedan: '#1E88E5', sports: '#B71C1C', moto: '#FFC107' };
+      ctx.save();
+      ctx.globalAlpha = v.scatterAlpha;
+      ctx.translate(cx, cy);
+      ctx.rotate(v.scatterRotation);
+      ctx.fillStyle = typeColors[v.type] || '#888888';
+      ctx.fillRect(-v.width / 2, -v.height / 2, v.width, v.height);
+      ctx.restore();
+    }
+    ctx.restore();
     // No renderPlayer (car hidden), no collectibles
     renderShockwaveRings(ctx);
     renderParticles(ctx);
