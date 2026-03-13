@@ -1,3 +1,20 @@
+## 2026-03-13 - US-009
+- Added `getVehicleXExtent(v, lookAheadS)`: returns {minX, maxX} X span of vehicle accounting for active lane changes and upcoming lane changes within lookAhead window
+- Added `findLargestGap(occupied, roadLeft, roadRight)`: finds largest free horizontal corridor given occupied X segments
+- Added `isFairToSpawn(candidate)`: checks all 96px vertical bands (stepping BAND_HEIGHT/2) — returns false if any band has no 60px free corridor after including candidate vehicle
+- Added `renderFairnessDebug(ctx)`: draws green (≥60px) or red (<60px) semi-transparent overlays for free corridors in each 96px band when debugMode=true
+- Refactored `spawnVehicle()` to accept a candidate object; added `buildVehicleCandidate()` to generate random type/lane
+- Modified spawn logic in `updateTraffic()`: build candidate, check `isFairToSpawn`, only spawn+advance nextSpawnDistance if fair; else skip frame (retry next frame with fresh candidate)
+- Verified in browser: game runs at 14.5s with debug showing Speed/Dist/Traffic; build passes (vite build, 10.57 kB)
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - `isFairToSpawn` uses overlapping bands (step = BAND_HEIGHT/2) to catch tight spots that would straddle band boundaries
+  - `getVehicleXExtent`: for laneChanging vehicles include both current and target X; for vehicles about to change (laneChangeTimer <= lookAhead) include adjacent lane extents; moto weave = full road width
+  - `findLargestGap`: sort segments by left edge, walk cursor through, track max gap between segments; add trailing gap after last segment
+  - Green overlays at rgba(0,255,0,0.25) are subtle against the dark road — visible but not distracting
+  - Spawn fairness check only runs when traffic count < max AND distance threshold reached — minimal perf impact (16 bands × max 5 vehicles = 80 ops/frame at most)
+---
+
 ## 2026-03-13 - US-008
 - Replaced sedan-only traffic with a 4-type vehicle system: sedan, truck, sports car, motorcycle
 - Added `VEHICLE_TYPES` config object with color, width, height, speedRatio, minTime, behavior per type
@@ -40,6 +57,7 @@
 - 4 vehicle types: sedan(blue,40x60,60%speed), truck(gray,60x72,40%speed), sports(darkred,36x58,85%speed,minTime=40s), moto(yellow,20x48,70%speed,minTime=60s)
 - Spawn config: `getSpawnConfig(elapsed)` returns {maxCount, spawnMin, spawnMax}; type selection via `chooseVehicleType(elapsed)`
 - Spawn tracking: `gameState.nextSpawnDistance` compared to `gameState.distanceTraveled`
+- Fairness constraint: `isFairToSpawn(candidate)` checks 96px vertical bands (step 48px) for 60px free corridor; `getVehicleXExtent(v, 1.0)` projects lane-change extents; skip spawn (don't advance nextSpawnDistance) if constraint fails
 - `resetGameState()` must clear `gameState.traffic = []` and reset `nextSpawnDistance`
 
 ---

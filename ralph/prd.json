@@ -159,7 +159,7 @@
         "Verify in browser: toggle debug mode, confirm green corridors always visible during gameplay"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Scan algorithm: for each Y band, project all vehicles into X ranges (including future positions for lane-changers), find largest gap. If largest gap < 60px, reject spawn. This is the game's 'fairness promise'."
     },
     {
