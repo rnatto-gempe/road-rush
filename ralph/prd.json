@@ -250,7 +250,7 @@
         "Verify in browser: play a full 90s+ run, confirm difficulty ramp feels like 4 acts (easy start → engagement → crisis → climax)"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "This story is about wiring together existing systems and tuning. Create a DifficultyManager that reads elapsed_seconds and exposes current values for all axes. Spawn pause after collision is the key new mechanic here."
     },
     {

@@ -1,3 +1,20 @@
+## 2026-03-13 - US-014
+- Created `DIFFICULTY` config object as single source of truth for all difficulty parameters (speed ramp, traffic density tiers, fuel drain/spawn/collect, spawn pause)
+- Moved DIFFICULTY before dependent constants; fuel/speed constants now aliased from DIFFICULTY
+- `getSpawnConfig(elapsed)` now iterates `DIFFICULTY.traffic.tiers` array instead of hardcoded if-chain
+- `getFuelCollectAmount(elapsed)` now iterates `DIFFICULTY.fuel.collectTiers` array
+- Added `spawnPauseTimer` module-level var; set to `DIFFICULTY.traffic.spawnPauseDuration` (1.5s) in `handleVehicleCollision` and border-hit handler
+- `updateTraffic(dt)` ticks `spawnPauseTimer` down and skips spawning while > 0
+- Debug overlay shows `SpawnPause: Xs` when pause is active
+- Verified in browser: game runs at 12.7s, speed 263, debug overlay shows all fields correctly
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - DIFFICULTY constant must be declared BEFORE any constants that alias its values (`const X = DIFFICULTY.x`)
+  - Tier arrays with `untilTime: Infinity` as last entry work cleanly as a fallback — iterate and return on first match
+  - `spawnPauseTimer` ticked in `updateTraffic` (not playingState.update) keeps spawn logic self-contained
+  - Backward-compat aliases (`const SPEED_MAX = DIFFICULTY.speed.max`) let you add DIFFICULTY without touching all call sites
+---
+
 ## 2026-03-13 - US-013
 - Added scoring constants: SCORE_PER_PX=0.1 (1pt/10px), OVERTAKE_BONUS=25, SURVIVOR_BONUS=300, SURVIVOR_INTERVAL=30s, SCORE_LERP_RATE=8
 - `gameState.score` accumulates continuously; `gameState.displayedScore` lerps toward it each frame at rate 8/s
@@ -108,6 +125,7 @@
 ---
 
 ## Codebase Patterns
+- `DIFFICULTY` config object at top of main.js is the single source of truth for all tunable difficulty params; constants below it alias DIFFICULTY values for backward compat
 - `debugMode` (module-level bool) toggled by D key in playingState.update() via consumeKey; rendered in playingState.render()
 - Speed ramp: phase 1 uses absolute formula `INITIAL + elapsed * RATE` (not incremental), phase 2 uses `speed += RATE2 * dt`; both capped with Math.min
 - `updateScrollSpeed(dt)` called BEFORE `scrollOffset +=` and `distanceTraveled +=` so the new speed applies immediately
