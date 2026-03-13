@@ -1,3 +1,24 @@
+## 2026-03-13 - US-015
+- Added `NEAR_MISS_DIST=20`, `NEAR_MISS_BASE_POINTS=50`, `NEAR_MISS_FLASH_DURATION=0.3`, `COMBO_RESET_TIME=3.0`, `COMBO_SCALE_DURATION=0.2` constants
+- Added module-level `comboMultiplier`, `comboResetTimer`, `comboScaleTimer` state
+- `spawnVehicle()` now adds `minDistX: Infinity`, `nearMissChecked: false`, `nearMissFlash: null` to each vehicle
+- In `updateTraffic()` per-vehicle loop: tracks min horizontal sprite-edge distance when sprites vertically overlap; checks near miss condition when vehicle's top passes `player.y + PLAYER_HEIGHT`; ticks `nearMissFlash.timer`
+- `triggerNearMiss(v)`: awards `50 * comboMultiplier` points, increments combo, resets timers, sets `v.nearMissFlash` with side (left/right) closest to player
+- `renderTraffic()`: draws white strip flash on near-miss side with alpha fading over 0.3s
+- `renderComboHUD(ctx)`: renders gold `xN` at center-top when `comboMultiplier >= 2`, with scale-in pop animation and fade-out in last second before reset
+- Combo resets to 1 on collision (in `handleVehicleCollision`) or after 3s without near miss
+- `resetGameState()` resets all combo vars
+- Debug overlay shows `Combo: xN (Xs)` when combo is active; type breakdown y offset shifted to 142 to avoid overlap
+- Verified in browser: game at 49.7s, 4 vehicles, score 1795; build clean (18.11 kB)
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Near miss check fires once per vehicle when `v.y > player.y + PLAYER_HEIGHT` (vehicle fully passed player) — gate with `nearMissChecked` flag to prevent double-firing
+  - `minDistX = Math.max(0, Math.max(v.x - (player.x + PLAYER_WIDTH), player.x - (v.x + v.width)))` — positive when gap exists, 0 when overlapping (collision zone); track only during vertical sprite overlap
+  - Combo counter alpha fades in the last second: `Math.min(1, comboResetTimer)` gives smooth fade since timer counts down from 3.0
+  - Scale-in pop: use progress from a short countdown timer `comboScaleTimer / COMBO_SCALE_DURATION` multiplied into a scale delta; set timer on every new near miss for re-pop
+  - `nearMissFlash.side` determined at trigger time using player center vs vehicle center — don't re-compute at render time (vehicle may have moved)
+---
+
 ## 2026-03-13 - US-014
 - Created `DIFFICULTY` config object as single source of truth for all difficulty parameters (speed ramp, traffic density tiers, fuel drain/spawn/collect, spawn pause)
 - Moved DIFFICULTY before dependent constants; fuel/speed constants now aliased from DIFFICULTY
@@ -156,6 +177,8 @@
 - Fuel system: `gameState.fuel` (0-100), drains per frame using `getEffectiveScrollSpeed()`; `gameState.fuelItems[]` with `{x,y,collectAnim}` (collectAnim=null until collected); road-fixed so scroll at effective speed (ownSpeed=0)
 - collectAnim pattern: `{timer: 0.2}` on item, skip normal update while non-null, splice when timer<=0; use `1 - timer/duration` as progress for scale/alpha
 - `gameOverState.causeOfDeath` must be set BEFORE `fsm.transition(gameOverState)`
+- Near miss tracking: add `minDistX: Infinity, nearMissChecked: false, nearMissFlash: null` to each vehicle; track horiz gap during vertical sprite overlap; check once when `v.y > player.y + PLAYER_HEIGHT`; gate with `nearMissChecked` flag
+- Combo system: `comboMultiplier` starts at 1, increments on near miss; display only when >= 2; `comboResetTimer` countdown for 3s timeout + fade; reset to 1 on collision or timeout
 
 ---
 

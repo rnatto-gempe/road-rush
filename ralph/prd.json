@@ -269,7 +269,7 @@
         "Verify in browser: drive close to traffic, see near miss triggers, combo counter appears at x2+"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "Per-vehicle tracking: add minDistX and nearMissChecked to each vehicle object. Measure during vertical overlap (vehicle.bottom > player.top && vehicle.top < player.bottom). Check on exit."
     },
     {
