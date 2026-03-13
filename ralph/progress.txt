@@ -1,184 +1,25 @@
 # Ralph Progress Log
-Started: Fri Mar 13 18:22:04 -03 2026
+Started: Fri Mar 13 19:15:22 -03 2026
 ---
 
 ## Codebase Patterns
-- AudioManager is a module-scope singleton in src/main.js — init() creates AudioContext, resume() handles autoplay policy
-- All audio nodes must connect through AudioManager.masterGain for global mute support
-- Use gain envelopes (0.01s attack/release) on all oscillators/noise to avoid clicks
-- Use oscillator.onended / source.onended to disconnect nodes and prevent memory leaks
-- AudioContext is created on first Enter press in titleState (browser autoplay policy compliance)
-- The game has two places where Enter starts gameplay: titleState and gameOverState — both need audio handling
-- FSM calls onExit() automatically if defined — use it for cleanup when leaving a state (covers all exit paths)
-- Long-lived audio nodes (engine, road, nitro) use start/stop/update pattern: start in onEnter, stop in onExit, update per frame
-- Nitro audio activation is driven by nitroTimer in playingState.update, not in updateNitroItems — keeps audio logic centralized
-- Reuse noise buffers (store on AudioManager) when creating looping noise sources to avoid repeated buffer generation
-- exponentialRampToValueAtTime cannot ramp to 0 — use 0.001 as the floor for all decay envelopes
-- Shield break has TWO trigger locations: handleVehicleCollision and border collision — both need consistent SFX
-- Pickup SFX gains (0.25-0.35) sit below collision/explosion hierarchy (0.4-0.8) — maintain this for new SFX
-- Coin cluster ascending pitch uses AudioManager.coinSeq with a 0.4s timeout, decremented via updateCoinSeq(dt) in game loop
-- Near miss/combo/bonus SFX gains (0.2-0.3) sit at or below pickup SFX hierarchy — maintain volume ordering: explosion > collision > pickups >= bonus SFX
-- triggerNearMiss() is the single trigger point for near miss whoosh + combo stinger — no need to wire multiple locations
-- Overtake bonus SFX is in the traffic filter callback (v.y > 760 && !v.collided) — fires frequently, keep it subtle
-- Title drone and state-specific ambient audio: start in onEnter (guard with ctx check), stop in onExit — follows same pattern as engine/road
-- Beat scheduler uses AudioContext.currentTime look-ahead pattern — schedule ~4 beats ahead, refill as time advances (never use setTimeout/setInterval for musical timing)
-- State-specific ambient audio (rumble, drone) follows onEnter/onExit pattern — start in onEnter, stop in onExit; cancelScheduledValues before new ramps on stop
-- Global HUD overlays (mute icon) render AFTER ctx.restore() in gameLoop, outside the shake transform, to stay stable in all states
+- AudioManager uses long-lived nodes stored as properties (engine, road, nitro, pad, etc.) — start/stop/update triplets follow the same pattern
+- playingState.onEnter/onExit are the canonical hooks for starting/stopping gameplay audio
+- updateBeat() is called every frame in playingState.update; it schedules beats ahead using AudioContext.currentTime (look-ahead scheduling pattern)
+- beat.beatIndex increments once per scheduled beat — use Math.floor(beatIndex / 4) % N for bar-level events
+- All audio nodes must connect through AudioManager.masterGain for mute to work
+- Pad oscillators use `osc.detune` (Web Audio API) to apply cents offset without touching frequency directly
 
----
-
-## 2026-03-13 18:23 - US-001
-- Implemented AudioManager object with AudioContext, masterGain, muted state, toggleMute()
-- Added playTone(freq, duration, type, gainValue) helper with gain envelope and auto-disconnect
-- Added createNoise(duration, filterFreq, filterType) helper with filter, envelope, auto-disconnect
-- AudioContext init/resume on first Enter press in titleState
+## 2026-03-13 - US-001
+- Implemented harmonic chord pad using supersaw timbre (3 detuned sawtooth oscillators per note)
+- Am → F → C → G progression in A minor, chord changes every 4 beats (1 bar), 4-bar loop
+- 3 notes per chord × 3 detuned oscillators = 9 oscillators total, all routed through shared lowpass filter → pad gain → masterGain
+- Chord frequencies placed above 200Hz (A4=440, C5=523, E5=659 etc.) to avoid clashing with engine drone (60-180Hz)
+- Filter cutoff (400→1200Hz) and volume (0.12→0.20) scale with scrollSpeed via updatePad()
+- Chord changes driven by updateBeat() — calls updatePadChord(beatIndex) on each newly scheduled beat
 - Files changed: src/main.js
 - **Learnings for future iterations:**
-  - AudioManager is module-scoped (not on window), so browser console can't access it directly — use evaluate with module context or add temp debug
-  - The titleState and gameOverState both have Enter key handlers — future audio state transitions need to handle both paths
-  - Build requires `npm install` first if node_modules is missing
-  - No console errors after AudioManager integration — Web Audio API is well-supported
----
-
-## 2026-03-13 21:27 - US-002
-- Wired engine drone to playingState lifecycle: startEngine() in onEnter, stopEngine() in onExit, updateEngine(scrollSpeed) every frame
-- Engine methods (startEngine, stopEngine, updateEngine) were already implemented in US-001 AudioManager
-- Added onExit() to playingState — FSM already supports it, covers both explosion and fuel-empty exit paths
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - The FSM calls onExit() automatically if defined on the current state — use this for cleanup
-  - playingState has two exit paths: collision → explosionState, fuel empty → gameOverState; onExit covers both
-  - Engine drone uses long-lived nodes with setTargetAtTime for smooth parameter changes — no per-frame node creation
----
-
-## 2026-03-13 - US-003
-- Added road ambience: looping white noise through band-pass filter (~300-800Hz), volume/bandwidth scale with scrollSpeed
-- Added nitro boost audio: high-freq sawtooth harmonic at 2x engine freq with own gain node, plus 1.3x engine pitch boost via updateEngine
-- Road noise starts/stops with engine in playingState onEnter/onExit
-- Nitro audio activates/deactivates based on nitroTimer in playingState.update
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Modifying updateEngine to check nitro.active flag is cleaner than manually setting pitch in startNitro — avoids fighting with per-frame updates
-  - Noise buffer can be cached on AudioManager (road.buffer) and reused across start/stop cycles
-  - stopNitro must be called before stopEngine in onExit to avoid accessing dead engine nodes
-  - The nitro harmonic needs per-frame updateNitro() calls to track the boosted engine frequency
----
-
-## 2026-03-13 - US-004
-- Added playCrash() SFX: high-pass noise burst (metallic clang) + low sine thump at 60Hz, both 0.15s with exponential decay
-- Added playExplosion() SFX: low sine sweep 80→30Hz over 0.5s + noise burst with decaying LP filter over 0.8s + 4 random crackle bursts over 1.5s
-- Added playShieldBreak() SFX: sine sweep 2kHz→500Hz over 0.2s + short high-pass noise burst
-- Wired playCrash() into handleVehicleCollision (fatal collision path)
-- Wired playExplosion() into explosionState.onEnter()
-- Wired playShieldBreak() into both shield break locations (vehicle collision + border collision)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - There are TWO shield break locations: handleVehicleCollision (line ~850) and border collision check (line ~1109) — both need SFX
-  - Explosion is the loudest event (gain 0.8) vs crash/shield (0.4-0.5) — maintain this hierarchy for future SFX
-  - exponentialRampToValueAtTime cannot ramp to 0 (must use 0.001) — use this for all decay envelopes
-  - Crackle bursts use scheduled start times (now + delay) with gain automation starting at the same offset
----
-
-## 2026-03-13 - US-005
-- Added playFuelPickup() SFX: ascending sine 400→800Hz over 0.15s with soft envelope
-- Added playCoinPickup() SFX: triangle wave ding at 1200Hz+, pitch rises +50Hz per rapid coin in cluster via coinSeq counter
-- Added playNitroPickup() SFX: aggressive sawtooth sweep 200→600Hz over 0.3s
-- Added playShieldPickup() SFX: two detuned sines at 500Hz/505Hz creating 5Hz beat frequency, 0.4s with slow fade-in
-- Added updateCoinSeq(dt) to decay the cluster sequence counter after 0.4s gap
-- Wired all 4 SFX into their respective update functions (updateFuelItems, updateCoins, updateNitroItems, updateShieldItems)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Coin cluster ascending pitch uses a sequence counter (coinSeq) with a 0.4s timeout — reset timer is decremented in the game update loop
-  - Shield pickup plays SFX even when player already has shield (item still gets collected with anim) — this is intentional for feedback
-  - Pickup SFX gains are in the 0.25-0.35 range to sit below collision/explosion hierarchy
----
-
-## 2026-03-13 - US-006
-- Added playNearMiss() SFX: band-passed noise burst (~2kHz center, Q 1.5) for 0.1s whoosh
-- Added playComboUp(combo) SFX: ascending sine stinger at 600Hz + combo×100Hz, 0.15s — triggers at x2+
-- Added playSurvivorBonus() SFX: major chord with three sines at 400/500/600Hz, 0.3s gentle decay
-- Added playOvertake() SFX: subtle low-pass filtered sawtooth sweep 80→120Hz, 0.15s
-- Wired near miss whoosh + combo stinger into triggerNearMiss()
-- Wired survivor bonus chord into survivor bonus scoring block in playingState.update
-- Wired overtake vroom into traffic removal filter (clean overtake path)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - triggerNearMiss() is the single trigger point for all near miss audio — no need to wire multiple locations
-  - Overtake bonus fires for every clean vehicle pass — keep its SFX very subtle (gain 0.2) to avoid fatigue
-  - Combo stinger uses the already-incremented comboMultiplier value, so at first near miss (combo goes 1→2) it plays at freq 800Hz
-  - Volume hierarchy: explosion (0.8) > collision (0.5) > pickups (0.25-0.35) >= bonus SFX (0.2-0.3)
----
-
-## 2026-03-13 - US-007
-- Added playFuelBeep() SFX: square wave 800Hz, 0.08s with gain envelope to avoid clicks
-- Added updateFuelWarning(dt, fuelPct) timer-based beep scheduler with 3 tiers: <25% (0.48s cycle), <15% (0.33s cycle), <5% (0.2s rapid cycle)
-- Fuel warning state (fuelWarning.timer) stored on AudioManager, reset in resetGameState()
-- Wired updateFuelWarning into playingState.update after fuel drain logic
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Timer-based repeating SFX is cleanest as a decrementing timer checked per frame, not setInterval — stays in sync with game loop and pauses
-  - Fuel percentage is computed as gameState.fuel / FUEL_INITIAL — reused from renderFuelHUD pattern
-  - Warning beep gain (0.25) fits in the existing hierarchy below pickups but remains clearly audible
-  - Resetting fuelWarning.timer to 0 on fuel collect above threshold ensures immediate beep if fuel drops again
----
-
-## 2026-03-13 - US-008
-- Added startTitleDrone() method: low sine drone (~55Hz) with LFO amplitude modulation (~0.3Hz) + soft filtered noise pad (low-pass ~200Hz)
-- Added stopTitleDrone() method: 0.3s crossfade out, then disconnects all nodes
-- Wired titleState.onEnter to start drone if AudioContext already exists (return visits)
-- Wired titleState.onExit to stop drone with crossfade
-- On first Enter press: drone starts briefly then crossfades as we transition to playingState
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - AudioContext doesn't exist on first titleState visit (created on Enter press) — must guard startTitleDrone with ctx check
-  - Title drone on first play is very brief (starts on Enter, immediately transitions) — the real payoff is on return visits to title
-  - titleState had no onExit before — FSM calls it automatically, use for audio cleanup
-  - LFO amplitude modulation connects to gain.gain AudioParam directly — modulation depth controlled by LFO gain node
----
-
-## 2026-03-13 - US-009
-- Added rhythmic beat scheduler to AudioManager with kick drum, hi-hat, and sub bass
-- Kick: sine 150→50Hz sweep with 0.1s exponential decay on every beat
-- Hi-hat: noise burst with high-pass 8kHz on off-beats (halfway between beats)
-- Sub bass: sine 45Hz on every 4th beat for low-end pulse
-- Tempo maps to scrollSpeed: 90 BPM at 200px/s → 150 BPM at 800px/s
-- Beat scheduling uses AudioContext.currentTime look-ahead (~4 beats), refilled each frame
-- Wired startBeat/stopBeat into playingState onEnter/onExit, updateBeat in update loop
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - AudioContext.currentTime look-ahead scheduling is the correct pattern for musical timing — never use setTimeout/setInterval
-  - Beat scheduler state (scheduledUpTo, beatIndex) must be reset in startBeat to avoid stale scheduling on retry
-  - Hi-hat noise buffers are short-lived (0.05s) and cheap — no need to cache like the road noise buffer
-  - stopBeat only needs to set running=false — already-scheduled sounds will play out naturally (they're short percussive hits)
-  - Beat gains (kick 0.35, hi-hat 0.12, sub 0.25) sit in the mix below SFX but audible as rhythm backbone
----
-
-## 2026-03-13 - US-010
-- Added startExplosionRumble() / stopExplosionRumble(): looping filtered noise (LP 80Hz) with 1s fade-in during explosionState
-- Added startGameOverDrone() / stopGameOverDrone(): two detuned sines (48Hz + 51Hz) creating dissonance + soft filtered noise tail
-- Wired startExplosionRumble into explosionState.onEnter (alongside playExplosion)
-- Added explosionState.onExit to stop rumble on transition to gameOverState
-- Added gameOverState.onEnter audio: starts somber drone after stats capture
-- Added gameOverState.onExit: stops somber drone cleanly on retry (Enter → playingState)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - explosionState had no onExit before — adding it follows same FSM pattern as titleState/playingState
-  - gameOverState has two entry paths: from explosionState (collision) and from playingState (fuel empty) — audio must work for both
-  - Rumble buffer can be shared with game over drone noise (_rumbleBuffer on AudioManager) to avoid duplicate allocation
-  - cancelScheduledValues(now) is needed before setTargetAtTime when stopping nodes that may still have pending ramps
-  - Game over drone gains (0.15 osc, 0.04 noise) are subtle — sit below the volume hierarchy as ambient atmosphere
----
-
-## 2026-03-13 - US-011
-- Added renderMuteIcon(ctx) function: canvas-drawn speaker icon with sound wave arcs (unmuted) or X mark (muted)
-- Added canvas click event listener with coordinate mapping (screen → canvas) for icon click detection
-- Added M key toggle using consumeKey('m')/consumeKey('M') in game loop (works in all states)
-- Mute icon renders after fsm.render() and ctx.restore() so it's visible in all states and unaffected by screen shake
-- Icon positioned at top-right (CANVAS_WIDTH - 28, 54), semi-transparent (0.5 alpha)
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Canvas click detection needs getBoundingClientRect + scale factor to map screen coords to canvas coords (letterbox scaling)
-  - Global overlays should render outside the shake ctx.save/restore block to stay stable
-  - consumeKey checks both lowercase and uppercase to handle caps lock state
-  - Browser verified: icon visible on title screen with correct speaker shape and wave arcs
+  - The `beat.beatIndex` is incremented inside the while-loop in `updateBeat()` — call `updatePadChord` after the increment to get the latest index
+  - AudioManager is module-level (not exported to window), so browser evaluate can't access it directly; use screenshot to verify visual game state instead
+  - `osc.detune.setValueAtTime(cents, now)` is the correct API for supersaw detuning — no need to compute frequency manually
 ---
