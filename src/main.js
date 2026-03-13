@@ -865,6 +865,110 @@ const AudioManager = {
     this.titleDrone = { osc: null, lfo: null, lfoGain: null, noiseSource: null, noiseGain: null, gain: null };
   },
 
+  // ─── Rhythmic beat scheduler ───
+  beat: { running: false, nextBeatTime: 0, beatIndex: 0, scheduledUpTo: 0 },
+
+  startBeat() {
+    if (!this.ctx) return;
+    this.beat.running = true;
+    this.beat.nextBeatTime = this.ctx.currentTime + 0.1; // slight delay to sync
+    this.beat.beatIndex = 0;
+    this.beat.scheduledUpTo = this.beat.nextBeatTime;
+  },
+
+  stopBeat() {
+    this.beat.running = false;
+    this.beat.beatIndex = 0;
+    this.beat.scheduledUpTo = 0;
+  },
+
+  // Schedule individual beat sounds at precise times
+  _scheduleKick(time) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(50, time + 0.1);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.11);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  _scheduleHiHat(time) {
+    if (!this.ctx) return;
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 0.05);
+    const buffer = this.ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(8000, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.12, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(time);
+    source.stop(time + 0.06);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  _scheduleSubBass(time) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(45, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.25, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.21);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Called every frame from playingState.update — schedules beats ahead using AudioContext timing
+  updateBeat(scrollSpeed) {
+    if (!this.ctx || !this.beat.running) return;
+    const now = this.ctx.currentTime;
+    // Map scrollSpeed 200→800 to BPM 90→150
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    const bpm = 90 + t * 60;
+    const beatInterval = 60 / bpm; // seconds per beat (quarter note)
+    const halfBeat = beatInterval / 2; // for off-beat hi-hat
+
+    // Schedule ~4 beats ahead
+    const lookAhead = beatInterval * 4;
+    while (this.beat.scheduledUpTo < now + lookAhead) {
+      const beatTime = this.beat.scheduledUpTo;
+      const idx = this.beat.beatIndex;
+
+      // Kick on every beat
+      this._scheduleKick(beatTime);
+
+      // Hi-hat on off-beats (halfway between beats)
+      this._scheduleHiHat(beatTime + halfBeat);
+
+      // Sub bass on every 4th beat
+      if (idx % 4 === 0) {
+        this._scheduleSubBass(beatTime);
+      }
+
+      this.beat.scheduledUpTo += beatInterval;
+      this.beat.beatIndex++;
+    }
+  },
+
   // Fuel warning beep state
   fuelWarning: { timer: 0 },
 
@@ -2459,10 +2563,12 @@ const playingState = {
   onEnter() {
     AudioManager.startEngine();
     AudioManager.startRoad();
+    AudioManager.startBeat();
   },
 
   onExit() {
     AudioManager.stopNitro();
+    AudioManager.stopBeat();
     AudioManager.stopEngine();
     AudioManager.stopRoad();
   },
@@ -2473,6 +2579,7 @@ const playingState = {
     AudioManager.updateEngine(gameState.scrollSpeed);
     AudioManager.updateRoad(gameState.scrollSpeed);
     AudioManager.updateNitro();
+    AudioManager.updateBeat(gameState.scrollSpeed);
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
