@@ -41,8 +41,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Reuse the existing particles[] array and updateParticles()/renderParticles() functions — same pipeline as sparks, just different colors/sizes/lifetimes. The spawnSparks() function can be used as reference but a new spawn function is needed for the different parameters."
+      "passes": true
     },
     {
       "id": "US-003",
@@ -64,8 +63,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "The old explosion system (explosions[] array at ~line 142, spawnExplosion at ~line 357, updateExplosions at ~line 361, renderExplosions at ~line 369) is fully replaced. gameOverState.update() calls updateExplosions(dt) at ~line 1921 and gameOverState.render() calls renderExplosions(ctx) at ~line 1934 — both must be removed."
+      "passes": true
     },
     {
       "id": "US-004",
@@ -80,8 +78,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Simple overlay effect. Render order in explosionState.render() should be: frozen world → shockwave rings → particles → screen flash (on top of everything briefly)."
+      "passes": true
     },
     {
       "id": "US-005",
@@ -99,8 +96,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "renderTraffic() renders all vehicles normally (frozen). After that, scattered vehicles need an additional render pass with rotation/alpha applied. Alternatively, modify the render loop to check the scattered flag per vehicle. The traffic array already has vehicle objects with x, y, width, height, color properties."
+      "passes": true
     },
     {
       "id": "US-006",
@@ -118,8 +114,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "The fade-in happens within explosionState's render, not in gameOverState. By the time we transition to gameOverState, the overlay is fully opaque and the text is fully visible, so the transition is seamless. gameOverState then takes over with its normal render (solid background + text). The stats (finalTime, finalDistance, finalScore, isNewBest, bestScore) must be computed in explosionState.onEnter() and shared with both the fade-in render and gameOverState."
+      "passes": true
     },
     {
       "id": "US-007",
@@ -139,8 +134,7 @@
         "Typecheck/lint passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "resetGameState() is at ~line 544. It already clears particles.length = 0 and explosions.length = 0. Need to add cleanup for all new state variables introduced by previous stories. Also verify that retrying from explosionState (if Enter is somehow pressed) and from gameOverState both work correctly."
+      "passes": true
     }
   ]
 }

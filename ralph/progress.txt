@@ -25,4 +25,18 @@ Started: Fri Mar 13 15:11:23 -03 2026
   - `playerVisible` flag is module-level (line ~199); `explosionState.onEnter()` sets it false, `resetGameState()` sets it true
   - US-002 should clear `particles[]` in `explosionState.onEnter()` and spawn fire/debris particles
   - US-003 should add `shockwaveRings[]` and remove old `spawnExplosion()`/`updateExplosions()`/`renderExplosions()` functions + `gameOverState` calls to them
+
+## 2026-03-13T18:23:55 - US-002 through US-007
+- US-002: Spawned 40 fire/debris particles in explosionState.onEnter() (30% debris, 70% fire colors), cleared pre-existing particles. Added updateParticles/renderParticles calls to explosionState.
+- US-003: Added shockwaveRings[] array; implemented renderShockwaveRings(); deprecated old spawnExplosion/updateExplosions/renderExplosions; removed those calls from gameOverState; added shockwaveRings reset in resetGameState.
+- US-004: Added screenFlashAlpha to explosionState; fades from 1.0 over 0.2s; white fullscreen rect rendered after all effects; reset in resetGameState.
+- US-005: In onEnter(), vehicles within 120px marked as scattered with outward velocity, spin rate, alpha=1.0. In update(), scattered vehicles move/spin/fade over 1.5s. Modified renderTraffic() to skip scattered vehicles; added separate scattered vehicle render pass with ctx.save/translate/rotate.
+- US-006: Added fadeInAlpha and textAlpha to explosionState. fadeIn starts at 1.0s elapsed (0.9s ramp); text starts at 1.2s elapsed (0.8s ramp). Added dark overlay + game over text render in explosionState.render(). isNewBest/bestScore computed in onEnter() and passed to gameOverState. gameOverState.onEnter() skips best score computation when statsPreset.
+- US-007: Added resetGameState() resets for shockwaveRings, playerVisible, screenFlashAlpha, fadeInAlpha, textAlpha, timer. traffic=[] already clears scattered flags. Verified all state properly cleaned on retry.
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - vehicles don't have a `color` property — color is type-based; use `typeColors` lookup for custom renders
+  - `renderTraffic()` now skips vehicles with `v.scattered = true`
+  - explosionState.onEnter() both computes best score and stores to localStorage (gameOverState.onEnter() skips this when statsPreset)
+  - resetGameState() references explosionState by name — works because it's called at runtime, not parse time
 ---
