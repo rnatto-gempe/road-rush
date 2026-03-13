@@ -38,7 +38,7 @@
         "Verify in browser using dev-browser skill: arpeggio melody audible and note speed changes with speed"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
