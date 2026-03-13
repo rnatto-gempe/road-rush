@@ -1,140 +1,200 @@
 {
   "project": "Road Rush",
-  "branchName": "ralph/explosion-game-over",
-  "description": "Cinematic explosion VFX on fatal collision game over — fire/debris particles, shockwave rings, screen flash, traffic scatter, and gradual fade-in to game over screen",
+  "branchName": "ralph/procedural-sound",
+  "description": "Procedural Sound System — fully synthesized audio via Web Audio API with engine drone, SFX, adaptive music, and mute toggle. Zero audio files.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create explosionState FSM state and wire fatal collision to it",
-      "description": "As a developer, I need a dedicated explosionState in the FSM to orchestrate the cinematic explosion sequence, keeping it cleanly separated from gameOverState logic.",
+      "title": "Audio engine foundation and AudioManager",
+      "description": "As a developer, I need a centralized AudioManager using the Web Audio API so that all sound systems share one AudioContext and can be globally controlled.",
       "acceptanceCriteria": [
-        "New explosionState object with onEnter(), update(dt), render(ctx) methods added to src/main.js",
-        "In handleVehicleCollision(), fatal collision (scrollSpeed > 600) transitions to explosionState instead of gameOverState",
-        "Remove the old spawnExplosion() call from handleVehicleCollision() for fatal collisions",
-        "explosionState.onEnter() captures explosion origin (player car center x/y), saves final stats (elapsedTime, distanceTraveled, score), and initializes an explosion timer to 2.0s",
-        "explosionState.onEnter() sets a player car visibility flag to false so the car is hidden during explosion",
-        "explosionState.render() calls renderRoad(), renderTraffic() to show the frozen game world as background (no position updates)",
-        "explosionState.render() does NOT call renderPlayer() (car is hidden)",
-        "explosionState.render() does NOT render collectible items (fuel, coins, nitro, shields) during explosion",
-        "explosionState.update() decrements the explosion timer; when timer reaches 0, transitions to gameOverState",
-        "gameOverState receives final stats from explosionState (finalTime, finalDistance, finalScore) — no stat capture logic duplicated in gameOverState.onEnter() for collision deaths",
-        "Fuel empty death still transitions directly to gameOverState (skips explosionState), and gameOverState.onEnter() still captures stats for fuel empty deaths",
-        "Typecheck/lint passes"
+        "Create an AudioManager object at module scope in src/main.js with a single AudioContext",
+        "AudioContext is created/resumed on first user interaction (Enter key press on title screen) to comply with browser autoplay policy",
+        "Expose a masterGain node connected to AudioContext.destination for global volume control",
+        "Expose a muted boolean state and toggleMute() function that sets masterGain.gain to 0 or 1",
+        "Provide helper: playTone(freq, duration, type, gainValue) — creates oscillator+gain, connects through masterGain, auto-disconnects on end",
+        "Provide helper: createNoise(duration, filterFreq, filterType) — generates white noise buffer, applies filter, connects through masterGain, auto-disconnects",
+        "All helpers use gain envelopes (short attack/release of ~0.01s) to avoid clicks and pops",
+        "Helpers use oscillator.onended to disconnect nodes and prevent memory leaks",
+        "No performance degradation — game maintains 60 FPS with AudioManager initialized",
+        "Verify in browser that AudioContext initializes on first Enter press (check console or state)"
       ],
       "priority": 1,
-      "passes": true
+      "passes": true,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Fire and debris particle burst on explosion",
-      "description": "As a player, I want to see fire and debris particles burst outward from the car on fatal collision so that the crash feels dramatic and visceral.",
+      "title": "Engine drone sound tied to scroll speed",
+      "description": "As a player, I want to hear a continuous engine hum while driving so that speed is perceptible by sound.",
       "acceptanceCriteria": [
-        "In explosionState.onEnter(), clear the existing particles[] array to remove any pre-existing particles (e.g. nitro trail blue particles)",
-        "Spawn 30-50 fire/debris particles from the explosion origin point",
-        "Fire particles use colors: #FFF176 (bright yellow), #FFB74D (orange), #FF7043 (red-orange), #E53935 (red)",
-        "Debris particles use colors: #757575 (gray), #4E342E (dark brown), mixed in at ~30% ratio",
-        "Particles spread outward in all directions with random velocities (200-400 px/s)",
-        "Particles have varied sizes (2-8px) and lifetimes (0.8-1.5s)",
-        "Particles fade out over their lifetime using the existing alpha = life/maxLife pattern",
-        "explosionState.update() calls updateParticles(dt) to tick particle positions and lifetimes",
-        "explosionState.render() calls renderParticles(ctx) after rendering the frozen world",
-        "Typecheck/lint passes"
+        "Engine sound uses a sawtooth oscillator with a low-pass filter (cutoff ~400-800Hz)",
+        "Engine pitch maps proportionally to scrollSpeed: ~60Hz at 200px/s → ~180Hz at 800px/s",
+        "Engine volume ramps up smoothly with speed using setTargetAtTime (not abrupt changes)",
+        "Engine oscillator starts when entering playingState and stops when leaving playingState",
+        "Use long-lived oscillator nodes with parameter automation (frequency.setTargetAtTime) — do NOT recreate nodes per frame",
+        "No clicks or pops on start, stop, or parameter changes (use gain ramp-up/down of ~0.05s)",
+        "Verify in browser that engine pitch audibly rises as the car accelerates"
       ],
       "priority": 2,
-      "passes": true
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Expanding shockwave rings replacing old explosion system",
-      "description": "As a player, I want to see large expanding shockwave rings emanate from the crash point so that the explosion feels powerful and layered.",
+      "title": "Road ambience and nitro boost audio",
+      "description": "As a player, I want road noise and a nitro boost whoosh to add depth to the driving experience.",
       "acceptanceCriteria": [
-        "New shockwave ring system with its own data array (e.g. shockwaveRings[]) storing ring state",
-        "On explosion start, initialize 3-4 concentric rings from the explosion origin",
-        "Rings have staggered start times (e.g. 0, 0.25, 0.5, 0.75 progress offsets) for cascading effect",
-        "Max radii are 120px, 140px, 160px, 180px (much larger than old 40-90px)",
-        "Ring colors shift from white/yellow (#FFFFFF, #FFF176) at small radius to orange/red (#FF7043, #E53935) as they expand",
-        "Rings fade in alpha as they expand (alpha = 1 - ringProgress)",
-        "Total ring animation duration ~1.2s",
-        "Ring line width starts at 4px and decreases as rings expand",
-        "explosionState.update() updates ring progress based on elapsed time",
-        "explosionState.render() renders rings after frozen world but before particles",
-        "Remove or deprecate old explosions[] array, spawnExplosion(), updateExplosions(), and renderExplosions() functions — they are fully replaced",
-        "Remove the updateExplosions(dt) call from gameOverState.update() and renderExplosions(ctx) call from gameOverState.render()",
-        "Typecheck/lint passes"
+        "Road ambience uses a white noise buffer through a band-pass filter (~300-800Hz center)",
+        "Road noise volume and filter bandwidth increase with scrollSpeed",
+        "Road noise starts/stops together with engine (playingState enter/exit)",
+        "Nitro boost temporarily raises engine pitch by ~30% and adds a high-freq sawtooth harmonic (~2x engine freq) with its own gain node",
+        "Nitro audio effect activates when nitroTimer > 0 and deactivates when nitro ends",
+        "All parameter transitions use setTargetAtTime for smooth crossfades",
+        "Verify in browser that road noise is audible and nitro pickup changes the sound"
       ],
       "priority": 3,
-      "passes": true
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Screen flash on impact",
-      "description": "As a player, I want to see a bright screen flash at the moment of collision so that the impact feels immediate and intense.",
+      "title": "Collision and explosion SFX",
+      "description": "As a player, I want impactful sounds on collision and explosion so that danger feels real and dramatic.",
       "acceptanceCriteria": [
-        "New screenFlashAlpha variable initialized to 1.0 in explosionState.onEnter()",
-        "explosionState.update() fades screenFlashAlpha from 1.0 to 0 over 0.2s (decrement by dt/0.2)",
-        "explosionState.render() draws a full-canvas white rectangle with globalAlpha = screenFlashAlpha after all other explosion effects",
-        "Flash is only visible for the first ~0.2s of the explosion, then fully transparent",
-        "Flash does not render when screenFlashAlpha <= 0",
-        "Typecheck/lint passes"
+        "Fatal collision triggers a metallic crash: short noise burst (high-pass ~2kHz, 0.15s) + low-freq impact thump (sine ~60Hz, 0.15s decay)",
+        "Explosion sequence (explosionState) plays a layered boom: low sine sweep 80→30Hz over 0.5s + noise burst with decaying low-pass filter + crackle (3-5 random short noise bursts spaced over 1.5s)",
+        "Shield break plays a crystalline shatter: high-freq sine sweep 2kHz→500Hz over 0.2s + short noise burst",
+        "Explosion is the loudest event in the game (gain ~0.8 vs ~0.3-0.5 for other SFX)",
+        "No audio clipping — use appropriate gain values",
+        "Collision SFX triggers from handleVehicleCollision() and explosionState.onEnter()",
+        "Shield break SFX triggers when shield absorbs a hit (existing shieldBreakFlash logic)",
+        "Verify in browser that collision and explosion sounds are distinct and impactful"
       ],
       "priority": 4,
-      "passes": true
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Nearby traffic reacts to explosion (scatter)",
-      "description": "As a player, I want nearby traffic vehicles to react to the explosion so that the crash feels like it has real impact on the world.",
+      "title": "Collectible pickup SFX",
+      "description": "As a player, I want satisfying audio feedback when collecting items so that pickups feel rewarding.",
       "acceptanceCriteria": [
-        "In explosionState.onEnter(), mark traffic vehicles within ~120px of explosion center as scattered",
-        "Scattered vehicles get new properties: scatterVx, scatterVy (outward velocity), scatterRotation (spin rate), scatterAlpha (starts at 1.0)",
-        "Outward velocity is proportional to proximity — closer vehicles are pushed harder (e.g. 150-300 px/s)",
-        "Scatter direction is calculated as vector from explosion center to vehicle center",
-        "explosionState.update() updates scattered vehicles: position += velocity*dt, rotation += spinRate*dt, alpha decreases over time",
-        "Non-scattered vehicles remain frozen (no position/rotation updates)",
-        "Scattered vehicles fade out completely within ~1.5s",
-        "explosionState.render() renders scattered vehicles with their current rotation and alpha (use ctx.save/translate/rotate/restore)",
-        "Typecheck/lint passes"
+        "Fuel pickup: warm ascending sine tone 400→800Hz over 0.15s with soft envelope",
+        "Coin pickup: bright metallic ding (triangle wave ~1200Hz, 0.1s, sharp attack). When collecting a cluster, each coin dings at slightly higher pitch (+50Hz per coin in sequence)",
+        "Nitro pickup: aggressive sawtooth sweep 200→600Hz over 0.3s",
+        "Shield pickup: ethereal tone using two detuned sines (~500Hz and ~505Hz creating beat frequency, 0.4s with slow fade-in)",
+        "Each SFX triggers at the point in code where the item is collected (fuel in updateFuelItems, coins in updateCoins, nitro in updateNitroItems, shield in updateShieldItems)",
+        "Each sound is distinct and instantly recognizable",
+        "Verify in browser that each pickup type has a different, satisfying sound"
       ],
       "priority": 5,
-      "passes": true
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Gradual game over screen fade-in over explosion",
-      "description": "As a player, I want the game over screen to fade in gradually over the explosion so that the transition feels smooth and cinematic.",
+      "title": "Near miss, combo, and bonus SFX",
+      "description": "As a player, I want audio feedback on near misses and bonuses to feel the adrenaline of risky driving.",
       "acceptanceCriteria": [
-        "New fadeInAlpha variable tracked in explosionState, starts at 0",
-        "After explosion timer passes ~1.0s (60-70% of 2.0s total), fadeInAlpha begins increasing",
-        "fadeInAlpha increases from 0 to 1.0 over ~0.8-1.0s",
-        "explosionState.render() draws a dark overlay (fillStyle #0A0A1A with globalAlpha = fadeInAlpha) over everything",
-        "Game over text (GAME OVER title, stats, retry prompt) renders on top of the dark overlay with a separate textAlpha that starts increasing ~0.2s after fadeInAlpha starts",
-        "Game over text content matches existing gameOverState layout: GAME OVER in red 44px, stats in white 18px, score in bold 22px, best score, pulsing retry text",
-        "Enter key is blocked during explosionState — retry only works after transition to gameOverState",
-        "When explosionState transitions to gameOverState, the game over screen is already fully visible (no visual pop or flash)",
-        "Typecheck/lint passes"
+        "Near miss plays a quick whoosh: band-passed noise burst 0.1s (~1-3kHz)",
+        "Combo multiplier increase (×2, ×3, etc.) adds an ascending pitch stinger: sine tone at 600Hz + combo×100Hz, 0.15s",
+        "Survivor bonus (30s clean) plays a triumphant short major chord: three sines at 400/500/600Hz, 0.3s with gentle decay",
+        "Overtake bonus plays a subtle low filtered sawtooth vroom, 0.15s",
+        "Near miss SFX triggers where nearMissFlash is set in the existing near miss detection code",
+        "Survivor bonus SFX triggers where SURVIVOR_BONUS points are added",
+        "Verify in browser that near miss whoosh is audible when passing close to traffic"
       ],
       "priority": 6,
-      "passes": true
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Clean state reset on retry",
-      "description": "As a developer, I need all new explosion-related state to be properly cleaned up when the player retries, to prevent visual glitches or stale state in the next game.",
+      "title": "Fuel warning beep",
+      "description": "As a player, I want an audio warning when fuel is critically low so I don't run out unexpectedly.",
       "acceptanceCriteria": [
-        "resetGameState() clears particles[] array (already done, verify it still works)",
-        "resetGameState() clears the new shockwave rings array",
-        "resetGameState() resets player car visibility flag to true",
-        "resetGameState() resets screenFlashAlpha to 0",
-        "resetGameState() resets fadeInAlpha to 0",
-        "resetGameState() resets explosion timer to 0",
-        "Traffic array is already emptied in resetGameState() (gameState.traffic = []), which clears scattered flags — verify this",
-        "After retry from a collision death, the new game starts clean with no explosion artifacts visible",
-        "After retry from a fuel empty death, the new game starts clean as well",
-        "The old explosions[] array cleanup (explosions.length = 0) can be removed if the old system was fully replaced",
-        "Typecheck/lint passes"
+        "When fuel < 25%, play a repeating warning beep: square wave ~800Hz, 0.08s on, 0.4s off",
+        "When fuel < 15%, beep faster: 0.08s on, 0.25s off",
+        "When fuel < 5%, beep rapidly: 0.08s on, 0.12s off",
+        "Warning stops immediately when fuel is collected above 25%",
+        "Warning respects mute state (goes through masterGain)",
+        "Implement using a timer tracking next beep time, checked in the fuel update logic",
+        "Verify in browser that beep starts at 25% fuel and accelerates as fuel drops"
       ],
       "priority": 7,
-      "passes": true
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Title screen ambient drone",
+      "description": "As a player, I want ambient sound on the title screen so the game feels atmospheric from the start.",
+      "acceptanceCriteria": [
+        "Title screen plays a low sustained sine drone (~50-60Hz) with slow LFO amplitude modulation (~0.3Hz)",
+        "Add a soft filtered noise pad (low-pass ~200Hz, very low gain) for texture",
+        "Drone starts when titleState is entered (after AudioContext is resumed)",
+        "Drone crossfades out over 0.3s when transitioning to playingState",
+        "On return to title (after game over → retry is NOT title, so this is only initial load), drone restarts",
+        "Verify in browser that title screen has a calm, mysterious ambient sound"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Playing state rhythmic beat",
+      "description": "As a player, I want a rhythmic beat during gameplay that intensifies with speed for a cinematic driving experience.",
+      "acceptanceCriteria": [
+        "Synthesized kick drum: sine 150→50Hz with 0.1s exponential decay, triggered on beat",
+        "Hi-hat on off-beats: short noise burst with high-pass 8kHz, 0.05s decay",
+        "Optional sub bass note on every 4th beat: sine 40-50Hz, 0.2s",
+        "Tempo (BPM) maps to scrollSpeed: ~90 BPM at 200px/s → ~150 BPM at 800px/s",
+        "Beat scheduling uses AudioContext.currentTime for precise timing (not setTimeout/setInterval)",
+        "Implement a beat scheduler that pre-schedules ~2-4 beats ahead and refills as time advances",
+        "Beat starts when entering playingState; scheduler stops when leaving playingState",
+        "Tempo changes smoothly as speed increases (recalculate interval on each scheduler tick)",
+        "Verify in browser that beat is audible and tempo increases with speed"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Explosion silence and game over somber drone",
+      "description": "As a player, I want the music to cut on explosion and shift to a somber tone on game over for cinematic impact.",
+      "acceptanceCriteria": [
+        "On transition to explosionState: engine, road noise, and beat stop abruptly (gain → 0 in 0.05s, then disconnect)",
+        "During explosionState: only explosion SFX plays, plus a low ominous rumble (filtered noise, very low freq ~40-80Hz, slow fade-in over 1s)",
+        "On transition to gameOverState: rumble crossfades into a slow somber drone — two detuned low sines (~48Hz and ~51Hz) creating dissonance + very soft filtered noise tail",
+        "Game over drone loops until player presses Enter (retry)",
+        "On retry (transition back to playingState via titleState path), all game over audio stops cleanly and engine/beat restart",
+        "No orphaned audio nodes after state transitions (all nodes properly stopped and disconnected)",
+        "Verify in browser that explosion cuts the music and game over has a somber atmosphere"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Mute/unmute HUD button and M key toggle",
+      "description": "As a player, I want a visible mute button so I can toggle sound on/off without leaving the game.",
+      "acceptanceCriteria": [
+        "Speaker icon rendered in top-right corner of canvas using simple canvas drawing (lines/arcs, no external assets)",
+        "Icon shows speaker-on (speaker body + 2 sound wave arcs) when unmuted",
+        "Icon shows speaker-off (speaker body + X mark, no wave arcs) when muted",
+        "Clicking the icon area (add click event listener on canvas, check coordinates) toggles AudioManager.toggleMute()",
+        "Pressing M key also toggles mute (using existing consumeKey pattern)",
+        "Icon is rendered in all game states (title, playing, explosion, game over)",
+        "Icon is semi-transparent (~0.5 alpha) to not distract from gameplay, full opacity on hover would be nice but not required",
+        "Verify in browser that icon is visible, clickable, and mute/unmute works"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
