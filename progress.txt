@@ -1,3 +1,24 @@
+## 2026-03-13 - US-011
+- Added fuel system: initial 100 units, drains at `(2.0 + effSpeed/800 * 3.0) * dt` per frame
+- Fuel drain uses `getEffectiveScrollSpeed()` so collision slowdown reduces consumption (mercy mechanic)
+- `spawnFuelItem()`: 60% chance in a lane adjacent to traffic, otherwise random lane; spawn interval = `FUEL_SPAWN_BASE_MIN + elapsed * 5 + random(0, 500)px`
+- Fuel item: green circle (#43A047) with radial glow, "F" label, 24px diameter, moves at full scroll speed (road-fixed, ownSpeed=0)
+- Collection: AABB (24x24 hitbox = 100% of item size) against player hitbox; adds 20/18/15 units based on elapsed (<60s / 60-90s / 90s+), capped at 100
+- Collect animation: `collectAnim.timer = 0.2s`; scale 1.0→1.2, alpha 1.0→0 during animation, then removed
+- Game over on `fuel <= 0`: `gameOverState.causeOfDeath = 'Fuel Empty'` then transition
+- `gameOverState.causeOfDeath` field added ('' for collision, shown in amber on game over screen)
+- Fuel text overlay in playing state: green >50%, yellow 20-50%, red <20%
+- Debug overlay shows fuel value; debug Y positions shifted down to accommodate extra time/fuel rows
+- `resetGameState()` resets fuel=100, fuelItems=[], nextFuelSpawnDistance
+- Files changed: road-rush/src/main.js
+- Verified in browser: fuel shows 85% at 5.3s, 60% (yellow) at 26.7s; draining correctly
+- **Learnings for future iterations:**
+  - Fuel items are road-fixed (no ownSpeed): `item.y += getEffectiveScrollSpeed() * dt` (not base scrollSpeed)
+  - `collectAnim` object pattern: store `{timer}` on item, check `!== null` before normal update logic; splice item when timer <= 0
+  - Always set `gameOverState.causeOfDeath` BEFORE `fsm.transition(gameOverState)` — `onEnter()` doesn't set it
+  - `gameState.nextFuelSpawnDistance` vs `nextSpawnDistance` (traffic): both are absolute `distanceTraveled` thresholds, not relative offsets
+---
+
 ## 2026-03-13 - US-010
 - Added graded collision system: lateral (side-swipe) vs frontal (head-on) classification
 - Lateral: `abs(player.vx) > abs(relativeVy) * 0.5` → 20% speed reduction 0.8s + yellow/orange spark particles (4-8, 0.2s life)
@@ -82,6 +103,9 @@
 - Graded collision: `speedPenaltyMultiplier` + `speedPenaltyTimer` (module-level) apply multiplicative slow; `getEffectiveScrollSpeed()` wraps `scrollSpeed * multiplier`; ramp writes base `scrollSpeed` independently
 - Invulnerability: `invulnTimer` (module-level), blink via `Math.floor(invulnTimer / BLINK_INTERVAL) % 2` in renderPlayer
 - Particle system: module-level `particles[]` array with `{x,y,vx,vy,life,maxLife,color,size}` objects; update/render separate functions
+- Fuel system: `gameState.fuel` (0-100), drains per frame using `getEffectiveScrollSpeed()`; `gameState.fuelItems[]` with `{x,y,collectAnim}` (collectAnim=null until collected); road-fixed so scroll at effective speed (ownSpeed=0)
+- collectAnim pattern: `{timer: 0.2}` on item, skip normal update while non-null, splice when timer<=0; use `1 - timer/duration` as progress for scale/alpha
+- `gameOverState.causeOfDeath` must be set BEFORE `fsm.transition(gameOverState)`
 
 ---
 

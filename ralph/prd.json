@@ -198,7 +198,7 @@
         "Verify in browser: fuel drains visibly, collecting fuel extends run, game ends when empty"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "At 200 px/s: 2.75 u/s (~36s to empty without collecting). At 500 px/s: 3.875 u/s. At 800 px/s: 5.0 u/s. This is the session timer — even perfect play eventually runs out."
     },
     {
