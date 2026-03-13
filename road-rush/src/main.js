@@ -29,14 +29,63 @@ const SHAKE_INTENSITY = 10; // max px offset
 const INVULN_DURATION = 1.5; // seconds of invulnerability after any collision
 const BLINK_INTERVAL = 0.1; // seconds per blink toggle during invulnerability
 
-// Fuel system constants
-const FUEL_INITIAL = 100;
-const FUEL_DRAIN_BASE = 2.0;          // units/s base drain
-const FUEL_DRAIN_SPEED = 3.0;         // extra units/s at max speed (800 px/s)
-const FUEL_ITEM_RADIUS = 12;          // 24px diameter fuel circle
-const FUEL_SPAWN_BASE_MIN = 900;      // px traveled min spawn interval
-const FUEL_SPAWN_BASE_MAX = 1400;     // px traveled max spawn interval
-const FUEL_SPAWN_INTERVAL_GROWTH = 5; // extra px per elapsed second (scarcity ramp)
+// ─── Difficulty Config (single source of truth for all tunable difficulty params) ───
+const DIFFICULTY = {
+  speed: {
+    initial: 200,          // px/s starting scroll speed
+    phase1Cap: 600,        // px/s cap before phase 2 kicks in
+    phase1Rate: 5,         // px/s gained per elapsed second (phase 1)
+    phase2Rate: 1.5,       // px/s gained per fixed-dt tick (phase 2)
+    max: 800,              // px/s hard cap
+  },
+  traffic: {
+    // Each tier active until untilTime; last tier is the 70s+ tier
+    tiers: [
+      { untilTime: 20,       maxCount: 2, spawnMin: 1200, spawnMax: 1600 },
+      { untilTime: 40,       maxCount: 3, spawnMin: 800,  spawnMax: 1200 },
+      { untilTime: 70,       maxCount: 4, spawnMin: 600,  spawnMax: 900  },
+      { untilTime: Infinity, maxCount: 5, spawnMin: 400,  spawnMax: 700  },
+    ],
+    // Aggressive-type weight curve (interpolated between these knots)
+    aggressiveWeights: [
+      { time: 0,  weight: 0.00 },
+      { time: 30, weight: 0.15 },
+      { time: 60, weight: 0.35 },
+      { time: 90, weight: 0.60 },
+    ],
+    spawnPauseDuration: 1.5, // seconds after any collision with no new spawns
+    spawnPauseZone: 200,     // px above/below player Y counted as "close"
+  },
+  fuel: {
+    initial: 100,
+    drainBase: 2.0,          // units/s base drain
+    drainSpeed: 3.0,         // extra units/s at max speed (800 px/s)
+    spawnBaseMin: 900,        // px traveled min spawn interval
+    spawnBaseMax: 1400,       // px traveled max spawn interval
+    spawnIntervalGrowth: 5,   // extra px per elapsed second (scarcity ramp)
+    // Pickup amount decreases as run progresses
+    collectTiers: [
+      { untilTime: 60,       amount: 20 },
+      { untilTime: 90,       amount: 18 },
+      { untilTime: Infinity, amount: 15 },
+    ],
+  },
+};
+
+// Scroll speed ramp constants (aliases to DIFFICULTY for backward compat)
+const SPEED_RAMP_PHASE1_CAP  = DIFFICULTY.speed.phase1Cap;
+const SPEED_RAMP_PHASE1_RATE = DIFFICULTY.speed.phase1Rate;
+const SPEED_RAMP_PHASE2_RATE = DIFFICULTY.speed.phase2Rate;
+const SPEED_MAX              = DIFFICULTY.speed.max;
+
+// Fuel system constants (aliases to DIFFICULTY where applicable)
+const FUEL_INITIAL              = DIFFICULTY.fuel.initial;
+const FUEL_DRAIN_BASE           = DIFFICULTY.fuel.drainBase;
+const FUEL_DRAIN_SPEED          = DIFFICULTY.fuel.drainSpeed;
+const FUEL_ITEM_RADIUS          = 12;   // 24px diameter fuel circle
+const FUEL_SPAWN_BASE_MIN       = DIFFICULTY.fuel.spawnBaseMin;
+const FUEL_SPAWN_BASE_MAX       = DIFFICULTY.fuel.spawnBaseMax;
+const FUEL_SPAWN_INTERVAL_GROWTH = DIFFICULTY.fuel.spawnIntervalGrowth;
 const FUEL_COLLECT_ANIM_DURATION = 0.2;
 
 // Scoring constants
@@ -45,12 +94,6 @@ const OVERTAKE_BONUS = 25;       // points for clean overtake
 const SURVIVOR_BONUS = 300;      // points every 30s without collision
 const SURVIVOR_INTERVAL = 30;    // seconds between survivor bonuses
 const SCORE_LERP_RATE = 8;       // display score lerp speed
-
-// Scroll speed ramp constants
-const SPEED_RAMP_PHASE1_CAP = 600; // px/s — phase 1 ramp cap
-const SPEED_RAMP_PHASE1_RATE = 5;  // px/s per second in phase 1
-const SPEED_RAMP_PHASE2_RATE = 1.5; // px/s per second in phase 2
-const SPEED_MAX = 800; // px/s hard cap
 
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
@@ -107,6 +150,9 @@ let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
 const particles = [];             // spark particles
+
+// Post-collision spawn pause (US-014)
+let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -289,8 +335,9 @@ function handleVehicleCollision(v) {
     triggerShake(0.3, 6);
   }
 
-  // Start invulnerability window
+  // Start invulnerability window + spawn pause
   invulnTimer = INVULN_DURATION;
+  spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
 }
 
 // --- Game State (shared) ---
@@ -335,6 +382,7 @@ function resetGameState() {
   invulnTimer = 0;
   redFlash.alpha = 0;
   particles.length = 0;
+  spawnPauseTimer = 0;
   // Reset fuel state
   gameState.fuel = FUEL_INITIAL;
   gameState.fuelItems = [];
@@ -475,6 +523,7 @@ function updatePlayer(dt) {
   if (borderHit && invulnTimer <= 0) {
     applySpeedPenalty(0.7, 1.0); // 30% speed reduction for 1s
     invulnTimer = INVULN_DURATION;
+    spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
     gameState.survivorTimer = 0;
   }
 }
@@ -636,12 +685,15 @@ function renderFairnessDebug(ctx) {
   }
 }
 
-// Returns spawn config based on elapsed time
+// Returns spawn config based on elapsed time (reads from DIFFICULTY config)
 function getSpawnConfig(elapsed) {
-  if (elapsed < 20) return { maxCount: 2, spawnMin: 1200, spawnMax: 1600 };
-  if (elapsed < 40) return { maxCount: 3, spawnMin: 800, spawnMax: 1200 };
-  if (elapsed < 70) return { maxCount: 4, spawnMin: 600, spawnMax: 900 };
-  return { maxCount: 5, spawnMin: 400, spawnMax: 700 };
+  for (const tier of DIFFICULTY.traffic.tiers) {
+    if (elapsed < tier.untilTime) {
+      return { maxCount: tier.maxCount, spawnMin: tier.spawnMin, spawnMax: tier.spawnMax };
+    }
+  }
+  const last = DIFFICULTY.traffic.tiers[DIFFICULTY.traffic.tiers.length - 1];
+  return { maxCount: last.maxCount, spawnMin: last.spawnMin, spawnMax: last.spawnMax };
 }
 
 // Returns probability of picking an aggressive (lane-changing) vehicle type
@@ -700,8 +752,12 @@ function updateTraffic(dt) {
   const elapsed = gameState.elapsedTime;
   const { maxCount, spawnMin, spawnMax } = getSpawnConfig(elapsed);
 
-  // Try spawning — only if fairness constraint is satisfied
+  // Tick spawn pause timer
+  if (spawnPauseTimer > 0) spawnPauseTimer = Math.max(0, spawnPauseTimer - dt);
+
+  // Try spawning — only if fairness constraint is satisfied and not in spawn pause
   if (
+    spawnPauseTimer <= 0 &&
     gameState.traffic.length < maxCount &&
     gameState.distanceTraveled >= gameState.nextSpawnDistance
   ) {
@@ -811,11 +867,12 @@ function renderTraffic(ctx) {
 
 // --- Fuel System ---
 
-// Fuel pickup amount decreases over time
+// Fuel pickup amount decreases over time (reads from DIFFICULTY config)
 function getFuelCollectAmount(elapsed) {
-  if (elapsed < 60) return 20;
-  if (elapsed < 90) return 18;
-  return 15;
+  for (const tier of DIFFICULTY.fuel.collectTiers) {
+    if (elapsed < tier.untilTime) return tier.amount;
+  }
+  return DIFFICULTY.fuel.collectTiers[DIFFICULTY.fuel.collectTiers.length - 1].amount;
 }
 
 // Spawn a fuel item; 60% chance in a lane adjacent to an existing traffic vehicle
@@ -1121,10 +1178,11 @@ const playingState = {
       ctx.fillText(`Traffic: ${gameState.traffic.length}`, 8, 72);
       ctx.fillText(`Invuln: ${invulnTimer.toFixed(1)}s`, 8, 86);
       ctx.fillText(`Fuel: ${gameState.fuel.toFixed(1)}`, 8, 100);
+      if (spawnPauseTimer > 0) ctx.fillText(`SpawnPause: ${spawnPauseTimer.toFixed(1)}s`, 8, 114);
       // Type breakdown
       const counts = {};
       for (const v of gameState.traffic) counts[v.type] = (counts[v.type] || 0) + 1;
-      let y = 114;
+      let y = 128;
       for (const [type, count] of Object.entries(counts)) {
         ctx.fillText(`  ${type}: ${count}`, 8, y);
         y += 14;
