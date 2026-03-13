@@ -895,6 +895,33 @@ function renderFuelItems(ctx) {
   }
 }
 
+// --- Fuel HUD ---
+function renderFuelHUD(ctx) {
+  const fuelPct = gameState.fuel / FUEL_INITIAL;
+  const lowFuel = fuelPct < 0.2;
+
+  // Blink bar on/off every 0.3s when below 20%
+  const blinkOff = lowFuel && Math.floor(gameState.elapsedTime / 0.3) % 2 === 1;
+
+  if (!blinkOff) {
+    const barColor = fuelPct > 0.5 ? '#43A047' : fuelPct > 0.2 ? '#FFC107' : '#E53935';
+    ctx.fillStyle = barColor;
+    ctx.fillRect(0, 0, CANVAS_WIDTH * fuelPct, 4);
+  }
+
+  // Red vignette at screen edges when fuel < 20%
+  if (lowFuel) {
+    const vignette = ctx.createRadialGradient(
+      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.3,
+      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.9
+    );
+    vignette.addColorStop(0, 'rgba(229, 57, 53, 0)');
+    vignette.addColorStop(1, 'rgba(229, 57, 53, 0.25)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  }
+}
+
 // --- Title State ---
 const titleState = {
   pulseTime: 0,
@@ -992,16 +1019,15 @@ const playingState = {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
-    // Show elapsed time and fuel overlay
+    // Fuel bar HUD (full-width bar at top + low-fuel vignette)
+    renderFuelHUD(ctx);
+
+    // Show elapsed time overlay
     ctx.font = '14px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.fillText(`Time: ${gameState.elapsedTime.toFixed(1)}s`, 8, 8);
-    // Fuel color: green > 50%, yellow 20-50%, red < 20%
-    const fuelPct = gameState.fuel / FUEL_INITIAL;
-    ctx.fillStyle = fuelPct > 0.5 ? 'rgba(67,160,71,0.9)' : fuelPct > 0.2 ? 'rgba(255,193,7,0.9)' : 'rgba(229,57,53,0.9)';
-    ctx.fillText(`Fuel: ${gameState.fuel.toFixed(0)}%`, 8, 26);
 
     // Debug overlay (toggle with D key)
     if (debugMode) {
