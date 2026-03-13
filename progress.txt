@@ -1,4 +1,9 @@
 ## Codebase Patterns
+- Player object lives in `gameState.player`: {x, y, width, height, vx}
+- `getPlayerHitbox(player)` returns {x, y, w, h} at 80% size (player.x+4, player.y+6.5, 32, 51)
+- `updatePlayer(dt)` handles ArrowLeft/Right input, acceleration/deceleration, and road clamping
+- `renderPlayer(ctx, player)` draws rounded red rect + windshield + rear window
+- ctx.roundRect() is available in modern browsers (Chrome 99+, Safari 15.4+)
 - All game code lives in `road-rush/src/main.js` (single file, vanilla JS)
 - Road constants: ROAD_LEFT=40, ROAD_RIGHT=360, ROAD_WIDTH=320, LANE_WIDTH=80, LANE_COUNT=4
 - `gameState` is a shared mutable object; `resetGameState()` resets it on retry
@@ -8,6 +13,22 @@
 - scrollOffset scrolls indefinitely (no wrap needed in storage — only modulo at render time)
 - Canvas context state (lineDash, lineWidth, etc.) must be reset after use to avoid bleed-over
 
+---
+
+## 2026-03-13 - US-004
+- Added player constants: PLAYER_WIDTH=40, PLAYER_HEIGHT=64, PLAYER_Y=560, PLAYER_ACCEL=1200, PLAYER_DECEL=1800, PLAYER_MAX_SPEED=400
+- Added `player` object to `gameState` with x, y, width, height, vx
+- Added `getPlayerHitbox()` returning 80% hitbox (32x51 centered, +4x +6.5y offset)
+- Added `updatePlayer(dt)` with arrow key acceleration/deceleration and road clamping
+- Added `renderPlayer()` drawing red rounded rect (#E53935) + blue windshield + rear window
+- Integrated updatePlayer and renderPlayer into playingState.update/render
+- Updated resetGameState() to reset player position and velocity
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - ctx.roundRect() works well for car body in modern browsers
+  - Player starts at road center: ROAD_LEFT + ROAD_WIDTH/2 - PLAYER_WIDTH/2 = 180
+  - Deceleration is applied per-frame; clamp vx to 0 to avoid overshoot
+  - Road clamping sets vx=0 on contact to prevent sticking
 ---
 
 ## 2026-03-13 - US-003
