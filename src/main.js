@@ -1914,10 +1914,35 @@ const explosionState = {
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
+    // Clear any pre-existing particles (e.g. nitro trail)
+    particles.length = 0;
+    // Spawn 40 fire/debris particles from explosion origin
+    const fireColors = ['#FFF176', '#FFB74D', '#FF7043', '#E53935'];
+    const debrisColors = ['#757575', '#4E342E'];
+    for (let i = 0; i < 40; i++) {
+      const isDebris = Math.random() < 0.3;
+      const color = isDebris
+        ? debrisColors[Math.floor(Math.random() * debrisColors.length)]
+        : fireColors[Math.floor(Math.random() * fireColors.length)];
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 200 + Math.random() * 200;
+      const maxLife = 0.8 + Math.random() * 0.7;
+      particles.push({
+        x: this.originX,
+        y: this.originY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: maxLife,
+        maxLife,
+        color,
+        size: 2 + Math.random() * 6,
+      });
+    }
   },
 
   update(dt) {
     this.timer -= dt;
+    updateParticles(dt);
     if (this.timer <= 0) {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
@@ -1932,6 +1957,7 @@ const explosionState = {
     renderRoad(ctx, gameState.scrollOffset);
     renderTraffic(ctx);
     // No renderPlayer (car hidden), no collectibles
+    renderParticles(ctx);
   },
 };
 
