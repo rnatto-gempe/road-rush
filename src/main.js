@@ -236,6 +236,12 @@ const AudioManager = {
   // ─── Engine drone (long-lived nodes) ───
   engine: { osc: null, filter: null, gain: null },
 
+  // ─── Road ambience (long-lived noise node) ───
+  road: { source: null, filter: null, gain: null, buffer: null },
+
+  // ─── Nitro boost harmonic ───
+  nitro: { osc: null, gain: null, active: false },
+
   startEngine() {
     if (!this.ctx) return;
     this.stopEngine(); // clean up any existing
@@ -277,13 +283,124 @@ const AudioManager = {
     const now = this.ctx.currentTime;
     // Map scrollSpeed 200→800 to frequency 60→180Hz
     const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
-    const freq = 60 + t * 120;
+    let freq = 60 + t * 120;
+    // Nitro boost: raise pitch by ~30%
+    if (this.nitro.active) freq *= 1.3;
     this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
     // Filter cutoff maps 400→800Hz
     this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
     // Volume ramps 0.08→0.20 with speed
     const vol = 0.08 + t * 0.12;
     this.engine.gain.gain.setTargetAtTime(vol, now, 0.05);
+  },
+
+  // ─── Road ambience (long-lived looping noise) ───
+  startRoad() {
+    if (!this.ctx) return;
+    this.stopRoad();
+    const now = this.ctx.currentTime;
+    // Create a long white noise buffer (2s, looped)
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this.road.buffer) {
+      this.road.buffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this.road.buffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.road.buffer;
+    source.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(500, now);
+    filter.Q.setValueAtTime(0.8, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.04, now, 0.05);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    this.road.source = source;
+    this.road.filter = filter;
+    this.road.gain = gain;
+  },
+
+  stopRoad() {
+    if (!this.road.source) return;
+    const now = this.ctx.currentTime;
+    this.road.gain.gain.setTargetAtTime(0, now, 0.05);
+    const source = this.road.source;
+    const filter = this.road.filter;
+    const gain = this.road.gain;
+    setTimeout(() => {
+      try { source.stop(); } catch (_) {}
+      source.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 250);
+    this.road.source = null;
+    this.road.filter = null;
+    this.road.gain = null;
+  },
+
+  updateRoad(scrollSpeed) {
+    if (!this.road.source) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    // Filter center 300→800Hz with speed
+    this.road.filter.frequency.setTargetAtTime(300 + t * 500, now, 0.05);
+    // Bandwidth widens with speed (Q decreases = wider)
+    this.road.filter.Q.setTargetAtTime(0.8 - t * 0.4, now, 0.05);
+    // Volume 0.03→0.10 with speed
+    const vol = 0.03 + t * 0.07;
+    this.road.gain.gain.setTargetAtTime(vol, now, 0.05);
+  },
+
+  // ─── Nitro boost audio effect ───
+  startNitro() {
+    if (!this.ctx || !this.engine.osc) return;
+    if (this.nitro.active) return;
+    const now = this.ctx.currentTime;
+    // Add high-freq sawtooth harmonic at ~2x engine freq
+    const engineFreq = this.engine.osc.frequency.value;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(engineFreq * 2, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.08, now, 0.05);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    this.nitro.osc = osc;
+    this.nitro.gain = gain;
+    this.nitro.active = true;
+    // Engine pitch boost handled by updateEngine via nitro.active flag
+  },
+
+  stopNitro() {
+    if (!this.nitro.active) return;
+    const now = this.ctx.currentTime;
+    if (this.nitro.gain) {
+      this.nitro.gain.gain.setTargetAtTime(0, now, 0.05);
+    }
+    const osc = this.nitro.osc;
+    const gain = this.nitro.gain;
+    setTimeout(() => {
+      try { if (osc) osc.stop(); } catch (_) {}
+      if (osc) osc.disconnect();
+      if (gain) gain.disconnect();
+    }, 250);
+    this.nitro.osc = null;
+    this.nitro.gain = null;
+    this.nitro.active = false;
+  },
+
+  updateNitro() {
+    if (!this.nitro.active || !this.nitro.osc || !this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    // Keep nitro harmonic tracking ~2x the boosted engine freq
+    const engineFreq = this.engine.osc.frequency.value;
+    this.nitro.osc.frequency.setTargetAtTime(engineFreq * 2, now, 0.05);
   },
 
   // Create filtered noise burst
@@ -1837,16 +1954,21 @@ const titleState = {
 const playingState = {
   onEnter() {
     AudioManager.startEngine();
+    AudioManager.startRoad();
   },
 
   onExit() {
+    AudioManager.stopNitro();
     AudioManager.stopEngine();
+    AudioManager.stopRoad();
   },
 
   update(dt) {
     gameState.elapsedTime += dt;
     updateScrollSpeed(dt);
     AudioManager.updateEngine(gameState.scrollSpeed);
+    AudioManager.updateRoad(gameState.scrollSpeed);
+    AudioManager.updateNitro();
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
@@ -1862,9 +1984,14 @@ const playingState = {
     updateParticles(dt);
 
     // Tick nitro boost and ease-out timers; spawn blue particle trail during active boost
+    // Start nitro audio when boost is active and audio isn't playing yet
+    if (nitroTimer > 0 && !AudioManager.nitro.active) AudioManager.startNitro();
     if (nitroTimer > 0) {
       nitroTimer = Math.max(0, nitroTimer - dt);
-      if (nitroTimer === 0) nitroEaseTimer = NITRO_EASE_DURATION;
+      if (nitroTimer === 0) {
+        nitroEaseTimer = NITRO_EASE_DURATION;
+        AudioManager.stopNitro();
+      }
       // Blue particle trail: 4-6 particles per frame at car bottom-center
       const trailCount = 4 + Math.floor(Math.random() * 3);
       for (let i = 0; i < trailCount; i++) {
