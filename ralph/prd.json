@@ -177,7 +177,7 @@
         "Verify in browser: side-swiping a sedan = sparks + slowdown. Head-on at high speed = death"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "relative_vy = scroll_speed - vehicle.ownSpeed (how fast vehicle approaches on screen). Invulnerability prevents chain-death spiral. Blink effect: toggle visibility every 0.1s during invuln."
     },
     {

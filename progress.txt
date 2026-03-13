@@ -1,3 +1,23 @@
+## 2026-03-13 - US-010
+- Added graded collision system: lateral (side-swipe) vs frontal (head-on) classification
+- Lateral: `abs(player.vx) > abs(relativeVy) * 0.5` → 20% speed reduction 0.8s + yellow/orange spark particles (4-8, 0.2s life)
+- Frontal: 40% speed reduction 1.5s + red flash overlay (alpha=0.2, 0.15s fade) + screen shake 6px/0.3s; fatal (game over) if `scrollSpeed > 600`
+- Border collision: 30% speed reduction 1s when player clamps against road edge while moving
+- Invulnerability: 1.5s window after any collision — player blinks at 0.1s interval, no further collision checks
+- `applySpeedPenalty(factor, duration)`: overwrites only if new penalty is stronger or no active penalty
+- `getEffectiveScrollSpeed()`: returns `scrollSpeed * speedPenaltyMultiplier`, used for all physics (scroll, distance, traffic visual speed); base ramp continues unaffected
+- `triggerShake(duration, intensity)`: now accepts optional custom duration/intensity; default args preserved for backwards compat
+- Particle system: `particles[]` array, `spawnSparks()`, `updateParticles()`, `renderParticles()`
+- Debug overlay: shows "eff" speed alongside base speed, and invuln countdown timer
+- Verified in browser: debug shows Speed 318 (eff: 191) with Invuln 0.2s countdown; player blinks; green fairness overlays visible
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - `relativeVy = getEffectiveScrollSpeed() - v.ownSpeed` (use effective speed, not base, for classification realism)
+  - Speed penalty is SEPARATE from the ramp — ramp writes `scrollSpeed`, penalty is a multiplier read via `getEffectiveScrollSpeed()`; this prevents penalty from affecting difficulty progression
+  - Border hit detection: track `borderHit` flag when clamping with non-zero velocity into the wall (not every frame while stationary at edge)
+  - `shake.intensity` added to shake object so custom intensity survives to render; `SHAKE_INTENSITY` const is now just the default
+---
+
 ## 2026-03-13 - US-009
 - Added `getVehicleXExtent(v, lookAheadS)`: returns {minX, maxX} X span of vehicle accounting for active lane changes and upcoming lane changes within lookAhead window
 - Added `findLargestGap(occupied, roadLeft, roadRight)`: finds largest free horizontal corridor given occupied X segments
@@ -59,6 +79,9 @@
 - Spawn tracking: `gameState.nextSpawnDistance` compared to `gameState.distanceTraveled`
 - Fairness constraint: `isFairToSpawn(candidate)` checks 96px vertical bands (step 48px) for 60px free corridor; `getVehicleXExtent(v, 1.0)` projects lane-change extents; skip spawn (don't advance nextSpawnDistance) if constraint fails
 - `resetGameState()` must clear `gameState.traffic = []` and reset `nextSpawnDistance`
+- Graded collision: `speedPenaltyMultiplier` + `speedPenaltyTimer` (module-level) apply multiplicative slow; `getEffectiveScrollSpeed()` wraps `scrollSpeed * multiplier`; ramp writes base `scrollSpeed` independently
+- Invulnerability: `invulnTimer` (module-level), blink via `Math.floor(invulnTimer / BLINK_INTERVAL) % 2` in renderPlayer
+- Particle system: module-level `particles[]` array with `{x,y,vx,vy,life,maxLife,color,size}` objects; update/render separate functions
 
 ---
 
