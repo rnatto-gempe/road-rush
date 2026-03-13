@@ -37,7 +37,7 @@
         "Verify in browser that engine pitch audibly rises as the car accelerates"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

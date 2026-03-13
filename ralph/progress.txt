@@ -9,6 +9,7 @@ Started: Fri Mar 13 18:22:04 -03 2026
 - Use oscillator.onended / source.onended to disconnect nodes and prevent memory leaks
 - AudioContext is created on first Enter press in titleState (browser autoplay policy compliance)
 - The game has two places where Enter starts gameplay: titleState and gameOverState — both need audio handling
+- FSM calls onExit() automatically if defined — use it for cleanup when leaving a state (covers all exit paths)
 
 ---
 
@@ -23,4 +24,15 @@ Started: Fri Mar 13 18:22:04 -03 2026
   - The titleState and gameOverState both have Enter key handlers — future audio state transitions need to handle both paths
   - Build requires `npm install` first if node_modules is missing
   - No console errors after AudioManager integration — Web Audio API is well-supported
+---
+
+## 2026-03-13 21:27 - US-002
+- Wired engine drone to playingState lifecycle: startEngine() in onEnter, stopEngine() in onExit, updateEngine(scrollSpeed) every frame
+- Engine methods (startEngine, stopEngine, updateEngine) were already implemented in US-001 AudioManager
+- Added onExit() to playingState — FSM already supports it, covers both explosion and fuel-empty exit paths
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - The FSM calls onExit() automatically if defined on the current state — use this for cleanup
+  - playingState has two exit paths: collision → explosionState, fuel empty → gameOverState; onExit covers both
+  - Engine drone uses long-lived nodes with setTargetAtTime for smooth parameter changes — no per-frame node creation
 ---
