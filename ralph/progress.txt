@@ -38,3 +38,18 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - beat.beatIndex is the global beat counter (not reset per bar), so use Math.floor(beatIndex / 4) to get bar index
   - subDiv as a stepped value (1/2/4) gives cleaner musical feel than continuous interpolation
 ---
+
+## 2026-03-13 - US-003
+- Implemented DnB bass line: sawtooth oscillators through lowpass filter (~200Hz) playing chord root notes
+- BASS_ROOTS: [55.0, 87.3, 65.4, 98.0] Hz (A1, F2, C2, G2) — all in 40–100Hz range
+- DnB pattern: main note on bar beat-1, syncopated ghost notes at 2.5 and 3.5 beats (via _scheduleBassBeat called when idx%4===0)
+- Chord index computed as Math.floor(idx/4)%4 (using idx before increment) for correct bar-chord alignment
+- Sidechain duck: setValueAtTime(0.3) + setTargetAtTime(1.0) on bass.gain on every kick beat
+- Per-note gain: 0.3 for main (vel=1.0×0.3), 0.15 for ghosts (vel=0.5×0.3), matching "gain ~0.3" spec
+- bass.gain is master passthrough node for sidechain automation; per-note gains hold the ADSR envelope
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Bass chord index must be computed with Math.floor(idx/4)%4 (not this.pad.chordIdx) because pad.chordIdx updates after the increment
+  - setValueAtTime + setTargetAtTime on a shared gain node enables sidechain ducking without extra nodes
+  - _scheduleBassNote guards on this.bass.gain to safely ignore notes scheduled after stopBass()
+---
