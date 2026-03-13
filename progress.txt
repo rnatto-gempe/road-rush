@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- `debugMode` (module-level bool) toggled by D key in playingState.update() via consumeKey; rendered in playingState.render()
+- Speed ramp: phase 1 uses absolute formula `INITIAL + elapsed * RATE` (not incremental), phase 2 uses `speed += RATE2 * dt`; both capped with Math.min
+- `updateScrollSpeed(dt)` called BEFORE `scrollOffset +=` and `distanceTraveled +=` so the new speed applies immediately
 - Player object lives in `gameState.player`: {x, y, width, height, vx}
 - `getPlayerHitbox(player)` returns {x, y, w, h} at 80% size (player.x+4, player.y+6.5, 32, 51)
 - `updatePlayer(dt)` handles ArrowLeft/Right input, acceleration/deceleration, and road clamping
@@ -18,6 +21,20 @@
 - Spawn tracking: `gameState.nextSpawnDistance` compared to `gameState.distanceTraveled`
 - `resetGameState()` must clear `gameState.traffic = []` and reset `nextSpawnDistance`
 
+---
+
+## 2026-03-13 - US-007
+- Added SPEED_RAMP_PHASE1_CAP=600, SPEED_RAMP_PHASE1_RATE=5, SPEED_RAMP_PHASE2_RATE=1.5, SPEED_MAX=800 constants
+- Added module-level `debugMode` boolean, toggled by D/d key in playingState.update()
+- Added `updateScrollSpeed(dt)`: phase 1 uses absolute formula `min(200 + elapsed*5, 600)`, phase 2 increments `speed + 1.5*dt` up to 800 cap
+- Called updateScrollSpeed before scrollOffset/distanceTraveled updates in playingState.update()
+- Added debug overlay in playingState.render(): yellow text showing Speed, Dist, Traffic count when debugMode=true
+- Verified in browser: at 10.4s speed=252px/s (200 + 10.4*5 = 252 ✓), debug overlay visible and accurate
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Phase 1 speed ramp uses absolute formula (not += per frame) to avoid drift from pauses/lag
+  - consumeKey() works for debug toggles — just call it in update() and flip the module-level bool
+  - Traffic spawn interval is distance-based so it naturally adapts to higher speeds (more spawns per second at high speed)
 ---
 
 ## 2026-03-13 - US-006
