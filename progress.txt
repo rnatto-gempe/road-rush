@@ -1,3 +1,21 @@
+## 2026-03-13 - US-017
+- Added COIN_RADIUS=8 (16px diameter), COIN_POINTS=100, COIN_SPAWN_MIN=600, COIN_SPAWN_MAX=1000, COIN_COLLECT_ANIM_DURATION=0.2, COIN_FLOAT_DURATION=0.8 constants
+- Added module-level `coinFloatTexts[]` array for floating '+100' text effects
+- Added `gameState.coins[]` and `gameState.nextCoinSpawnDistance` (reset in `resetGameState()`)
+- `spawnCoinCluster()`: spawns 3-5 coins in 'line', 'arc', or 'zigzag' pattern; arc uses `sin(t*PI)*24px` offset; zigzag alternates ±20px; coins spaced 40px vertically (i=0 arrives at player first)
+- `updateCoins(dt)`: spawns on distance threshold; scrolls at `getEffectiveScrollSpeed()` (road-fixed); AABB collection check (player 80% hitbox vs coin 100% hitbox); awards +100 score; pushes to `coinFloatTexts`; ticks float texts (60px/s upward)
+- `renderCoins(ctx)`: gold circle (#FFD700) with shine highlight; scale 1.0→1.2, alpha 1→0 during collectAnim; floating '+100' text with alpha fade
+- Wired `updateCoins(dt)` and `renderCoins(ctx)` into `playingState`; coins rendered between fuelItems and player
+- Verified in browser: coin visible at t=15.1s (score 431), coin cluster of 2 visible approaching player at t=29.4s; build 20.10 kB
+- Files changed: road-rush/src/main.js
+- **Learnings for future iterations:**
+  - Coin cluster vertical spacing: `y = -COIN_RADIUS - i * 40` puts first coin (i=0) at screen top; subsequent coins are further above screen and arrive later
+  - Arc pattern: `Math.sin(t * Math.PI) * amplitude` gives a smooth hump shape — wider is more visible but mind road width
+  - `coinFloatTexts` is a separate module-level array (not per-coin state) because float text outlasts the coin's own collectAnim timer
+  - Float text needs explicit `ctx.globalAlpha = 1` reset after the loop to avoid affecting subsequent renders
+  - Coin cluster spawn does NOT use fairness constraint (coins are small, non-blocking) — only traffic uses `isFairToSpawn`
+---
+
 ## 2026-03-13 - US-016
 - Added module-level `ddaCleanTimer` (secs since last collision) and `ddaSpawnRate` (1.0→1.5 cap) state vars
 - `ddaCleanTimer += dt` in `playingState.update()` with while-loop: every 10s → `ddaSpawnRate = min(1.5, rate + 0.05)`
@@ -198,6 +216,7 @@
 - `gameOverState.causeOfDeath` must be set BEFORE `fsm.transition(gameOverState)`
 - Near miss tracking: add `minDistX: Infinity, nearMissChecked: false, nearMissFlash: null` to each vehicle; track horiz gap during vertical sprite overlap; check once when `v.y > player.y + PLAYER_HEIGHT`; gate with `nearMissChecked` flag
 - Combo system: `comboMultiplier` starts at 1, increments on near miss; display only when >= 2; `comboResetTimer` countdown for 3s timeout + fade; reset to 1 on collision or timeout
+- Coin clusters: `spawnCoinCluster()` creates 3-5 coins with `y = -COIN_RADIUS - i*40` (first arrives first); patterns 'line'/'arc'/'zigzag'; road-fixed scroll like fuel items; `coinFloatTexts[]` module array for '+100' float effect
 - DDA: `ddaCleanTimer` + `ddaSpawnRate` (1.0–1.5); +5% per 10s clean play; partial reset on collision halves bonus: `1.0 + (rate - 1.0) * 0.5`; applied at spawn time by dividing raw interval; fuel distance x1.2 when fuel > 70%; fairness constraint unaffected
 
 ---

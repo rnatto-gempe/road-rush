@@ -305,7 +305,7 @@
         "Verify in browser: coin clusters appear regularly, collecting feels satisfying with popup"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Cluster patterns: line (same X, spaced 40px Y), arc (slight X offset per coin), zigzag. Pick randomly. Coins are low-risk reward — they don't need to be in dangerous positions."
     },
     {
