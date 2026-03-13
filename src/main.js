@@ -110,6 +110,15 @@ const COIN_SPAWN_MAX = 1000;           // px traveled max between cluster spawns
 const COIN_COLLECT_ANIM_DURATION = 0.2;
 const COIN_FLOAT_DURATION = 0.8;       // float '+100' text duration
 
+// Nitro boost constants
+const NITRO_ITEM_HALF = 10;            // half-size (so sprite is ~20px)
+const NITRO_SPAWN_MIN = 2500;          // px traveled min between spawns
+const NITRO_SPAWN_MAX = 4000;          // px traveled max between spawns
+const NITRO_BOOST_FACTOR = 1.3;        // +30% scroll speed during boost
+const NITRO_BOOST_DURATION = 3.0;      // seconds of active boost
+const NITRO_EASE_DURATION = 0.5;       // seconds to ease speed back to normal after boost
+const NITRO_COLLECT_ANIM_DURATION = 0.2;
+
 // Lane change duration (seconds) for lane-changing vehicles
 const LANE_CHANGE_DURATION = 0.8;
 
@@ -180,6 +189,10 @@ let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, ca
 
 // Coin float text state (populated on coin collection, rendered over game elements)
 const coinFloatTexts = []; // {x, y, timer}
+
+// Nitro state
+let nitroTimer = 0;      // countdown during active boost (3s → 0)
+let nitroEaseTimer = 0;  // countdown during ease-out (0.5s → 0)
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -281,9 +294,19 @@ function triggerShake(duration, intensity) {
   }
 }
 
-// Returns scroll speed with active penalty applied
+// Returns the nitro speed multiplier (1.0 normally, 1.3 during boost, eases back to 1.0)
+function getNitroMultiplier() {
+  if (nitroTimer > 0) return NITRO_BOOST_FACTOR;
+  if (nitroEaseTimer > 0) {
+    const progress = nitroEaseTimer / NITRO_EASE_DURATION; // 1→0 as ease progresses
+    return 1.0 + (NITRO_BOOST_FACTOR - 1.0) * progress;
+  }
+  return 1.0;
+}
+
+// Returns scroll speed with active penalty and nitro boost applied
 function getEffectiveScrollSpeed() {
-  return gameState.scrollSpeed * speedPenaltyMultiplier;
+  return gameState.scrollSpeed * speedPenaltyMultiplier * getNitroMultiplier();
 }
 
 // Apply a multiplicative speed penalty; overwrites if the new penalty is stronger
@@ -415,6 +438,9 @@ const gameState = {
   // Coin collectibles
   coins: [],
   nextCoinSpawnDistance: COIN_SPAWN_MIN,
+  // Nitro items
+  nitroItems: [],
+  nextNitroSpawnDistance: NITRO_SPAWN_MIN,
 };
 
 function resetGameState() {
@@ -455,6 +481,11 @@ function resetGameState() {
   gameState.coins = [];
   gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
   coinFloatTexts.length = 0;
+  // Reset nitro state
+  gameState.nitroItems = [];
+  gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
+  nitroTimer = 0;
+  nitroEaseTimer = 0;
 }
 
 // --- Scroll Speed Ramp ---
@@ -1219,6 +1250,97 @@ function renderCoins(ctx) {
   ctx.globalAlpha = 1;
 }
 
+// --- Nitro Item ---
+
+function spawnNitroItem() {
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const x = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+  gameState.nitroItems.push({ x, y: -NITRO_ITEM_HALF * 2, collectAnim: null });
+  gameState.nextNitroSpawnDistance =
+    gameState.distanceTraveled + NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
+}
+
+function updateNitroItems(dt) {
+  const effSpeed = getEffectiveScrollSpeed();
+
+  if (gameState.distanceTraveled >= gameState.nextNitroSpawnDistance) {
+    spawnNitroItem();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.nitroItems.length - 1; i >= 0; i--) {
+    const item = gameState.nitroItems[i];
+
+    if (item.collectAnim !== null) {
+      item.collectAnim.timer -= dt;
+      if (item.collectAnim.timer <= 0) gameState.nitroItems.splice(i, 1);
+      continue;
+    }
+
+    item.y += effSpeed * dt;
+
+    if (item.y > CANVAS_HEIGHT + NITRO_ITEM_HALF * 2) {
+      gameState.nitroItems.splice(i, 1);
+      continue;
+    }
+
+    // Collection: player 80% hitbox vs item full bounding box (20x20)
+    const itemHb = {
+      x: item.x - NITRO_ITEM_HALF,
+      y: item.y - NITRO_ITEM_HALF,
+      w: NITRO_ITEM_HALF * 2,
+      h: NITRO_ITEM_HALF * 2,
+    };
+    if (aabbOverlap(ph, itemHb)) {
+      nitroTimer = NITRO_BOOST_DURATION;
+      nitroEaseTimer = 0;
+      // Full invulnerability during boost
+      invulnTimer = Math.max(invulnTimer, NITRO_BOOST_DURATION);
+      item.collectAnim = { timer: NITRO_COLLECT_ANIM_DURATION };
+    }
+  }
+}
+
+function renderNitroItems(ctx) {
+  // Pulsing scale: 0.9 to 1.1 over a 0.5s cycle
+  const pulseScale = 1.0 + 0.1 * Math.sin(gameState.elapsedTime * 4 * Math.PI);
+
+  for (const item of gameState.nitroItems) {
+    let scale = pulseScale;
+    let alpha = 1;
+    if (item.collectAnim !== null) {
+      const progress = 1 - item.collectAnim.timer / NITRO_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(item.x, item.y);
+    ctx.scale(scale, scale);
+
+    const s = NITRO_ITEM_HALF;
+    // Yellow triangle pointing upward
+    ctx.fillStyle = '#FFD600';
+    ctx.beginPath();
+    ctx.moveTo(0, -s);       // apex
+    ctx.lineTo(s, s);        // bottom right
+    ctx.lineTo(-s, s);       // bottom left
+    ctx.closePath();
+    ctx.fill();
+
+    // "N" label
+    ctx.fillStyle = '#000000';
+    ctx.font = `bold ${Math.floor(s * 1.2)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', 0, s * 0.2);
+
+    ctx.restore();
+  }
+}
+
 // --- Fuel HUD ---
 function renderFuelHUD(ctx) {
   const fuelPct = gameState.fuel / FUEL_INITIAL;
@@ -1355,7 +1477,29 @@ const playingState = {
     updateTraffic(dt);
     updateFuelItems(dt);
     updateCoins(dt);
+    updateNitroItems(dt);
     updateParticles(dt);
+
+    // Tick nitro boost and ease-out timers; spawn blue particle trail during active boost
+    if (nitroTimer > 0) {
+      nitroTimer = Math.max(0, nitroTimer - dt);
+      if (nitroTimer === 0) nitroEaseTimer = NITRO_EASE_DURATION;
+      // Blue particle trail: 4-6 particles per frame at car bottom-center
+      const trailCount = 4 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < trailCount; i++) {
+        particles.push({
+          x: gameState.player.x + PLAYER_WIDTH / 2 + (Math.random() * 2 - 1) * 10,
+          y: gameState.player.y + PLAYER_HEIGHT,
+          vx: (Math.random() * 2 - 1) * 30,
+          vy: 50 + Math.random() * 50, // drift downward on screen
+          life: 0.3,
+          maxLife: 0.3,
+          color: '#42A5F5',
+          size: 2 + Math.random() * 2,
+        });
+      }
+    }
+    if (nitroEaseTimer > 0) nitroEaseTimer = Math.max(0, nitroEaseTimer - dt);
 
     // Distance score: 1 pt per 10 px traveled
     gameState.score += effSpeed * dt * SCORE_PER_PX;
@@ -1424,6 +1568,7 @@ const playingState = {
     renderTraffic(ctx);
     renderFuelItems(ctx);
     renderCoins(ctx);
+    renderNitroItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
 
@@ -1474,6 +1619,8 @@ const playingState = {
       y += 14;
       if (comboMultiplier >= 3) { ctx.fillText(`DDA combo: x0.9 (combo ${comboMultiplier})`, 8, y); y += 14; }
       if (gameState.fuel > 70) { ctx.fillText(`DDA fuel: x1.2 (fuel ${gameState.fuel.toFixed(0)})`, 8, y); y += 14; }
+      if (nitroTimer > 0) { ctx.fillText(`NITRO: ${nitroTimer.toFixed(1)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
+      else if (nitroEaseTimer > 0) { ctx.fillText(`Nitro ease: ${nitroEaseTimer.toFixed(2)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
     }
   },
 };
