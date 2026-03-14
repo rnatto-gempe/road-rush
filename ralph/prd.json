@@ -1,208 +1,233 @@
 {
   "project": "Road Rush",
-  "branchName": "ralph/near-miss-juice",
-  "description": "Near Miss Juice — fix multiplier relevance, add visual/audio feedback escalation, redesign combo HUD, and close the feedback loop with game over stats.",
+  "branchName": "ralph/space-transition",
+  "description": "Transição Progressiva — Estrada → Céu → Espaço ao atingir 25k/50k pontos, com cenários procedurais, obstáculos temáticos e sprites evolutivos, sem alterar gameplay core.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Combo color palette utility + global score multiplier",
-      "description": "As a player, I want my combo multiplier to affect ALL score sources (not just near miss base points) so that maintaining a combo streak has a real, noticeable impact on my total score.",
+      "title": "Sistema de fases e estado de transição",
+      "description": "Como desenvolvedor, preciso de um sistema que gerencie as fases do jogo e a progressão entre elas, para que todos os outros sistemas possam reagir à fase atual.",
       "acceptanceCriteria": [
-        "Create a `getComboColor(level)` function that returns: x1='#FF8800' (orange), x2='#FFD700' (gold), x3='#00FFDD' (cyan), x4+='#FF44FF' (magenta)",
-        "Distance score (line ~4612: `effSpeed * dt * SCORE_PER_PX`) is multiplied by `comboMultiplier` when combo >= 2",
-        "Overtake bonus (line ~3552: `OVERTAKE_BONUS`) is multiplied by `comboMultiplier` when combo >= 2",
-        "Coin pickup score (line ~3802: `COIN_POINTS`) is multiplied by `comboMultiplier` when combo >= 2",
-        "Survivor bonus (line ~4617: `SURVIVOR_BONUS`) is NOT multiplied — it stays fixed",
-        "Near miss base points continue multiplied as before (line ~2784-2785)",
-        "Add tracking variables at module scope: `let nearMissCount = 0`, `let bestCombo = 0`, `let nearMissBonusTotal = 0` — incremented in `triggerNearMiss()`. `bestCombo` updated via `bestCombo = Math.max(bestCombo, comboMultiplier)`. All three reset in `resetGame()`",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Nova propriedade `gameState.phase` com valores: 'road', 'sky', 'space' (inicializa como 'road')",
+        "Nova propriedade `gameState.phaseTransition` com `{ progress: 0-1, active: false, from: '', to: '' }`",
+        "Fase 'sky' inicia quando `gameState.score >= 25000`; fase 'space' quando `>= 50000`",
+        "Transição dura 3 segundos — `progress` vai de 0→1 com easing `easeInOutCubic`",
+        "Durante transição, `gameState.phase` já é o novo valor, mas `phaseTransition.active === true` permite interpolar visual",
+        "Flags `phaseTriggered.sky` e `phaseTriggered.space` garantem que cada transição é trigada uma única vez",
+        "`resetGameState()` reseta phase para 'road', zera `phaseTriggered`, zera `phaseTransition`",
+        "Todos os tipos em `VEHICLE_TYPES` recebem `phase: 'road'` sem alterar nenhum outro comportamento",
+        "Build passa sem erros (npm run build)"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "getComboColor() will be reused by all subsequent stories for consistent color theming. Tracking vars are added here so data accumulates from the start."
+      "notes": "Fundação de todo o feature. Não introduz nada visual — apenas estado e lógica de trigger."
     },
     {
       "id": "US-002",
-      "title": "Float text shows points + multiplier at player position",
-      "description": "As a player, I want to see the actual points gained and the current multiplier in the near miss floating text, spawned at my car's position (not behind me where the vehicle already passed).",
+      "title": "Cenário do céu (fase sky estática)",
+      "description": "Como jogador, quero ver um cenário de céu quando estou na fase sky, para sentir que estou voando.",
       "acceptanceCriteria": [
-        "Modify `spawnFloatText()` to accept an optional `scale` parameter (default 1.0) that multiplies the rendered font size",
-        "Modify `triggerNearMiss()`: the float text now shows points and multiplier — format: '+50' at x1, 'x2 +100!' at x2, 'x3 +150!' at x3, etc.",
-        "The float text color uses `getComboColor(comboMultiplier)` instead of hardcoded '#FF8800'",
-        "The float text scale increases with combo: `1.0 + (comboMultiplier - 1) * 0.12` (capped at 1.5)",
-        "The float text spawns at the player's center position (`playerCenterX, player.y + PLAYER_HEIGHT * 0.3`) — NOT at the vehicle's position",
-        "Existing float texts for coins (+1), fuel (+FUEL), nitro (+NITRO), shield (+SHIELD) are unchanged",
-        "The float text render function respects the scale parameter when setting font size",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "`renderRoad()` verifica `gameState.phase` e renderiza cenário sky quando `phase === 'sky'`",
+        "Fundo: gradiente linear top `#4A90D9` → bottom `#87CEEB`",
+        "Sem rumble strips — substituídas por bordas de vento: 2 linhas brancas semi-transparentes (alpha 0.3) em `ROAD_LEFT` e `ROAD_RIGHT`",
+        "Sem faixas tracejadas de lane — substituídas por linhas pontilhadas brancas (alpha 0.15) nas posições de lane com mesmo scroll",
+        "Nuvens decorativas: array pré-gerado de 6 nuvens (x aleatório na área do road, yPhase aleatório). Cada nuvem é um roundRect branco alpha 0.25 (~40×15px), scrolla a 0.3× da scroll speed",
+        "Corredor usa gradiente azul-claro sutil (`#6BB3E0` alpha 0.15) em vez de asfalto",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — cenário sky visível, lanes reconhecíveis"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "The near miss detection fires AFTER the vehicle passes the player (v.y > player.y + PLAYER_HEIGHT), so the vehicle is already below/behind. Spawning text at the player position ensures the player sees it."
+      "notes": "Apenas visual estático — sem lógica de transição ainda (isso vem no US-004)."
     },
     {
       "id": "US-003",
-      "title": "Redesign combo HUD with timer bar and animations",
-      "description": "As a player, I want a prominent, animated combo indicator with a visible countdown bar so I know my combo level and feel urgency to maintain it.",
+      "title": "Cenário do espaço (fase space estática)",
+      "description": "Como jogador, quero ver um cenário espacial quando estou na fase space.",
       "acceptanceCriteria": [
-        "Rewrite `renderComboHUD(ctx)` — displays 'x{N} COMBO' in large bold font (28-32px) at center-top (y ~45, below score)",
-        "Text color uses `getComboColor(comboMultiplier)`",
-        "Below the text, render a horizontal timer bar (width ~120px, height ~6px) showing `comboResetTimer / COMBO_RESET_TIME` as fill ratio",
-        "Timer bar color transitions: green (>66%), yellow (33-66%), red (<33%) based on remaining ratio",
-        "Pop/bounce animation on each new near miss: scale jumps to 1.35 then eases back to 1.0 over COMBO_SCALE_DURATION (0.2s) — use existing `comboScaleTimer`",
-        "When combo expires (comboResetTimer reaches 0), the HUD shakes briefly (2-3px horizontal oscillation for 0.15s) then fades out over 0.3s",
-        "At milestone levels (x3, x5, x8), the HUD briefly flashes white (0.1s) as a celebration pulse",
-        "HUD only renders when comboMultiplier >= 2 (unchanged from current behavior)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "`renderRoad()` renderiza cenário space quando `phase === 'space'`",
+        "Fundo: gradiente top `#0A0A1A` → bottom `#0D1B2A`",
+        "Starfield: array pré-gerado de 40 estrelas com `{x, y, size: 1-2px, brightness: 0.3-1.0, layer: 1|2}`. Layer 1 scrolla a 0.1× speed, layer 2 a 0.2× speed. Wrap vertical ao sair da tela",
+        "Bordas do corredor: linhas ciano `#00E5FF` alpha 0.6, lineWidth 2, em `ROAD_LEFT` e `ROAD_RIGHT`",
+        "Lanes: linhas pontilhadas ciano alpha 0.1",
+        "Corredor: gradiente sutil `#0D1B2A` alpha 0.3",
+        "Sem nebulosas (performance)",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — cenário space visível, lanes reconhecíveis"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "The existing renderComboHUD is small (~25 lines). The rewrite replaces it entirely. comboScaleTimer and comboResetTimer already exist and are ticked in the game loop."
+      "notes": "Starfield deve usar array fixo pré-gerado (como speedLineData) para evitar alocação no game loop."
     },
     {
       "id": "US-004",
-      "title": "Screen shake on near miss with priority system",
-      "description": "As a player, I want to feel a short screen shake when I nail a near miss, with intensity that scales with my combo level.",
+      "title": "Transição animada entre cenários",
+      "description": "Como jogador, quero ver o cenário mudar gradualmente durante a transição de fase, sem corte abrupto.",
       "acceptanceCriteria": [
-        "In `triggerNearMiss()`, call `triggerShake()` with: duration = 0.12s, intensity = min(2 + comboMultiplier, 5)",
-        "Modify `triggerShake()` to only apply the new shake if its intensity is >= the remaining intensity of any current shake — this prevents near miss shake (2-5px) from overriding collision shake (10px) in progress",
-        "The remaining intensity of a shake is: `shake.intensity * (shake.time / shake.maxTime)`",
-        "Shake remains visual-only: applied via ctx.translate() offset, does not affect hitboxes or game logic",
-        "Collision shake (0.5s, 10px) continues to work unchanged and always overrides near miss shake",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Quando `phaseTransition.active === true`, `renderRoad()` interpola entre cenário anterior e novo usando `phaseTransition.progress` como fator de lerp",
+        "Cores de fundo interpolam via lerp por canal RGB entre as duas fases",
+        "Elementos do cenário anterior fazem fade out: alpha × (1 - progress)",
+        "Elementos do novo cenário fazem fade in: alpha × progress",
+        "Nuvens (sky) e estrelas (space) aparecem gradualmente com alpha proporcional ao progress",
+        "Veículos já na tela continuam scrollando normalmente durante a transição (não somem abruptamente)",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — transição suave road→sky e sky→space, sem flicker"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "triggerShake() already exists at line ~2458. The collision handler calls triggerShake(0.5, 10). The change is: add a priority/intensity guard so weaker shakes don't replace stronger ones."
+      "notes": "Depende de US-002 e US-003 estarem implementados. Apenas modifica renderRoad() para usar o progress do phaseTransition."
     },
     {
       "id": "US-005",
-      "title": "Near miss spark particles at player position",
-      "description": "As a player, I want to see sparks fly from my car when I barely dodge a vehicle, reinforcing the feeling of speed and danger.",
+      "title": "Sprite do jogador — fase sky (carro com asas)",
+      "description": "Como jogador, quero ver meu carro ganhar asas na fase sky.",
       "acceptanceCriteria": [
-        "In `triggerNearMiss(v)`, emit particles from the player's side closest to the vehicle: if vehicle is to the right, sparks emit from player's right edge; if left, from left edge",
-        "Base particle count: 8 at x1, +3 per combo level, capped at 20",
-        "Each particle: random velocity (lateral away from vehicle +-80-150px/s, vertical -50 to +50px/s), lifespan 0.3-0.5s, fades out linearly",
-        "Particle color uses `getComboColor(comboMultiplier)` — all sparks from one near miss share the same combo color",
-        "Particles are added to the existing `particles[]` array and rendered/updated by the existing particle system",
-        "If the existing particle object shape needs new fields (e.g., color, alpha), add them without breaking existing explosion/collision particles",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "`renderPlayer()` verifica `gameState.phase` e desenha sprite diferente para 'sky'",
+        "Sprite sky: corpo do carro atual (vermelho, 40×64) + 2 asas triangulares brancas (alpha 0.8, 12×20px cada) nas laterais, centralizadas verticalmente no corpo",
+        "Quando `phaseTransition.active && phaseTransition.to === 'sky'`: asas crescem de 0 até tamanho final (scale = progress)",
+        "Trilha de vento: 3 linhas brancas semi-transparentes (alpha 0.15, comprimento 20px) saindo da traseira, animadas com scroll",
+        "Hitbox permanece inalterada: `{x: player.x + 4, y: player.y + 6.5, w: 32, h: 51}`",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — carro com asas visível, crescimento suave durante transição"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "The particles[] array already exists for collision sparks. Check the existing particle object shape before adding fields — maintain backward compatibility with existing particle types."
+      "notes": "Asas são puramente decorativas — fora do hitbox."
     },
     {
       "id": "US-006",
-      "title": "Combo edge glow on top/bottom borders",
-      "description": "As a player, I want a subtle ambient glow on the screen edges while my combo is active, making the combo state feel immersive.",
+      "title": "Sprite do jogador — fase space (nave)",
+      "description": "Como jogador, quero ver meu carro virar uma nave espacial na fase space.",
       "acceptanceCriteria": [
-        "When `comboMultiplier >= 2`, render a radial gradient glow on the top and bottom edges of the canvas (NOT lateral edges — those are used by the danger flash)",
-        "Glow color uses `getComboColor(comboMultiplier)` with low alpha (~0.15-0.25)",
-        "Glow pulses subtly: alpha oscillates using sin() at ~1Hz (breathing effect)",
-        "Glow fades in over 0.3s when combo starts (comboMultiplier goes from 1 to 2) and fades out over 0.5s when combo expires",
-        "Glow is rendered AFTER the game world but BEFORE the HUD layer",
-        "Danger flash (red, lateral edges) and combo glow (combo color, top/bottom) can coexist without visual conflict — different colors and positions",
-        "Glow has negligible performance impact (two gradient draws per frame max)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "`renderPlayer()` desenha sprite diferente para 'space'",
+        "Sprite space: forma triangular aerodinâmica (bounding box 40×64) — triângulo principal ciano `#00E5FF`, cockpit escuro no topo, 2 propulsores traseiros (retângulos 6×10 laranja)",
+        "Propulsores com chama animada: height oscila 8-14px por frame, cor interpola entre `#FF6600` e `#FFCC00`",
+        "Quando `phaseTransition.active && phaseTransition.to === 'space'`: crossfade alpha — sky com alpha (1-progress), space com alpha progress",
+        "Hitbox permanece inalterada: `{x: player.x + 4, y: player.y + 6.5, w: 32, h: 51}`",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — nave visível, propulsores animados, transição suave"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "The danger flash already exists (dangerFlashAlpha, red glow on lateral edges when traffic is near). The combo glow uses TOP/BOTTOM edges with the combo color palette to stay visually distinct."
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Score punch animation on near miss points",
-      "description": "As a player, I want the score display to visually react when I earn multiplied near miss points, connecting the near miss event to my score.",
+      "title": "Obstáculos do céu — pássaro",
+      "description": "Como jogador, quero enfrentar pássaros como obstáculos na fase sky.",
       "acceptanceCriteria": [
-        "Add module-scope variables: `let scorePunchScale = 0` (0 = no punch, decays to 0), `let scorePunchColor = null`",
-        "In `triggerNearMiss()`, set `scorePunchScale = 0.15 + comboMultiplier * 0.05` (capped at 0.4) and `scorePunchColor = getComboColor(comboMultiplier)`",
-        "In the game loop update, decay `scorePunchScale` toward 0: `scorePunchScale = Math.max(0, scorePunchScale - dt * 3)`",
-        "In the score rendering code, when `scorePunchScale > 0`: apply ctx.scale(1 + scorePunchScale, 1 + scorePunchScale) around the score text, and temporarily use `scorePunchColor` as fill color (blending back to white as scale decays)",
-        "The punch is purely visual — it does not affect the score lerp or the actual score value",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Novo tipo em `VEHICLE_TYPES`: `bird` com `{ color: '#5D4037', width: 24, height: 20, speedRatio: 0.75, minTime: 0, behavior: 'weave', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'sky' }`",
+        "Sprite em `renderTraffic`: corpo oval (ellipse 12×8), 2 asas triangulares que oscilam. Oscilação: ângulo = sin(elapsedTime × 8) × 30 graus. Cor: `#5D4037`",
+        "`chooseVehicleType` filtra candidatos por `phase === gameState.phase` (aplica a todos os tipos, road e sky)",
+        "Colisão AABB funciona com a bounding box do tipo",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — pássaro aparece, asas batem, colisão funciona"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "The score rendering currently uses ctx.fillText with lerped displayScore. The punch adds a temporary scale transform and color flash around that same draw call."
+      "notes": "Este US instala o filtro de fase em chooseVehicleType — os próximos US de obstáculos dependem disso estar pronto."
     },
     {
       "id": "US-008",
-      "title": "Combo milestone SFX and combo lost SFX",
-      "description": "As a player, I want escalating audio feedback at combo milestones and a deflation sound when my combo drops, reinforcing the risk/reward loop.",
+      "title": "Obstáculos do céu — avião e helicóptero",
+      "description": "Como jogador, quero enfrentar aviões e helicópteros na fase sky.",
       "acceptanceCriteria": [
-        "Add `AudioManager.playComboMilestone(level)` method: plays a bright ascending chord/ding that varies by level — higher pitch/more harmonics for x5 and x8 vs x3. Duration ~0.2s, volume 0.2",
-        "In `triggerNearMiss()`, call `playComboMilestone(comboMultiplier)` when comboMultiplier reaches exactly 3, 5, or 8 (check AFTER incrementing combo)",
-        "Add `AudioManager.playComboLost()` method: plays a short descending 'whoosh down' or deflation tone. Duration ~0.3s, volume 0.15",
-        "In the combo reset timer tick (line ~4657), when `comboResetTimer` reaches 0 AND `comboMultiplier` was > 1, call `playComboLost()` BEFORE resetting comboMultiplier to 1",
-        "Milestone SFX and combo lost SFX do not overlap with or drown out engine sound, crash SFX, or near miss whoosh",
-        "Verify playComboUp (existing) still works correctly — the new milestone SFX is additional, not a replacement",
-        "Typecheck passes"
+        "Novo tipo `airplane`: `{ color: '#B0BEC5', width: 50, height: 70, speedRatio: 0.35, minTime: 0, behavior: 'none', phase: 'sky' }`",
+        "Sprite avião: fuselagem roundRect 16×70 cinza `#B0BEC5`, 2 asas horizontais 50×10 centralizadas, cauda triangular no topo, 4 janelas (pontos azuis 2×2 em fila no corpo)",
+        "Novo tipo `helicopter`: `{ color: '#78909C', width: 44, height: 50, speedRatio: 0.5, minTime: 0, behavior: 'laneChange', laneChangeMin: 2.5, laneChangeMax: 5, phase: 'sky' }`",
+        "Sprite helicóptero: corpo oval cinza-escuro `#78909C`, hélice = linha 40px que rotaciona (ângulo += dt × 15), patins na base (2 linhas horizontais)",
+        "Ambos colidem normalmente via AABB",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — avião e helicóptero aparecem, hélice gira, colisão ok"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "AudioManager uses Web Audio API with oscillators. playComboUp already exists and raises pitch with combo level. The new milestone SFX should be distinct — a celebratory ding vs the existing power chord. playComboLost needs a reference to comboMultiplier before it resets."
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Camera zoom on high combo",
-      "description": "As a player, I want to feel the intensity ramp up through a subtle zoom-in effect when I maintain a high combo streak.",
+      "title": "Obstáculos do espaço — asteroide",
+      "description": "Como jogador, quero enfrentar asteroides na fase space.",
       "acceptanceCriteria": [
-        "Add module-scope variable: `let comboZoom = 1.0` (current zoom level, lerps toward target)",
-        "Target zoom: 1.0 at combo < 4, 1.02 at combo 4-5, 1.04 at combo 6+, capped at 1.05",
-        "In game loop update, lerp `comboZoom` toward target: `comboZoom += (target - comboZoom) * dt * 3` (smooth ease)",
-        "When combo is lost (comboMultiplier reset to 1), target becomes 1.0 — zoom eases back over ~0.5s due to lerp",
-        "In the play state render, apply zoom at the start of the frame: ctx.save(), ctx.translate(CANVAS_WIDTH/2, CANVAS_HEIGHT/2), ctx.scale(comboZoom, comboZoom), ctx.translate(-CANVAS_WIDTH/2, -CANVAS_HEIGHT/2) — then ctx.restore() at the end",
-        "The zoom is purely visual — hitboxes, spawn positions, and all game logic use unscaled coordinates",
-        "Zoom does NOT apply during explosion, game over, or title states — only during play state",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Novo tipo `asteroid`: `{ color: '#795548', width: 36, height: 36, speedRatio: 0.3, minTime: 0, behavior: 'none', phase: 'space' }`",
+        "Sprite asteroide: polígono irregular de 7 vértices pré-gerado no spawn (raio base 18px ± 4px random), armazenado em `v.vertices`. Cor `#795548` com borda `#5D4037`",
+        "Rotação visual: `v.rotation` incrementa `dt × 0.5` por frame. Renderiza com `ctx.rotate(v.rotation)`. Não afeta hitbox AABB",
+        "`spawnVehicle()` gera `vertices` e `rotation: 0` para tipo asteroid",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — asteroide aparece, gira lentamente, colisão funciona"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "The zoom transform must wrap ALL rendering inside the play state's render function but be applied AFTER the ctx.save() that handles screen shake. Order: save → translate(shake) → translate+scale(zoom) → render world → restore."
+      "notes": "vertices gerados uma vez no spawn e armazenados no objeto do veículo."
     },
     {
       "id": "US-010",
-      "title": "Near miss stats on game over screen",
-      "description": "As a player, I want to see my near miss performance (count, best combo, bonus points) on the game over screen so I understand how the mechanic impacted my score.",
+      "title": "Obstáculos do espaço — naves inimigas",
+      "description": "Como jogador, quero enfrentar naves inimigas na fase space.",
       "acceptanceCriteria": [
-        "In `gameOverState.onEnter()`, capture tracking vars into gameOverState: `finalNearMissCount`, `finalBestCombo`, `finalNearMissBonusTotal`",
-        "In `gameOverState.render()`, if `finalNearMissCount > 0`, render a 'NEAR MISS' stats section below the existing stats (Time/Distance/Score) and above the ranking panel",
-        "Stats section shows: 'Near Misses: {count}  |  Best Combo: x{best}  |  Bonus: +{total}'",
-        "If `finalBestCombo >= 3`, render the stats in gold color (#FFD700) with a 'NICE!' label",
-        "If `finalNearMissCount === 0`, do not render the section at all (no empty/zero state)",
-        "Stats are read-only display — they do not affect score submission or ranking",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Novo tipo `fighter`: `{ color: '#F44336', width: 30, height: 48, speedRatio: 0.8, minTime: 0, behavior: 'laneChange', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'space' }`",
+        "Sprite fighter: triângulo vermelho invertido, 2 canhões laterais (retângulos 4×8), trail de fogo: 2 retângulos laranja na traseira que oscilam em height",
+        "Novo tipo `cruiser`: `{ color: '#455A64', width: 48, height: 72, speedRatio: 0.25, minTime: 0, behavior: 'none', phase: 'space' }` — width 48px (não 55) para caber no fairness system",
+        "Sprite cruiser: roundRect cinza-escuro, 4 painéis laterais (linhas internas), 2 luzes azuis piscantes no topo (toggle a cada 0.5s)",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — fighter e cruiser aparecem, animações funcionam, colisão ok"
       ],
       "priority": 10,
       "passes": true,
-      "notes": "The tracking vars (nearMissCount, bestCombo, nearMissBonusTotal) are created in US-001. gameOverState already captures finalScore, finalDistance, finalTime, coinsCollected. The new stats follow the same capture pattern. May need to adjust RANK_Y or stats positioning to fit the new section."
+      "notes": "cruiser.width = 48px (não 55) para que 2 cruisers em lanes adjacentes deixem gap suficiente (80-48=32px, igual ao hitbox width do jogador)."
     },
     {
       "id": "US-011",
-      "title": "First-time near miss discoverability hint",
-      "description": "As a new player, I want to learn that near miss exists so I can use it intentionally to boost my score.",
+      "title": "Efeitos sonoros das transições de fase",
+      "description": "Como jogador, quero ouvir sons que acompanham a mudança de fase.",
       "acceptanceCriteria": [
-        "Add module-scope flag: `let nearMissHintShown = false` — reset in `resetGame()`",
-        "When the first traffic vehicle enters the screen (y > 0) and `nearMissHintShown` is false, spawn a float text at top-center of screen: 'Passe rente aos carros!' in white, with 3s duration",
-        "Set `nearMissHintShown = true` immediately after showing the hint",
-        "If the player triggers a near miss before the hint naturally expires, the hint disappears early (or is simply overtaken by the near miss float text due to the 8-item limit)",
-        "The hint does NOT pause the game, block input, or interfere with gameplay in any way",
-        "The hint appears only once per game session (resets on new game via resetGame, but not on page reload — no localStorage needed)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Novo método `AudioManager.playPhaseTransition(fromPhase, toPhase)` chamado quando transição inicia",
+        "road→sky: sweep ascendente — oscilador 'sawtooth', frequency ramp 200Hz→600Hz em 2s, gain 0.15, fade out no final",
+        "sky→space: bass drop — oscilador 'sine', frequency ramp 120Hz→40Hz em 1.5s, gain 0.2; seguido de tom etéreo (sine 800Hz, gain 0.05, duration 1.5s)",
+        "Fase sky: engine drone muda frequency para +50% do valor atual",
+        "Fase space: engine drone muda para sine wave 80Hz, gain 0.05 (hum eletrônico)",
+        "Sons procedurais via Web Audio API, sem arquivos externos",
+        "Build passa sem erros (npm run build)"
       ],
       "priority": 11,
       "passes": true,
-      "notes": "Use the existing spawnFloatText system. The hint is a regular float text with longer duration (3s vs the normal FLOAT_TEXT_DURATION). May need to allow spawnFloatText to accept a custom duration parameter, or just set a longer timer directly."
+      "notes": "AudioManager pattern: check this.ctx, create osc+gain, connect to masterGain, schedule, cleanup onended."
+    },
+    {
+      "id": "US-012",
+      "title": "Partículas de transição de fase",
+      "description": "Como jogador, quero ver efeitos de partículas durante a mudança de fase para reforçar o momento.",
+      "acceptanceCriteria": [
+        "Transição road→sky: spawna 20 partículas brancas com vy negativo (sobem), vx aleatório ±50, life 2s. Chamado uma vez no início da transição",
+        "Transição sky→space: spawna 30 partículas ciano com vy=0, vx aleatório ±200 (streaking), life 1.5s. Chamado uma vez no início da transição",
+        "Partículas usam o array `particles[]` existente, renderizadas por `renderParticles()` sem mudanças nessa função",
+        "Partículas de transição têm `isTransition: true` — renderizadas como linha (lineWidth 2, comprimento proporcional à velocidade) em vez de quadrado",
+        "Sem slow-motion durante transição (risco de morte injusta)",
+        "Máximo 30 partículas de transição por evento (cap para performance)",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — partículas visíveis durante transição"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Usa particle shape existente: { x, y, vx, vy, life, maxLife, color, size } + isTransition."
+    },
+    {
+      "id": "US-013",
+      "title": "Limpeza de veículos na transição e smoke test completo",
+      "description": "Como desenvolvedor, preciso garantir que veículos da fase anterior são removidos corretamente e que o fluxo completo funciona.",
+      "acceptanceCriteria": [
+        "Veículos da fase anterior que já estão na tela continuam descendo normalmente até saírem — não somem abruptamente",
+        "Nenhum novo veículo da fase anterior é spawnado após início da transição",
+        "Novos veículos da fase atual começam a spawnar imediatamente durante a transição",
+        "Se `phaseTransition.active`, `spawnPauseTimer` recebe 1.0s (pausa breve para não sobrecarregar o jogador)",
+        "Smoke test: jogar → atingir 25k → transição road→sky → obstáculos sky aparecem → atingir 50k → transição sky→space → obstáculos space aparecem → morrer → game over → reiniciar → volta para fase road com tudo resetado",
+        "Sem crash, NaN, ou veículo 'fantasma' (tipo de fase errada) em nenhum momento do fluxo",
+        "Build passa sem erros (npm run build)",
+        "Verificar no browser usando dev-browser skill — fluxo completo funciona"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "US final de integração. Confirmar que resetGameState() limpa tudo: phase, phaseTriggered, phaseTransition, e que veículos antigos não ficam 'presos'."
     }
   ]
 }

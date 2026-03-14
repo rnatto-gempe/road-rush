@@ -140,6 +140,35 @@ const speedLineData = (() => {
   return data;
 })();
 
+// Sky clouds: pre-generated array of 6 clouds for sky phase background
+const SKY_CLOUD_PERIOD = CANVAS_HEIGHT + 100; // vertical wrap period
+const skyCloudData = (() => {
+  const data = [];
+  for (let i = 0; i < 6; i++) {
+    data.push({
+      x: ROAD_LEFT + Math.random() * ROAD_WIDTH,
+      yPhase: Math.random() * SKY_CLOUD_PERIOD,
+    });
+  }
+  return data;
+})();
+
+// Space starfield: pre-generated array of 40 stars for space phase background
+const SPACE_STAR_PERIOD = CANVAS_HEIGHT + 100; // vertical wrap period
+const spaceStarData = (() => {
+  const data = [];
+  for (let i = 0; i < 40; i++) {
+    data.push({
+      x: Math.random() * CANVAS_WIDTH,
+      yPhase: Math.random() * SPACE_STAR_PERIOD,
+      size: 1 + Math.random(), // 1-2px
+      brightness: 0.3 + Math.random() * 0.7, // 0.3-1.0
+      layer: Math.random() < 0.5 ? 1 : 2,
+    });
+  }
+  return data;
+})();
+
 // Explosion effects (deprecated — kept for array cleanup in resetGameState)
 const explosions = []; // no longer used; shockwaveRings replaces this
 
@@ -158,6 +187,7 @@ const VEHICLE_TYPES = {
     speedRatio: 0.6,
     minTime: 0,
     behavior: 'none',
+    phase: 'road',
   },
   truck: {
     color: '#616161',
@@ -166,6 +196,7 @@ const VEHICLE_TYPES = {
     speedRatio: 0.4,
     minTime: 0,
     behavior: 'none',
+    phase: 'road',
   },
   sports: {
     color: '#B71C1C',
@@ -176,6 +207,7 @@ const VEHICLE_TYPES = {
     behavior: 'laneChange',
     laneChangeMin: 2,
     laneChangeMax: 4,
+    phase: 'road',
   },
   moto: {
     color: '#FFC107',
@@ -186,11 +218,85 @@ const VEHICLE_TYPES = {
     behavior: 'weave',
     laneChangeMin: 1,
     laneChangeMax: 2,
+    phase: 'road',
+  },
+  bird: {
+    color: '#5D4037',
+    width: 24,
+    height: 20,
+    speedRatio: 0.75,
+    minTime: 0,
+    behavior: 'weave',
+    laneChangeMin: 1.5,
+    laneChangeMax: 3,
+    phase: 'sky',
+  },
+  airplane: {
+    color: '#B0BEC5',
+    width: 50,
+    height: 70,
+    speedRatio: 0.35,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'sky',
+  },
+  helicopter: {
+    color: '#78909C',
+    width: 44,
+    height: 50,
+    speedRatio: 0.5,
+    minTime: 0,
+    behavior: 'laneChange',
+    laneChangeMin: 2.5,
+    laneChangeMax: 5,
+    phase: 'sky',
+  },
+  asteroid: {
+    color: '#795548',
+    width: 36,
+    height: 36,
+    speedRatio: 0.3,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'space',
+  },
+  fighter: {
+    color: '#F44336',
+    width: 30,
+    height: 48,
+    speedRatio: 0.8,
+    minTime: 0,
+    behavior: 'laneChange',
+    laneChangeMin: 1.5,
+    laneChangeMax: 3,
+    phase: 'space',
+  },
+  cruiser: {
+    color: '#455A64',
+    width: 48,
+    height: 72,
+    speedRatio: 0.25,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'space',
   },
 };
 
 // Debug mode
 let debugMode = false;
+
+// Easing utility
+function easeInOutCubic (t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Color interpolation for phase transitions
+function lerpColor (hex1, hex2, t) {
+  const r1 = parseInt(hex1.slice(1, 3), 16), g1 = parseInt(hex1.slice(3, 5), 16), b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16), g2 = parseInt(hex2.slice(3, 5), 16), b2 = parseInt(hex2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t), g = Math.round(g1 + (g2 - g1) * t), b = Math.round(b1 + (b2 - b1) * t);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
 
 // ─── Audio Manager (Web Audio API) ───
 const AudioManager = {
@@ -291,11 +397,30 @@ const AudioManager = {
   updateEngine (scrollSpeed) {
     if (!this.engine.osc) return;
     const now = this.ctx.currentTime;
+    const phase = gameState.phase;
+
+    if (phase === 'space') {
+      // Space: electronic hum — sine wave 80Hz, low gain
+      if (this.engine.osc.type !== 'sine') {
+        this.engine.osc.type = 'sine';
+      }
+      this.engine.osc.frequency.setTargetAtTime(80, now, 0.1);
+      this.engine.filter.frequency.setTargetAtTime(200, now, 0.1);
+      this.engine.gain.gain.setTargetAtTime(0.05, now, 0.1);
+      return;
+    }
+
     // Map scrollSpeed 200→800 to frequency 60→180Hz
     const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
     let freq = 60 + t * 120;
+    // Sky phase: raise pitch by 50%
+    if (phase === 'sky') freq *= 1.5;
     // Nitro boost: raise pitch by ~30%
     if (this.nitro.active) freq *= 1.3;
+    // Restore sawtooth if coming back from space (e.g. after reset)
+    if (this.engine.osc.type !== 'sawtooth') {
+      this.engine.osc.type = 'sawtooth';
+    }
     this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
     // Filter cutoff maps 400→800Hz
     this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
@@ -1252,6 +1377,63 @@ const AudioManager = {
     }
   },
 
+  // ─── Phase transition sound effects ───
+  playPhaseTransition (fromPhase, toPhase) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    if (fromPhase === 'road' && toPhase === 'sky') {
+      // Ascending sweep — sawtooth 200Hz→600Hz over 2s
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 2);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+      gain.gain.setValueAtTime(0.15, now + 1.5);
+      gain.gain.linearRampToValueAtTime(0, now + 2);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+
+    if (fromPhase === 'sky' && toPhase === 'space') {
+      // Bass drop — sine 120Hz→40Hz over 1.5s
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 1.5);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+      gain.gain.setValueAtTime(0.2, now + 1.0);
+      gain.gain.linearRampToValueAtTime(0, now + 1.5);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 1.5);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+
+      // Ethereal tone — sine 800Hz, gain 0.05, 1.5s (starts after bass drop)
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(800, now + 0.5);
+      const gain2 = this.ctx.createGain();
+      gain2.gain.setValueAtTime(0, now + 0.5);
+      gain2.gain.linearRampToValueAtTime(0.05, now + 0.8);
+      gain2.gain.setValueAtTime(0.05, now + 1.5);
+      gain2.gain.linearRampToValueAtTime(0, now + 2.0);
+      osc2.connect(gain2);
+      gain2.connect(this.masterGain);
+      osc2.start(now + 0.5);
+      osc2.stop(now + 2.0);
+      osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
+    }
+  },
+
   // ─── Game over somber drone (two detuned low sines + filtered noise tail) ───
   gameOverDrone: { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null, dimOsc1: null, dimOsc2: null, dimOsc3: null, dimGain: null },
 
@@ -1626,6 +1808,9 @@ let playerVisible = true;         // set to false during explosion sequence
 
 // Post-collision spawn pause (US-014)
 let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
+
+// Phase transition flags — ensure each transition triggers exactly once
+let phaseTriggered = { sky: false, space: false };
 
 // Near miss / combo state
 let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
@@ -3017,6 +3202,44 @@ function updateParticles (dt) {
   }
 }
 
+function spawnTransitionParticles (fromPhase, toPhase) {
+  const px = gameState.player.x + 20; // center of player
+  const py = gameState.player.y + 32; // center of player
+  if (toPhase === 'sky') {
+    // 20 white particles rising upward
+    const count = 20;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: px + (Math.random() - 0.5) * 300,
+        y: py + Math.random() * 200,
+        vx: (Math.random() - 0.5) * 100,
+        vy: -(80 + Math.random() * 120),
+        life: 2,
+        maxLife: 2,
+        color: '#FFFFFF',
+        size: 2,
+        isTransition: true,
+      });
+    }
+  } else if (toPhase === 'space') {
+    // 30 cyan particles streaking horizontally
+    const count = 30;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * 400,
+        y: Math.random() * 700,
+        vx: (Math.random() - 0.5) * 400,
+        vy: 0,
+        life: 1.5,
+        maxLife: 1.5,
+        color: '#00E5FF',
+        size: 2,
+        isTransition: true,
+      });
+    }
+  }
+}
+
 function renderParticles (ctx) {
   const highSpeed = gameState.scrollSpeed > 600;
   for (const p of particles) {
@@ -3031,6 +3254,19 @@ function renderParticles (ctx) {
       ctx.arc(p.x, p.y, p.size * (highSpeed ? 1.3 : 1), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+    } else if (p.isTransition) {
+      // Transition particles: render as velocity-oriented lines
+      ctx.globalAlpha = baseAlpha;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      const len = Math.min(20, speed * 0.08);
+      const nx = speed > 0 ? p.vx / speed : 0;
+      const ny = speed > 0 ? p.vy / speed : 0;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - nx * len, p.y - ny * len);
+      ctx.stroke();
     } else {
       ctx.globalAlpha = baseAlpha;
       ctx.fillStyle = p.color;
@@ -3120,6 +3356,9 @@ const gameState = {
   // Shield items
   shieldItems: [],
   nextShieldSpawnDistance: SHIELD_SPAWN_MIN,
+  // Phase system
+  phase: 'road',
+  phaseTransition: { progress: 0, active: false, from: '', to: '' },
 };
 
 function resetGameState () {
@@ -3211,6 +3450,10 @@ function resetGameState () {
   explosionState.fadeInAlpha = 0;
   explosionState.textAlpha = 0;
   explosionState.timer = 0;
+  // Reset phase system
+  gameState.phase = 'road';
+  gameState.phaseTransition = { progress: 0, active: false, from: '', to: '' };
+  phaseTriggered = { sky: false, space: false };
 }
 
 // --- Scroll Speed Ramp ---
@@ -3245,6 +3488,25 @@ function getRoadFovFactor () {
 }
 
 function renderRoad (ctx, scrollOffset) {
+  const phase = gameState.phase;
+  const pt = gameState.phaseTransition;
+
+  // During active transition, blend between from and to phases
+  if (pt.active) {
+    renderRoadTransition(ctx, scrollOffset, pt);
+    return;
+  }
+
+  if (phase === 'sky') {
+    renderRoadSky(ctx, scrollOffset);
+    return;
+  }
+
+  if (phase === 'space') {
+    renderRoadSpace(ctx, scrollOffset);
+    return;
+  }
+
   // Asphalt background with vertical gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   gradient.addColorStop(0, '#1A1A2E');
@@ -3320,6 +3582,225 @@ function renderRoad (ctx, scrollOffset) {
     ctx.stroke();
   }
 
+  ctx.setLineDash([]);
+}
+
+function renderRoadSky (ctx, scrollOffset) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#4A90D9');
+  gradient.addColorStop(1, '#87CEEB');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  renderSkyElements(ctx, scrollOffset);
+}
+
+function renderRoadSpace (ctx, scrollOffset) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#0A0A1A');
+  gradient.addColorStop(1, '#0D1B2A');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  renderSpaceElements(ctx, scrollOffset);
+}
+
+// Phase background color definitions for transitions
+const PHASE_BG_COLORS = {
+  road:  { top: '#1A1A2E', bottom: '#16213E' },
+  sky:   { top: '#4A90D9', bottom: '#87CEEB' },
+  space: { top: '#0A0A1A', bottom: '#0D1B2A' }
+};
+
+function renderRoadTransition (ctx, scrollOffset, pt) {
+  const progress = pt.progress;
+  const fromPhase = pt.from;
+  const toPhase = pt.to;
+
+  // 1. Interpolated background gradient
+  const fromColors = PHASE_BG_COLORS[fromPhase];
+  const toColors = PHASE_BG_COLORS[toPhase];
+  const blendTop = lerpColor(fromColors.top, toColors.top, progress);
+  const blendBottom = lerpColor(fromColors.bottom, toColors.bottom, progress);
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, blendTop);
+  gradient.addColorStop(1, blendBottom);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // 2. Fade out elements of the "from" phase
+  const fadeOut = 1 - progress;
+  const savedAlpha = ctx.globalAlpha;
+
+  if (fromPhase === 'road') {
+    // Fade out rumble strips
+    ctx.globalAlpha = fadeOut;
+    renderRoadRumbleStrips(ctx, scrollOffset);
+    renderRoadSurface(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  } else if (fromPhase === 'sky') {
+    // Fade out clouds, sky corridor, wind borders, sky lanes
+    ctx.globalAlpha = fadeOut;
+    renderSkyElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  }
+
+  // 3. Fade in elements of the "to" phase
+  if (toPhase === 'sky') {
+    ctx.globalAlpha = progress;
+    renderSkyElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  } else if (toPhase === 'space') {
+    ctx.globalAlpha = progress;
+    renderSpaceElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  }
+}
+
+// Extracted: road rumble strips
+function renderRoadRumbleStrips (ctx, scrollOffset) {
+  const rumbleOffset = scrollOffset % RUMBLE_PERIOD;
+  for (let side = 0; side < 2; side++) {
+    const stripX = side === 0 ? 0 : ROAD_RIGHT;
+    const stripW = ROAD_LEFT;
+    let y = rumbleOffset - RUMBLE_PERIOD;
+    let colorIndex = 0;
+    while (y < CANVAS_HEIGHT) {
+      ctx.fillStyle = colorIndex % 2 === 0 ? '#E53935' : '#FFFFFF';
+      ctx.fillRect(stripX, y, stripW, RUMBLE_SEGMENT);
+      y += RUMBLE_SEGMENT;
+      colorIndex++;
+    }
+  }
+}
+
+// Extracted: road surface (asphalt trapezoid + borders + lanes)
+function renderRoadSurface (ctx, scrollOffset) {
+  const fovFactor = getRoadFovFactor();
+  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2;
+  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
+  const fovTopLeft = roadCenter - topHalfWidth;
+  const fovTopRight = roadCenter + topHalfWidth;
+
+  const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  roadGradient.addColorStop(0, '#2A2A3E');
+  roadGradient.addColorStop(1, '#26314E');
+  ctx.fillStyle = roadGradient;
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneXBottom = ROAD_LEFT + i * LANE_WIDTH;
+    const laneXTop = roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor);
+    const dx = laneXBottom - laneXTop;
+    const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
+    ctx.beginPath();
+    ctx.moveTo(xAtY(dashScrollOffset - DASH_PERIOD), dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+// Extracted: sky phase elements (clouds + corridor + borders + lanes)
+function renderSkyElements (ctx, scrollOffset) {
+  const cloudScrollY = (scrollOffset * 0.3) % SKY_CLOUD_PERIOD;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  for (const cloud of skyCloudData) {
+    let cy = (cloud.yPhase + cloudScrollY) % SKY_CLOUD_PERIOD - 20;
+    if (cy < -20) cy += SKY_CLOUD_PERIOD;
+    const cx = cloud.x - 20;
+    ctx.beginPath();
+    ctx.roundRect(cx, cy, 40, 15, 7);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(107, 179, 224, 0.15)';
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(laneX, dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+// Extracted: space phase elements (stars + corridor + borders + lanes)
+function renderSpaceElements (ctx, scrollOffset) {
+  for (const star of spaceStarData) {
+    const speed = star.layer === 1 ? 0.1 : 0.2;
+    const starScrollY = (scrollOffset * speed) % SPACE_STAR_PERIOD;
+    let sy = (star.yPhase + starScrollY) % SPACE_STAR_PERIOD;
+    if (sy < 0) sy += SPACE_STAR_PERIOD;
+    if (sy >= -2 && sy <= CANVAS_HEIGHT + 2) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
+      ctx.fillRect(star.x, sy, star.size, star.size);
+    }
+  }
+
+  ctx.fillStyle = 'rgba(13, 27, 42, 0.3)';
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.1)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(laneX, dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
   ctx.setLineDash([]);
 }
 
@@ -3420,6 +3901,8 @@ function renderPlayer (ctx, player) {
   }
 
   const { x, y, width, height } = player;
+  const phase = gameState.phase;
+  const pt = gameState.phaseTransition;
 
   // Active shield: subtle blue border/glow around car
   if (player.hasShield) {
@@ -3437,6 +3920,198 @@ function renderPlayer (ctx, player) {
     ctx.stroke();
   }
 
+  // --- Space phase: spaceship ---
+  if (phase === 'space' || (pt.active && (pt.to === 'space' || pt.from === 'space'))) {
+    // During sky→space transition, crossfade: draw sky sprite with alpha (1-progress), space sprite with alpha progress
+    const isTransitioningToSpace = pt.active && pt.to === 'space';
+    const isTransitioningFromSpace = pt.active && pt.from === 'space';
+    const spaceAlpha = isTransitioningToSpace ? pt.progress : isTransitioningFromSpace ? 1 - pt.progress : 1;
+
+    // Draw sky sprite (fading out) during sky→space transition
+    if (isTransitioningToSpace && pt.progress < 1) {
+      const skyAlpha = 1 - pt.progress;
+      const skyWingScale = 1 - pt.progress; // wings shrink as we leave sky
+      ctx.save();
+      ctx.globalAlpha = skyAlpha;
+
+      // Car body
+      ctx.fillStyle = '#E53935';
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, 6);
+      ctx.fill();
+
+      // Wings shrinking
+      if (skyWingScale > 0.01) {
+        const wingW = 12 * skyWingScale;
+        const wingH = 20 * skyWingScale;
+        const wingY = y + (height - wingH) / 2;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.globalAlpha = skyAlpha * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x, wingY);
+        ctx.lineTo(x - wingW, wingY + wingH / 2);
+        ctx.lineTo(x, wingY + wingH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + width, wingY);
+        ctx.lineTo(x + width + wingW, wingY + wingH / 2);
+        ctx.lineTo(x + width, wingY + wingH);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Windshield
+      ctx.globalAlpha = skyAlpha;
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+      ctx.fillRect(x + 6, y + 8, width - 12, 16);
+      ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+      // Headlights
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw space ship sprite
+    if (spaceAlpha > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = spaceAlpha;
+
+      const cx = x + width / 2; // center x
+
+      // Thruster flames (behind ship, draw first)
+      const flameTime = gameState.elapsedTime * 10;
+      const flameH1 = 8 + 6 * Math.abs(Math.sin(flameTime));
+      const flameH2 = 8 + 6 * Math.abs(Math.sin(flameTime + 2));
+      const flameLerp = 0.5 + 0.5 * Math.sin(flameTime * 1.3);
+      // Interpolate between #FF6600 and #FFCC00
+      const flameR = 255;
+      const flameG = Math.round(102 + (204 - 102) * flameLerp);
+      const flameB = Math.round(0 + (0 - 0) * flameLerp);
+      const flameColor = `rgb(${flameR}, ${flameG}, ${flameB})`;
+
+      ctx.fillStyle = flameColor;
+      // Left thruster flame
+      ctx.fillRect(cx - 10, y + height, 6, flameH1);
+      // Right thruster flame
+      ctx.fillRect(cx + 4, y + height, 6, flameH2);
+
+      // Main body: triangular aerodynamic shape (cyan)
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.moveTo(cx, y); // nose (top center)
+      ctx.lineTo(x + width - 4, y + height - 6); // right bottom
+      ctx.lineTo(x + 4, y + height - 6); // left bottom
+      ctx.closePath();
+      ctx.fill();
+
+      // Cockpit (dark, at the top portion)
+      ctx.fillStyle = '#0A1628';
+      ctx.beginPath();
+      ctx.moveTo(cx, y + 6); // tip
+      ctx.lineTo(cx + 7, y + 22); // right
+      ctx.lineTo(cx - 7, y + 22); // left
+      ctx.closePath();
+      ctx.fill();
+
+      // Cockpit glass highlight
+      ctx.fillStyle = 'rgba(100, 200, 255, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(cx, y + 8);
+      ctx.lineTo(cx + 5, y + 20);
+      ctx.lineTo(cx - 5, y + 20);
+      ctx.closePath();
+      ctx.fill();
+
+      // Thruster housings (2 orange rectangles 6×10 at rear)
+      ctx.fillStyle = '#FF6600';
+      ctx.fillRect(cx - 10, y + height - 10, 6, 10);
+      ctx.fillRect(cx + 4, y + height - 10, 6, 10);
+
+      ctx.restore();
+    }
+    return;
+  }
+
+  // --- Sky phase: car with wings ---
+  if (phase === 'sky' || (pt.active && (pt.to === 'sky' || pt.from === 'sky'))) {
+    // Determine wing scale: grow during transition to sky, shrink during transition from sky
+    let wingScale = 1;
+    if (pt.active && pt.to === 'sky') wingScale = pt.progress;
+    else if (pt.active && pt.from === 'sky') wingScale = 1 - pt.progress;
+
+    // Wind trail lines (behind car, drawn first)
+    const trailAlpha = 0.15 * wingScale;
+    if (trailAlpha > 0.01) {
+      const scrollAnim = (gameState.scrollOffset * 0.5) % 20;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${trailAlpha})`;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        const trailX = x + 8 + i * 12;
+        const trailY = y + height + 2 + i * 3 + scrollAnim;
+        ctx.beginPath();
+        ctx.moveTo(trailX, trailY);
+        ctx.lineTo(trailX, trailY + 20);
+        ctx.stroke();
+      }
+    }
+
+    // Car body (same red car)
+    ctx.fillStyle = '#E53935';
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, 6);
+    ctx.fill();
+
+    // Wings (triangular, white, alpha 0.8, 12×20px each, centered vertically on body)
+    if (wingScale > 0.01) {
+      const wingW = 12 * wingScale;
+      const wingH = 20 * wingScale;
+      const wingY = y + (height - wingH) / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#FFFFFF';
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(x, wingY);
+      ctx.lineTo(x - wingW, wingY + wingH / 2);
+      ctx.lineTo(x, wingY + wingH);
+      ctx.closePath();
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(x + width, wingY);
+      ctx.lineTo(x + width + wingW, wingY + wingH / 2);
+      ctx.lineTo(x + width, wingY + wingH);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Windshield
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+    ctx.fillRect(x + 6, y + 8, width - 12, 16);
+
+    // Rear window
+    ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+    // Headlights
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  // --- Default road phase car ---
   // Car body
   ctx.fillStyle = '#E53935';
   ctx.beginPath();
@@ -3615,7 +4290,8 @@ function getAggressiveWeight (elapsed) {
 }
 
 function chooseVehicleType (elapsed) {
-  const available = Object.entries(VEHICLE_TYPES).filter(([, t]) => elapsed >= t.minTime);
+  const currentPhase = gameState.phase;
+  const available = Object.entries(VEHICLE_TYPES).filter(([, t]) => elapsed >= t.minTime && t.phase === currentPhase);
   const aggressive = available.filter(([, t]) => t.behavior !== 'none');
   const passive = available.filter(([, t]) => t.behavior === 'none');
 
@@ -3623,7 +4299,7 @@ function chooseVehicleType (elapsed) {
   if (aggressive.length > 0 && Math.random() < getAggressiveWeight(elapsed)) {
     pool = aggressive;
   } else {
-    pool = passive;
+    pool = passive.length > 0 ? passive : available;
   }
 
   const [typeName] = pool[Math.floor(Math.random() * pool.length)];
@@ -3640,7 +4316,7 @@ function buildVehicleCandidate () {
 }
 
 function spawnVehicle (candidate) {
-  gameState.traffic.push({
+  const obj = {
     type: candidate.typeName,
     x: candidate.x,
     y: candidate.y,
@@ -3657,7 +4333,20 @@ function spawnVehicle (candidate) {
     minDistX: Infinity, // min sprite-edge-to-edge horizontal dist during vertical overlap
     nearMissChecked: false, // true once near miss check has been performed
     nearMissFlash: null,    // {side: 'left'|'right', timer} when flashing
-  });
+  };
+  // Asteroid: pre-generate irregular polygon vertices and rotation state
+  if (candidate.typeName === 'asteroid') {
+    const baseRadius = 18;
+    const verts = [];
+    for (let i = 0; i < 7; i++) {
+      const angle = (i / 7) * Math.PI * 2;
+      const r = baseRadius + (Math.random() * 8 - 4); // ±4px variation
+      verts.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+    }
+    obj.vertices = verts;
+    obj.rotation = 0;
+  }
+  gameState.traffic.push(obj);
 }
 
 function updateTraffic (dt) {
@@ -3694,6 +4383,9 @@ function updateTraffic (dt) {
     v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio;
     const visualSpeed = getEffectiveScrollSpeed() * (1 - type.speedRatio);
     v.y += visualSpeed * dt;
+
+    // Asteroid rotation
+    if (v.rotation !== undefined) v.rotation += dt * 0.5;
 
     // First-time near miss discoverability hint (US-011)
     if (!nearMissHintShown && v.y > 0) {
@@ -3813,6 +4505,200 @@ function renderTraffic (ctx) {
       // Rider silhouette
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+    } else if (v.type === 'bird') {
+      // Bird: oval body + oscillating wings
+      const bx = v.x + v.width / 2;
+      const by = v.y + v.height / 2;
+      const wingAngle = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6); // ±30 degrees
+      ctx.fillStyle = '#5D4037';
+      // Body oval
+      ctx.beginPath();
+      ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Left wing
+      ctx.save();
+      ctx.translate(bx - 8, by);
+      ctx.rotate(-wingAngle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-10, -6);
+      ctx.lineTo(-2, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // Right wing
+      ctx.save();
+      ctx.translate(bx + 8, by);
+      ctx.rotate(wingAngle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(10, -6);
+      ctx.lineTo(2, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (v.type === 'airplane') {
+      // Airplane: fuselage + horizontal wings + tail + windows
+      const ax = v.x;
+      const ay = v.y;
+      const acx = ax + v.width / 2; // center x
+      // Fuselage (narrow roundRect centered)
+      ctx.fillStyle = '#B0BEC5';
+      ctx.beginPath();
+      ctx.roundRect(acx - 8, ay, 16, 70, 4);
+      ctx.fill();
+      // Horizontal wings (centered at ~40% from top)
+      ctx.fillRect(ax, ay + 25, 50, 10);
+      // Tail (triangle at top)
+      ctx.beginPath();
+      ctx.moveTo(acx, ay);
+      ctx.lineTo(acx - 10, ay + 14);
+      ctx.lineTo(acx + 10, ay + 14);
+      ctx.closePath();
+      ctx.fill();
+      // Windows (4 blue dots in a row along fuselage)
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+      for (let wi = 0; wi < 4; wi++) {
+        ctx.fillRect(acx - 1, ay + 32 + wi * 8, 2, 2);
+      }
+    } else if (v.type === 'helicopter') {
+      // Helicopter: oval body + spinning rotor + skids
+      const hcx = v.x + v.width / 2;
+      const hcy = v.y + v.height / 2;
+      // Body (oval)
+      ctx.fillStyle = '#78909C';
+      ctx.beginPath();
+      ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Rotor (spinning line at top)
+      const rotorAngle = gameState.elapsedTime * 15;
+      ctx.save();
+      ctx.translate(hcx, v.y + 8);
+      ctx.rotate(rotorAngle);
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-20, 0);
+      ctx.lineTo(20, 0);
+      ctx.stroke();
+      ctx.restore();
+      // Rotor hub
+      ctx.fillStyle = '#546E7A';
+      ctx.beginPath();
+      ctx.arc(hcx, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Skids at base (2 horizontal lines)
+      ctx.strokeStyle = '#455A64';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(v.x + 6, v.y + v.height - 4);
+      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + 10, v.y + v.height - 1);
+      ctx.lineTo(v.x + v.width - 10, v.y + v.height - 1);
+      ctx.stroke();
+    } else if (v.type === 'asteroid') {
+      // Asteroid: rotating irregular polygon
+      const acx = v.x + v.width / 2;
+      const acy = v.y + v.height / 2;
+      ctx.save();
+      ctx.translate(acx, acy);
+      ctx.rotate(v.rotation || 0);
+      // Fill
+      ctx.fillStyle = '#795548';
+      ctx.beginPath();
+      const verts = v.vertices;
+      if (verts && verts.length > 0) {
+        ctx.moveTo(verts[0].x, verts[0].y);
+        for (let i = 1; i < verts.length; i++) {
+          ctx.lineTo(verts[i].x, verts[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        // Border
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (v.type === 'fighter') {
+      // Fighter: inverted red triangle with cannons and fire trail
+      const fcx = v.x + v.width / 2;
+      ctx.save();
+      // Main body — inverted triangle (point at bottom)
+      ctx.fillStyle = '#F44336';
+      ctx.beginPath();
+      ctx.moveTo(fcx, v.y + v.height);            // bottom point
+      ctx.lineTo(v.x, v.y);                        // top-left
+      ctx.lineTo(v.x + v.width, v.y);              // top-right
+      ctx.closePath();
+      ctx.fill();
+      // Darker center stripe
+      ctx.fillStyle = '#C62828';
+      ctx.beginPath();
+      ctx.moveTo(fcx, v.y + v.height);
+      ctx.lineTo(fcx - 5, v.y);
+      ctx.lineTo(fcx + 5, v.y);
+      ctx.closePath();
+      ctx.fill();
+      // 2 cannons (lateral rectangles)
+      ctx.fillStyle = '#B71C1C';
+      ctx.fillRect(v.x - 2, v.y + 4, 4, 8);
+      ctx.fillRect(v.x + v.width - 2, v.y + 4, 4, 8);
+      // Fire trail at rear (2 oscillating flame rectangles)
+      const ft = gameState.elapsedTime || 0;
+      const flameH1 = 8 + Math.sin(ft * 10) * 3;
+      const flameH2 = 8 + Math.sin(ft * 10 + 2) * 3;
+      const flameLerp1 = (Math.sin(ft * 10) + 1) / 2;
+      const flameLerp2 = (Math.sin(ft * 10 + 2) + 1) / 2;
+      // Flame 1 (left thruster)
+      ctx.fillStyle = `rgb(${Math.round(255 - flameLerp1 * 0)}, ${Math.round(102 + flameLerp1 * 102)}, ${Math.round(flameLerp1 * 0)})`;
+      ctx.fillRect(fcx - 7, v.y + v.height, 5, flameH1);
+      // Flame 2 (right thruster)
+      ctx.fillStyle = `rgb(${Math.round(255 - flameLerp2 * 0)}, ${Math.round(102 + flameLerp2 * 102)}, ${Math.round(flameLerp2 * 0)})`;
+      ctx.fillRect(fcx + 2, v.y + v.height, 5, flameH2);
+      ctx.restore();
+    } else if (v.type === 'cruiser') {
+      // Cruiser: large dark roundRect with internal panels and blinking lights
+      ctx.save();
+      ctx.fillStyle = '#455A64';
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 6);
+      ctx.fill();
+      // 4 internal panel lines (horizontal)
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      const panelSpacing = v.height / 5;
+      for (let i = 1; i <= 4; i++) {
+        const py = v.y + panelSpacing * i;
+        ctx.beginPath();
+        ctx.moveTo(v.x + 4, py);
+        ctx.lineTo(v.x + v.width - 4, py);
+        ctx.stroke();
+      }
+      // 2 lateral panel lines (vertical, near edges)
+      ctx.beginPath();
+      ctx.moveTo(v.x + 8, v.y + 6);
+      ctx.lineTo(v.x + 8, v.y + v.height - 6);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width - 8, v.y + 6);
+      ctx.lineTo(v.x + v.width - 8, v.y + v.height - 6);
+      ctx.stroke();
+      // 2 blinking blue lights at top (toggle every 0.5s)
+      const ct = gameState.elapsedTime || 0;
+      const lightOn = Math.floor(ct / 0.5) % 2 === 0;
+      ctx.fillStyle = lightOn ? '#42A5F5' : '#1565C0';
+      ctx.globalAlpha = lightOn ? 1.0 : 0.4;
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2 - 8, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2 + 8, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+      ctx.restore();
     }
 
     // Near miss flash: white strip on the side closest to the player
@@ -4833,6 +5719,9 @@ const playingState = {
     gameState.distanceTraveled += effSpeed * dt;
 
     if (consumeKey('d') || consumeKey('D')) debugMode = !debugMode;
+    // Debug shortcuts: P = jump near 25k (sky), O = jump near 50k (space)
+    if (debugMode && (consumeKey('p') || consumeKey('P'))) gameState.score = 24500;
+    if (debugMode && (consumeKey('o') || consumeKey('O'))) gameState.score = 49500;
 
     updatePlayer(dt);
     updateTraffic(dt);
@@ -4909,6 +5798,36 @@ const playingState = {
 
     // Lerp displayed score toward actual score
     gameState.displayedScore += (gameState.score - gameState.displayedScore) * Math.min(1, SCORE_LERP_RATE * dt);
+
+    // Phase transition triggers
+    if (!phaseTriggered.sky && gameState.score >= 25000) {
+      phaseTriggered.sky = true;
+      gameState.phase = 'sky';
+      gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'road', to: 'sky' };
+      spawnPauseTimer = 1.0; // Brief pause to avoid overwhelming player during transition
+      AudioManager.playPhaseTransition('road', 'sky');
+      spawnTransitionParticles('road', 'sky');
+    }
+    if (!phaseTriggered.space && gameState.score >= 50000) {
+      phaseTriggered.space = true;
+      gameState.phase = 'space';
+      gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'sky', to: 'space' };
+      spawnPauseTimer = 1.0; // Brief pause to avoid overwhelming player during transition
+      AudioManager.playPhaseTransition('sky', 'space');
+      spawnTransitionParticles('sky', 'space');
+    }
+
+    // Advance active phase transition (3 second duration with easing)
+    if (gameState.phaseTransition.active) {
+      const TRANSITION_DURATION = 3;
+      gameState.phaseTransition._timer = Math.min(TRANSITION_DURATION, gameState.phaseTransition._timer + dt);
+      const linearT = gameState.phaseTransition._timer / TRANSITION_DURATION;
+      gameState.phaseTransition.progress = easeInOutCubic(linearT);
+      if (gameState.phaseTransition._timer >= TRANSITION_DURATION) {
+        gameState.phaseTransition.active = false;
+        gameState.phaseTransition.progress = 1;
+      }
+    }
 
     // Drain fuel proportional to effective speed
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
@@ -5114,6 +6033,7 @@ const playingState = {
       if (nitroTimer > 0) { ctx.fillText(`NITRO: ${nitroTimer.toFixed(1)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
       else if (nitroEaseTimer > 0) { ctx.fillText(`Nitro ease: ${nitroEaseTimer.toFixed(2)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
       if (gameState.player.hasShield) { ctx.fillText('SHIELD: active', 8, y); y += 14; }
+      ctx.fillText(`Phase: ${gameState.phase} | P=25k O=50k`, 8, y); y += 14;
     }
   },
 };
