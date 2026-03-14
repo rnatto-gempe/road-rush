@@ -1796,6 +1796,8 @@ function resizeCanvas() {
   canvas.style.height = `${displayHeight}px`;
   positionNameForm();
   positionTouchButtons(displayWidth, displayHeight);
+  positionRankingBtn();
+  positionRankingBackBtn();
 }
 
 function positionTouchButtons(displayWidth, displayHeight) {
@@ -1819,6 +1821,9 @@ function positionTouchButtons(displayWidth, displayHeight) {
 
 // Declared early so positionNameForm() guard works when resizeCanvas() is called below
 let nameFormEl = null;
+// Declared early so positionRankingBtn/positionRankingBackBtn guard works when resizeCanvas() is called below
+let rankingBtnEl = null;
+let rankingBackBtnEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -1962,6 +1967,79 @@ function fetchRanking() {
     });
 }
 
+// --- Ranking Button (title screen) ---
+rankingBtnEl = document.createElement('button');
+rankingBtnEl.id = 'ranking-btn';
+rankingBtnEl.textContent = '🏆 RANKING';
+rankingBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:140px',
+  'font:16px monospace',
+  'padding:0 18px',
+  'cursor:pointer',
+  'backdrop-filter:blur(4px)',
+  '-webkit-backdrop-filter:blur(4px)',
+].join(';') + ';';
+document.body.appendChild(rankingBtnEl);
+
+rankingBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === titleState) {
+    fsm.transition(titleRankingState);
+  }
+});
+
+function positionRankingBtn() {
+  if (!rankingBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  rankingBtnEl.style.left = `${rect.left + rect.width / 2 - 70}px`;
+  rankingBtnEl.style.top = `${rect.top + 440 * scale}px`;
+}
+
+// --- Ranking Back Button (titleRanking screen) ---
+rankingBackBtnEl = document.createElement('button');
+rankingBackBtnEl.id = 'ranking-back-btn';
+rankingBackBtnEl.textContent = 'VOLTAR';
+rankingBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:120px',
+  'font:16px monospace',
+  'padding:0 18px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(rankingBackBtnEl);
+
+rankingBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === titleRankingState) {
+    fsm.transition(titleState);
+  }
+});
+
+function positionRankingBackBtn() {
+  if (!rankingBackBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  rankingBackBtnEl.style.left = `${rect.left + rect.width / 2 - 60}px`;
+  rankingBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+}
+
+// Abort controller for title ranking fetch
+let titleRankingAbortController = null;
+
 // --- Tap to Start / Tap to Retry / Tap Mute Icon / Swipe Ranking ---
 let touchStartY = 0; // canvas coords at touchstart
 
@@ -2011,6 +2089,16 @@ canvas.addEventListener('touchend', (e) => {
       AudioManager.playDrumRoll();
       resetGameState();
       fsm.transition(playingState);
+    }
+  } else if (fsm.currentState === titleRankingState) {
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      // Swipe gesture: scroll ranking
+      if (titleRankingState.rankingStatus === 'loaded' && titleRankingState.rankingData.length > 10) {
+        const maxScroll = titleRankingState.rankingData.length - 10;
+        const scrollDelta = Math.round(delta / 30);
+        titleRankingState.rankingScroll = Math.max(0, Math.min(titleRankingState.rankingScroll + scrollDelta, maxScroll));
+      }
     }
   }
   // No tap action during playingState
@@ -3909,14 +3997,21 @@ const titleState = {
     if (AudioManager.ctx) {
       AudioManager.startTitleDrone();
     }
+    rankingBtnEl.style.display = 'block';
+    positionRankingBtn();
   },
 
   onExit() {
     AudioManager.stopTitleDrone();
+    rankingBtnEl.style.display = 'none';
   },
 
   update(dt) {
     this.pulseTime += dt;
+    if (consumeKey('r') || consumeKey('R')) {
+      fsm.transition(titleRankingState);
+      return;
+    }
     if (consumeKey('Enter')) {
       AudioManager.init();
       AudioManager.resume();
@@ -3953,6 +4048,7 @@ const titleState = {
 // --- Playing State ---
 const playingState = {
   onEnter() {
+    rankingBtnEl.style.display = 'none';
     AudioManager.startEngine();
     AudioManager.startRoad();
     AudioManager.startBeat();
@@ -4278,6 +4374,7 @@ const explosionState = {
   textAlpha: 0,
 
   onEnter() {
+    rankingBtnEl.style.display = 'none';
     this.originX = gameState.player.x + PLAYER_WIDTH / 2;
     this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
     this.timer = 2.0;
@@ -4561,6 +4658,7 @@ const gameOverState = {
   rankingDotTime: 0, // for animated loading dots
 
   onEnter() {
+    rankingBtnEl.style.display = 'none';
     this.pulseTime = 0;
     if (!this.statsPreset) {
       // Fuel empty or other non-collision death: capture stats now
@@ -4659,6 +4757,113 @@ const gameOverState = {
     const retryLabel = ('ontouchstart' in window) ? 'Press Enter or Tap to Retry' : 'Press Enter to Retry';
     ctx.fillText(retryLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
+  },
+};
+
+// --- Title Ranking State ---
+const titleRankingState = {
+  rankingData: [],
+  rankingStatus: 'idle',
+  rankingScroll: 0,
+  rankingDotTime: 0,
+  errorMessage: '',
+
+  onEnter() {
+    // Hide ranking button, show back button
+    rankingBtnEl.style.display = 'none';
+    rankingBackBtnEl.style.display = 'block';
+    positionRankingBackBtn();
+    // Always reset to fresh loading state — never show stale data
+    this.rankingData = [];
+    this.rankingStatus = 'loading';
+    this.rankingScroll = 0;
+    this.rankingDotTime = 0;
+    this.errorMessage = '';
+    // Abort any pending fetch
+    if (titleRankingAbortController) {
+      titleRankingAbortController.abort();
+    }
+    titleRankingAbortController = new AbortController();
+    const signal = titleRankingAbortController.signal;
+    // 10-second timeout
+    const timeoutId = setTimeout(() => {
+      if (titleRankingAbortController) titleRankingAbortController.abort();
+    }, 10000);
+    fetch(SCORE_WEBHOOK_URL, { signal })
+      .then((res) => {
+        clearTimeout(timeoutId);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        const entries = Array.isArray(data) && data[0]?.data ? data[0].data : [];
+        this.rankingData = entries
+          .filter((e) => e && typeof e.name === 'string' && typeof e.score === 'number')
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 50);
+        this.rankingStatus = 'loaded';
+      })
+      .catch((err) => {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          // Only set error if we're still in this state (not navigated away)
+          if (fsm.currentState === titleRankingState) {
+            this.rankingStatus = 'error';
+            this.errorMessage = 'Timeout — tente novamente';
+          }
+        } else {
+          this.rankingStatus = 'error';
+          this.errorMessage = 'Erro ao carregar ranking';
+        }
+      });
+  },
+
+  onExit() {
+    rankingBackBtnEl.style.display = 'none';
+  },
+
+  update(dt) {
+    this.rankingDotTime += dt;
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+    if (this.rankingStatus === 'loaded' && this.rankingData.length > 10) {
+      const maxScroll = this.rankingData.length - 10;
+      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
+      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
+    }
+  },
+
+  render(ctx) {
+    // Background
+    ctx.fillStyle = '#1A1A2E';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Title
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🏆 RANKING GLOBAL', CANVAS_WIDTH / 2, 55);
+
+    // Hint
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '12px monospace';
+    ctx.fillText('ESC ou VOLTAR para sair', CANVAS_WIDTH / 2, 85);
+
+    // Ranking content
+    if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(this.errorMessage || 'Erro ao carregar ranking', CANVAS_WIDTH / 2, 545);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillText('ESC ou VOLTAR para tentar novamente', CANVAS_WIDTH / 2, 560);
+    } else {
+      renderRankingPanel(ctx, this.rankingData, this.rankingStatus, this.rankingScroll, this.rankingDotTime, localStorage.getItem('roadRushPlayerName') || '');
+    }
   },
 };
 
