@@ -3202,6 +3202,44 @@ function updateParticles (dt) {
   }
 }
 
+function spawnTransitionParticles (fromPhase, toPhase) {
+  const px = gameState.player.x + 20; // center of player
+  const py = gameState.player.y + 32; // center of player
+  if (toPhase === 'sky') {
+    // 20 white particles rising upward
+    const count = 20;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: px + (Math.random() - 0.5) * 300,
+        y: py + Math.random() * 200,
+        vx: (Math.random() - 0.5) * 100,
+        vy: -(80 + Math.random() * 120),
+        life: 2,
+        maxLife: 2,
+        color: '#FFFFFF',
+        size: 2,
+        isTransition: true,
+      });
+    }
+  } else if (toPhase === 'space') {
+    // 30 cyan particles streaking horizontally
+    const count = 30;
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * 400,
+        y: Math.random() * 700,
+        vx: (Math.random() - 0.5) * 400,
+        vy: 0,
+        life: 1.5,
+        maxLife: 1.5,
+        color: '#00E5FF',
+        size: 2,
+        isTransition: true,
+      });
+    }
+  }
+}
+
 function renderParticles (ctx) {
   const highSpeed = gameState.scrollSpeed > 600;
   for (const p of particles) {
@@ -3216,6 +3254,19 @@ function renderParticles (ctx) {
       ctx.arc(p.x, p.y, p.size * (highSpeed ? 1.3 : 1), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+    } else if (p.isTransition) {
+      // Transition particles: render as velocity-oriented lines
+      ctx.globalAlpha = baseAlpha;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      const len = Math.min(20, speed * 0.08);
+      const nx = speed > 0 ? p.vx / speed : 0;
+      const ny = speed > 0 ? p.vy / speed : 0;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - nx * len, p.y - ny * len);
+      ctx.stroke();
     } else {
       ctx.globalAlpha = baseAlpha;
       ctx.fillStyle = p.color;
@@ -5751,12 +5802,14 @@ const playingState = {
       gameState.phase = 'sky';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'road', to: 'sky' };
       AudioManager.playPhaseTransition('road', 'sky');
+      spawnTransitionParticles('road', 'sky');
     }
     if (!phaseTriggered.space && gameState.score >= 50000) {
       phaseTriggered.space = true;
       gameState.phase = 'space';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'sky', to: 'space' };
       AudioManager.playPhaseTransition('sky', 'space');
+      spawnTransitionParticles('sky', 'space');
     }
 
     // Advance active phase transition (3 second duration with easing)
