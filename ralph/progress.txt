@@ -2,6 +2,22 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-006
+- Implemented camera roll on lateral movement
+- Added `cameraRoll` module-level variable (degrees); updated in `updatePlayer()` at the end after border handling
+- Target roll: +2.5° when pressing left, -2.5° right, 0° when no key; spring easing `roll += (target - roll) * 0.12` per frame; capped ±3°
+- In `playingState.render()`: wrapped all world elements (road, ghost, traffic, items, player, particles, bloom, redFlash, speedVignette) in `ctx.save()` + `ctx.translate/rotate/translate` around canvas center + `ctx.restore()`
+- HUD elements (renderFuelHUD, renderScoreHUD, renderComboHUD, time display, debug) drawn AFTER `ctx.restore()` so they remain level
+- Chromatic aberration also moved AFTER restore — it post-processes the whole rolled frame correctly via canvas snapshot
+- `cameraRoll = 0` reset in `initGame()` so stale roll doesn't persist into a new run
+- Browser verification: game ran without errors; HUD elements confirmed flat/level while world rotates
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - `ctx.save()` / `ctx.translate(cx,cy)` / `ctx.rotate(angle)` / `ctx.translate(-cx,-cy)` / `ctx.restore()` is the canonical canvas rotation-around-center pattern
+  - Any post-process effect that snapshots the whole canvas (like chroma aberration) should be called AFTER `ctx.restore()` so it captures the already-rotated world correctly
+  - Camera roll update naturally fits at the end of `updatePlayer()` since left/right key variables are already in scope
+---
+
 ## Codebase Patterns
 - Offscreen canvas for effects: initialize at module level (not lazily) with `document.createElement('canvas')` — avoids per-frame allocation overhead
 - For chromatic aberration with canvas 2D: snapshot via `drawImage(canvas, 0, 0)`, then extract color channel using `globalCompositeOperation = 'multiply'` + solid color fill, then composite back with `'screen'` at globalAlpha
@@ -16,6 +32,7 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Bloom pattern: clear offscreen canvas, set `filter = 'blur(8px)'`, draw shapes at 2× scale, reset `filter = 'none'`, composite onto main canvas with `globalCompositeOperation = 'lighter'`; must call AFTER captureGhostFrame
 - Particle type flags: add typed flags (e.g., `isNitro: true`) at spawn time rather than comparing color strings in the render loop
 - Perspective trapezoid road: only draw geometry changes (fovTopLeft/fovTopRight at y=0, ROAD_LEFT/ROAD_RIGHT at y=CANVAS_HEIGHT); all game logic keeps using original constants. Converging lane lines use `xAtY(y) = laneXTop + (laneXBottom-laneXTop)*(y/CANVAS_HEIGHT)` extended beyond canvas for scrollable dashes
+- Camera roll pattern: `ctx.save()` → `ctx.translate(CW/2, CH/2)` → `ctx.rotate(roll*PI/180)` → `ctx.translate(-CW/2,-CH/2)` → draw world → `ctx.restore()` → draw HUD; post-process effects (chroma snapshot) go after restore
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights

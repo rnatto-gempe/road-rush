@@ -99,7 +99,7 @@
         "Verify in browser using dev-browser skill: visible screen tilt when pressing left/right; HUD stays level"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
