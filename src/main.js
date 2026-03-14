@@ -99,6 +99,8 @@ const SCORE_LERP_RATE = 8;       // display score lerp speed
 const NEAR_MISS_DIST = 20;           // px sprite-edge to sprite-edge threshold
 const NEAR_MISS_BASE_POINTS = 50;    // base points per near miss (× combo multiplier)
 const NEAR_MISS_FLASH_DURATION = 0.3; // seconds for vehicle side flash
+const DANGER_FLASH_PROXIMITY = 120;  // px center-to-center vertical dist for danger flash (US-010)
+const DANGER_FLASH_DECAY = 0.3;      // seconds for danger flash to decay to zero (US-010)
 const COMBO_RESET_TIME = 3.0;        // seconds without near miss before combo resets
 const COMBO_SCALE_DURATION = 0.2;    // scale-in animation duration
 
@@ -1548,6 +1550,7 @@ let speedPenaltyMultiplier = 1.0; // multiplicative speed reduction factor (1.0 
 let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
+let dangerFlashAlpha = 0;         // screen-edge red flash when traffic is nearby (US-010)
 const particles = [];             // spark particles
 let playerVisible = true;         // set to false during explosion sequence
 
@@ -1812,6 +1815,20 @@ function renderSpeedVignette(ctx) {
   vignette.addColorStop(0, 'rgba(0,0,0,0)');
   vignette.addColorStop(1, `rgba(0,0,0,${alpha})`);
   ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
+// Screen-edge danger flash — red radial glow from edges when traffic is nearby (US-010)
+// Zero cost when dangerFlashAlpha === 0; only active during playingState.
+function renderDangerFlash(ctx) {
+  if (dangerFlashAlpha <= 0) return;
+  const grad = ctx.createRadialGradient(
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.2,
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.8
+  );
+  grad.addColorStop(0, 'rgba(255,0,0,0)');
+  grad.addColorStop(1, `rgba(255,0,0,${dangerFlashAlpha})`);
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 }
 
@@ -2186,6 +2203,7 @@ function resetGameState() {
   speedPenaltyTimer = 0;
   invulnTimer = 0;
   redFlash.alpha = 0;
+  dangerFlashAlpha = 0;
   particles.length = 0;
   spawnPauseTimer = 0;
   // Reset fuel state
@@ -3692,6 +3710,24 @@ const playingState = {
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
 
+    // Screen-edge danger flash: accumulate alpha from nearby traffic vehicles (US-010)
+    {
+      const playerCenterY = gameState.player.y + PLAYER_HEIGHT / 2;
+      let dangerAccum = 0;
+      for (const v of gameState.traffic) {
+        const vehicleCenterY = v.y + v.height / 2;
+        if (Math.abs(vehicleCenterY - playerCenterY) < DANGER_FLASH_PROXIMITY) {
+          dangerAccum += 0.25; // each nearby vehicle contributes 0.25 (2+ vehicles reach cap)
+        }
+      }
+      dangerAccum = Math.min(dangerAccum, 0.5); // cap at 0.5 total
+      if (dangerAccum > dangerFlashAlpha) {
+        dangerFlashAlpha = dangerAccum; // rapid onset: jump to danger level immediately
+      } else {
+        dangerFlashAlpha = Math.max(0, dangerFlashAlpha - dt / DANGER_FLASH_DECAY); // decay over 0.3s
+      }
+    }
+
     // AABB collision detection — only when not invulnerable
     if (invulnTimer <= 0) {
       const ph = getPlayerHitbox(gameState.player);
@@ -3743,6 +3779,9 @@ const playingState = {
 
     // Speed vignette — tunnel vision effect (darkens edges at high speed)
     renderSpeedVignette(ctx);
+
+    // Screen-edge danger flash — red glow from edges when traffic is nearby (US-010)
+    renderDangerFlash(ctx);
 
     ctx.restore();
     // --- End world layer ---
