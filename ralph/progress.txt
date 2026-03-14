@@ -2,6 +2,40 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-011
+- Implemented hit stop on major collision: freeze game loop update for 3 frames (~50ms) on explosion entry
+- Added `hitStopFrames` module-level variable (initialized to 0)
+- Set `hitStopFrames = 3` in `explosionState.onEnter()` just before chromatic aberration trigger
+- In `gameLoop` while-loop: if `hitStopFrames > 0`, decrement and skip `fsm.update(FIXED_DT)`; otherwise update normally
+- Shake timer still decrements during hit stop (shake.time countdown continues) — AudioContext unaffected
+- Reset `hitStopFrames = 0` in `initGame()` so stale freeze doesn't persist into a new run
+- Browser verification: game loaded and ran clean without JS errors; hit stop is a 3-frame (~50ms) freeze — too brief for static screenshot but logic verified through clean run
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Hit stop pattern: `hitStopFrames` counter set at explosion entry, decremented in gameLoop, `fsm.update()` skipped while > 0; render() continues each frame so screen stays live
+  - Shake timer decrement should happen outside the hitStop guard (independent of game update) so screen shake doesn't freeze too
+  - `explosionState.onEnter()` is the canonical hook for all "on crash" effects (chroma, hitStop, screen flash, particles, shockwave rings all set there)
+---
+
+## 2026-03-13 - US-012
+- Implemented adaptive HUD opacity: score and fuel HUD elements render at 65% steady, brighten to 100% when values change
+- Added constants: `HUD_OPACITY_STEADY=0.65`, `HUD_OPACITY_RAMP_IN=0.1s`, `HUD_OPACITY_HOLD=1.5s`, `HUD_OPACITY_RAMP_OUT=0.5s`
+- Added `hudOpacity` object with `score` and `fuel` trackers `{trackedValue, lastChanged, currentAlpha}`
+- Added `tickHudOpacity(tracker, newValue, elapsedTime)` helper: detects value change → sets `lastChanged`; interpolates alpha based on time-since-change (ramp-in → hold → ramp-out)
+- Called in `playingState.update()`: score tracks `Math.floor(gameState.displayedScore)`, fuel tracks `Math.floor(gameState.fuel)`
+- Score brightens on any score event (distance, coin, near-miss, survivor, overtake) since they all change `displayedScore`; coins changing score satisfies the "coins" tracker requirement
+- Fuel bar: `fuelCritical = fuel < FUEL_INITIAL * 0.3` → forces alpha 1.0 (critical state override)
+- Wrapped `renderFuelHUD` and `renderScoreHUD` calls in `playingState.render()` with `ctx.save(); ctx.globalAlpha = ...; ctx.restore()` — inner globalAlpha manipulations (beat-pulse scale, survivor flash) work correctly since they're within the save/restore scope
+- Reset `hudOpacity` trackers in `initGame()` so stale state doesn't persist
+- Browser verification: game loaded, HUD visible at 65% steady state at start; score and fuel render clearly without errors
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Adaptive opacity pattern: `{trackedValue, lastChanged, currentAlpha}` + `tickHudOpacity(tracker, roundedValue, time)` — detects discrete changes by comparing to last known integer value; time-based ramp-in/hold/ramp-out drives currentAlpha
+  - Canvas `ctx.save(); ctx.globalAlpha = x; render(); ctx.restore()` safely applies opacity to an entire render function even if the function internally modifies globalAlpha — inner changes are undone by restore
+  - Score changes continuously from distance travel (SCORE_PER_PX), so score HUD stays at 100% during play; the "steady state" 65% is most visible right at game start or during a pause in score events
+  - Fuel critical override (< 30%) should use `FUEL_INITIAL * 0.3` not `FUEL_MAX * 0.3` — fuel starts at FUEL_INITIAL (100), so threshold is 30 fuel units
+---
+
 ## 2026-03-13 - US-010
 - Implemented screen-edge danger flash: red radial gradient from edges inward when traffic is nearby
 - Added `DANGER_FLASH_PROXIMITY = 120` and `DANGER_FLASH_DECAY = 0.3` constants
@@ -111,6 +145,8 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Beat detection for visuals: queue scheduled AudioContext beat times in `AudioManager.beat.pendingBeats[]`, consume each frame via `currentTime >= pendingBeats[0]` — precise, frame-rate independent, zero polling cost
 - Exponential decay for pulse animations: precompute `Math.pow(0.001, FIXED_DT / durationSecs)` as a per-frame multiplier; threshold at 0.001 before zeroing; gives snappy feel vs linear decay
 - Floating pickup text pattern: single `floatTexts[]` array `{x,y,timer,text,color}` + `spawnFloatText(x,y,text,color)` helper with 8-max cap; tick in playingState.update(); render after world ctx.restore() but before HUD so texts are above world and unaffected by camera roll
+- Adaptive HUD opacity pattern: per-element tracker `{trackedValue, lastChanged, currentAlpha}` + `tickHudOpacity(tracker, Math.floor(value), elapsedTime)` each frame; wrap render call with `ctx.save(); ctx.globalAlpha = tracker.currentAlpha; render(); ctx.restore()` — inner globalAlpha changes are safe inside save/restore
+- Hit stop pattern: `hitStopFrames` counter set to N on explosion entry; in gameLoop decrement and skip `fsm.update()` while > 0; render continues each frame; shake timer still decrements (independent of game update)
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights

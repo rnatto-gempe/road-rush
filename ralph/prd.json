@@ -185,7 +185,7 @@
         "Verify in browser using dev-browser skill: brief freeze visible at moment of explosion before explosion animation plays"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -201,7 +201,7 @@
         "Verify in browser using dev-browser skill: HUD elements are subdued at steady state, brighten when score/fuel changes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
