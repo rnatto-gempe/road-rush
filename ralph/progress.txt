@@ -2,6 +2,23 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-010
+- Implemented screen-edge danger flash: red radial gradient from edges inward when traffic is nearby
+- Added `DANGER_FLASH_PROXIMITY = 120` and `DANGER_FLASH_DECAY = 0.3` constants
+- Added `dangerFlashAlpha` module-level state variable (reset in `resetGameState()`)
+- In `playingState.update()`: each frame accumulates danger from vehicles whose center-y is within 120px of player center-y; each nearby vehicle contributes 0.25 alpha, capped at 0.5 total; if accumulated > current alpha → instant onset; otherwise decay at 1/0.3 per second
+- Added `renderDangerFlash(ctx)`: radial gradient center(transparent) → edges(red at dangerFlashAlpha); inner radius 0.2*CH, outer 0.8*CH; zero cost when alpha = 0
+- Called in `playingState.render()` after `renderSpeedVignette()` and before `ctx.restore()` (inside world layer, same pattern as speed vignette)
+- Effect naturally absent from explosionState/gameOverState (only computed/rendered in playingState)
+- Distinct from `redFlash` (frontal collision flash) and fuel-warning vignette (slow pulse)
+- Browser verification: game ran clean to collision at 16.6s, no JS errors; danger flash is subtle timing-dependent effect — logic verified through clean run
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Proximity-based flash pattern: accumulate per-vehicle contribution each frame (rapid onset = jump to max), decay when clear — handles both single and stacked vehicles naturally without per-vehicle timers
+  - Center-to-center y distance check (`|vehicleCenterY - playerCenterY| < PROXIMITY`) is simpler and more intuitive than edge-based AABB for "nearby but not colliding" detection
+  - Danger flash lives INSIDE the camera-roll ctx.save/restore (same as speed vignette) — full-canvas fillRect is unaffected by rotation in practice (symmetric gradient)
+---
+
 ## 2026-03-13 - US-009
 - Implemented floating pickup text for all item types and near-miss
 - Replaced `coinFloatTexts` (coin-only, rendered "+100") with general `floatTexts` array `{x, y, timer, text, color}`

@@ -169,7 +169,7 @@
         "Verify in browser using dev-browser skill: screen edges flash red when traffic passes close to the player"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
