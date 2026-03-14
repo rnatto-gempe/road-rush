@@ -5719,6 +5719,9 @@ const playingState = {
     gameState.distanceTraveled += effSpeed * dt;
 
     if (consumeKey('d') || consumeKey('D')) debugMode = !debugMode;
+    // Debug shortcuts: P = jump near 25k (sky), O = jump near 50k (space)
+    if (debugMode && (consumeKey('p') || consumeKey('P'))) gameState.score = 24500;
+    if (debugMode && (consumeKey('o') || consumeKey('O'))) gameState.score = 49500;
 
     updatePlayer(dt);
     updateTraffic(dt);
@@ -5801,6 +5804,7 @@ const playingState = {
       phaseTriggered.sky = true;
       gameState.phase = 'sky';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'road', to: 'sky' };
+      spawnPauseTimer = 1.0; // Brief pause to avoid overwhelming player during transition
       AudioManager.playPhaseTransition('road', 'sky');
       spawnTransitionParticles('road', 'sky');
     }
@@ -5808,6 +5812,7 @@ const playingState = {
       phaseTriggered.space = true;
       gameState.phase = 'space';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'sky', to: 'space' };
+      spawnPauseTimer = 1.0; // Brief pause to avoid overwhelming player during transition
       AudioManager.playPhaseTransition('sky', 'space');
       spawnTransitionParticles('sky', 'space');
     }
@@ -6028,6 +6033,7 @@ const playingState = {
       if (nitroTimer > 0) { ctx.fillText(`NITRO: ${nitroTimer.toFixed(1)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
       else if (nitroEaseTimer > 0) { ctx.fillText(`Nitro ease: ${nitroEaseTimer.toFixed(2)}s (x${getNitroMultiplier().toFixed(2)})`, 8, y); y += 14; }
       if (gameState.player.hasShield) { ctx.fillText('SHIELD: active', 8, y); y += 14; }
+      ctx.fillText(`Phase: ${gameState.phase} | P=25k O=50k`, 8, y); y += 14;
     }
   },
 };
