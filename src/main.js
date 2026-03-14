@@ -1590,6 +1590,11 @@ let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
 let comboResetTimer = 0;  // seconds until combo resets to 1
 let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 
+// Near miss tracking for game over stats
+let nearMissCount = 0;
+let bestCombo = 0;
+let nearMissBonusTotal = 0;
+
 // DDA (Dynamic Difficulty Adjustment) state
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
 let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, cap 1.5; halves on collision
@@ -2779,6 +2784,14 @@ function spawnFloatText (x, y, text, color) {
   floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color });
 }
 
+// Combo color palette: returns a color based on combo level
+function getComboColor (level) {
+  if (level <= 1) return '#FF8800'; // orange (base)
+  if (level === 2) return '#FFD700'; // gold
+  if (level === 3) return '#00FFDD'; // cyan
+  return '#FF44FF'; // magenta (x4+)
+}
+
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
 function triggerNearMiss (v) {
   const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
@@ -2786,6 +2799,11 @@ function triggerNearMiss (v) {
   comboMultiplier += 1;
   comboResetTimer = COMBO_RESET_TIME;
   comboScaleTimer = COMBO_SCALE_DURATION;
+
+  // Track near miss stats
+  nearMissCount++;
+  nearMissBonusTotal += pts;
+  bestCombo = Math.max(bestCombo, comboMultiplier);
 
   // Near miss whoosh + combo stinger
   AudioManager.playNearMiss();
@@ -2951,6 +2969,9 @@ function resetGameState () {
   comboMultiplier = 1;
   comboResetTimer = 0;
   comboScaleTimer = 0;
+  nearMissCount = 0;
+  bestCombo = 0;
+  nearMissBonusTotal = 0;
   // Reset DDA fully on game over / retry
   ddaCleanTimer = 0;
   ddaSpawnRate = 1.0;
@@ -3549,7 +3570,7 @@ function updateTraffic (dt) {
   gameState.traffic = gameState.traffic.filter((v) => {
     if (v.y > 760) {
       if (!v.collided) {
-        gameState.score += OVERTAKE_BONUS;
+        gameState.score += OVERTAKE_BONUS * (comboMultiplier >= 2 ? comboMultiplier : 1);
         AudioManager.playOvertake();
       }
       return false;
@@ -3799,7 +3820,7 @@ function updateCoins (dt) {
       h: COIN_RADIUS * 2,
     };
     if (aabbOverlap(ph, coinHb)) {
-      gameState.score += COIN_POINTS;
+      gameState.score += COIN_POINTS * (comboMultiplier >= 2 ? comboMultiplier : 1);
       gameState.coinsCollected++;
       spawnFloatText(coin.x, coin.y, '+1', '#FFD700'); // US-009
       AudioManager.playCoinPickup();
@@ -4608,8 +4629,8 @@ const playingState = {
     // Tick shield break flash
     if (shieldBreakFlash > 0) shieldBreakFlash = Math.max(0, shieldBreakFlash - dt);
 
-    // Distance score: 1 pt per 10 px traveled
-    gameState.score += effSpeed * dt * SCORE_PER_PX;
+    // Distance score: 1 pt per 10 px traveled (multiplied by combo when active)
+    gameState.score += effSpeed * dt * SCORE_PER_PX * (comboMultiplier >= 2 ? comboMultiplier : 1);
 
     // Survivor bonus: +300 every 30s without collision
     gameState.survivorTimer += dt;
