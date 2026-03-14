@@ -1,3 +1,14 @@
+## 2026-03-14 - US-006
+- Updated `index.html` viewport meta to add `user-scalable=no, maximum-scale=1.0`
+- Added `touch-action: none` to canvas CSS rule in index.html
+- Added `document.body` touchmove listener that calls `e.preventDefault()` when target is canvas, touchLeft, or touchRight
+- Files changed: index.html, src/main.js, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - `touch-action: none` in CSS + `{ passive: false }` + `e.preventDefault()` in JS both needed for full suppression
+  - body touchmove listener must check `e.target` to avoid suppressing all page scrolling
+  - `touchLeft` and `touchRight` already in scope at the point of the body listener (declared earlier in the file)
+---
+
 ## 2026-03-13 - US-005
 - Added `touchstart` listener on canvas to capture `touchStartY` in canvas coordinates
 - `touchend` in gameOverState: computes delta = touchStartY - cy; |delta| < 10px = tap (retry), >= 10px = swipe
