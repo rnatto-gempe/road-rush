@@ -251,6 +251,15 @@ const VEHICLE_TYPES = {
     laneChangeMax: 5,
     phase: 'sky',
   },
+  asteroid: {
+    color: '#795548',
+    width: 36,
+    height: 36,
+    speedRatio: 0.3,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'space',
+  },
 };
 
 // Debug mode
@@ -4160,7 +4169,7 @@ function buildVehicleCandidate () {
 }
 
 function spawnVehicle (candidate) {
-  gameState.traffic.push({
+  const obj = {
     type: candidate.typeName,
     x: candidate.x,
     y: candidate.y,
@@ -4177,7 +4186,20 @@ function spawnVehicle (candidate) {
     minDistX: Infinity, // min sprite-edge-to-edge horizontal dist during vertical overlap
     nearMissChecked: false, // true once near miss check has been performed
     nearMissFlash: null,    // {side: 'left'|'right', timer} when flashing
-  });
+  };
+  // Asteroid: pre-generate irregular polygon vertices and rotation state
+  if (candidate.typeName === 'asteroid') {
+    const baseRadius = 18;
+    const verts = [];
+    for (let i = 0; i < 7; i++) {
+      const angle = (i / 7) * Math.PI * 2;
+      const r = baseRadius + (Math.random() * 8 - 4); // ±4px variation
+      verts.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+    }
+    obj.vertices = verts;
+    obj.rotation = 0;
+  }
+  gameState.traffic.push(obj);
 }
 
 function updateTraffic (dt) {
@@ -4214,6 +4236,9 @@ function updateTraffic (dt) {
     v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio;
     const visualSpeed = getEffectiveScrollSpeed() * (1 - type.speedRatio);
     v.y += visualSpeed * dt;
+
+    // Asteroid rotation
+    if (v.rotation !== undefined) v.rotation += dt * 0.5;
 
     // First-time near miss discoverability hint (US-011)
     if (!nearMissHintShown && v.y > 0) {
@@ -4426,6 +4451,30 @@ function renderTraffic (ctx) {
       ctx.moveTo(v.x + 10, v.y + v.height - 1);
       ctx.lineTo(v.x + v.width - 10, v.y + v.height - 1);
       ctx.stroke();
+    } else if (v.type === 'asteroid') {
+      // Asteroid: rotating irregular polygon
+      const acx = v.x + v.width / 2;
+      const acy = v.y + v.height / 2;
+      ctx.save();
+      ctx.translate(acx, acy);
+      ctx.rotate(v.rotation || 0);
+      // Fill
+      ctx.fillStyle = '#795548';
+      ctx.beginPath();
+      const verts = v.vertices;
+      if (verts && verts.length > 0) {
+        ctx.moveTo(verts[0].x, verts[0].y);
+        for (let i = 1; i < verts.length; i++) {
+          ctx.lineTo(verts[i].x, verts[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        // Border
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // Near miss flash: white strip on the side closest to the player
