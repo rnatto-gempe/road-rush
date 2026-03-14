@@ -773,6 +773,48 @@ const AudioManager = {
     }
   },
 
+  // Combo milestone SFX: bright ascending ding at x3/x5/x8 (US-008)
+  playComboMilestone (level) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Higher pitch and more harmonics at higher milestones
+    const baseFreq = level >= 8 ? 1200 : level >= 5 ? 900 : 700;
+    const harmonics = level >= 8 ? [1, 1.5, 2, 2.5] : level >= 5 ? [1, 1.5, 2] : [1, 1.5];
+    for (const h of harmonics) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq * h, now);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * h * 1.2, now + 0.1);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2 / harmonics.length, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Combo lost SFX: short descending deflation tone (US-008)
+  playComboLost () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(500, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
   // Survivor bonus: triumphant short major chord (400/500/600Hz sines, 0.3s)
   playSurvivorBonus () {
     if (!this.ctx) return;
@@ -2845,9 +2887,10 @@ function triggerNearMiss (v) {
   AudioManager.playNearMiss();
   if (comboMultiplier >= 2) AudioManager.playComboUp(comboMultiplier);
 
-  // Combo milestone flash (x3, x5, x8)
+  // Combo milestone flash + SFX (x3, x5, x8)
   if (comboMultiplier === 3 || comboMultiplier === 5 || comboMultiplier === 8) {
     comboMilestoneFlash = 0.1;
+    AudioManager.playComboMilestone(comboMultiplier);
   }
 
   // Near miss screen shake — intensity scales with combo, won't override stronger collision shake
@@ -4811,6 +4854,7 @@ const playingState = {
     if (comboResetTimer > 0) {
       comboResetTimer = Math.max(0, comboResetTimer - dt);
       if (comboResetTimer === 0 && comboMultiplier > 1) {
+        AudioManager.playComboLost();
         comboMultiplier = 1;
         comboExpireShakeTimer = 0.15;
         comboExpireFadeTimer = 0.3;
