@@ -2193,6 +2193,16 @@ function updateScrollSpeed(dt) {
 }
 
 // --- Road Rendering ---
+// Returns road perspective convergence factor [0..0.30] based on scroll speed (US-005)
+// At 600 px/s: 15% top-width reduction; at 800 px/s: 30% (maximum)
+function getRoadFovFactor() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600) {
+    return 0.15 * (speed / 600);
+  }
+  return 0.15 + 0.15 * Math.min(1, (speed - 600) / 200);
+}
+
 function renderRoad(ctx, scrollOffset) {
   // Asphalt background with vertical gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
@@ -2218,36 +2228,54 @@ function renderRoad(ctx, scrollOffset) {
     }
   }
 
-  // Road surface (asphalt, re-drawn on top of rumble edges)
+  // Dynamic FOV: road top edge narrows at high speed (US-005)
+  const fovFactor = getRoadFovFactor();
+  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2; // 200
+  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
+  const fovTopLeft = roadCenter - topHalfWidth;  // > ROAD_LEFT at speed
+  const fovTopRight = roadCenter + topHalfWidth; // < ROAD_RIGHT at speed
+
+  // Road surface (asphalt) as perspective trapezoid
   const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   roadGradient.addColorStop(0, '#2A2A3E');
   roadGradient.addColorStop(1, '#26314E');
   ctx.fillStyle = roadGradient;
-  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.closePath();
+  ctx.fill();
 
-  // White border lines
+  // White border lines — converging edges of the trapezoid
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.moveTo(fovTopLeft, 0);
   ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.moveTo(fovTopRight, 0);
   ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
   ctx.stroke();
 
-  // Dashed lane markers between 4 lanes (3 markers)
+  // Dashed lane markers — converge toward vanishing point at top
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
   ctx.lineWidth = 2;
   ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
 
   for (let i = 1; i < LANE_COUNT; i++) {
-    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    const laneXBottom = ROAD_LEFT + i * LANE_WIDTH;
+    // Converge toward road center at the top of screen
+    const laneXTop = roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor);
+    // Extend the line beyond canvas for smooth dash scrolling (mirrors original approach)
+    const dx = laneXBottom - laneXTop; // horizontal shift per CANVAS_HEIGHT of vertical travel
+    const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
     ctx.beginPath();
-    ctx.moveTo(laneX, -dashScrollOffset);
-    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.moveTo(xAtY(-dashScrollOffset), -dashScrollOffset);
+    ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
 
