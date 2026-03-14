@@ -5469,6 +5469,10 @@ const gameOverState = {
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    // Capture near miss stats (US-010)
+    this.finalNearMissCount = nearMissCount;
+    this.finalBestCombo = bestCombo;
+    this.finalNearMissBonusTotal = nearMissBonusTotal;
     this.rankingScroll = 0;
     this.rankingDotTime = 0;
     feedbackBtnEl.style.display = 'block';
@@ -5603,6 +5607,21 @@ const gameOverState = {
       ctx.font = '11px monospace';
       ctx.textBaseline = 'middle';
       ctx.fillText(`Recorde: ${this.bestScore.toLocaleString()}`, CX, cardsY + cardH + 14);
+    }
+
+    // --- Near miss stats section (US-010) ---
+    if (this.finalNearMissCount > 0) {
+      const nmY = cardsY + cardH + 32;
+      const isGold = this.finalBestCombo >= 3;
+      ctx.fillStyle = isGold ? '#FFD700' : 'rgba(255,255,255,0.55)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      const niceLabel = isGold ? '  NICE!' : '';
+      ctx.fillText(
+        `Near Misses: ${this.finalNearMissCount}  |  Best Combo: x${this.finalBestCombo}  |  Bonus: +${this.finalNearMissBonusTotal}${niceLabel}`,
+        CX, nmY
+      );
     }
 
     // --- Ranking section ---
