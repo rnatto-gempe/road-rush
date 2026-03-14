@@ -1,3 +1,16 @@
+## 2026-03-13 - US-004
+- Added mute icon touch detection inside the existing canvas `touchend` listener
+- Touch coords mapped via getBoundingClientRect + scale ratio (same pattern as click handler)
+- 44×44px hit area centered on (CANVAS_WIDTH-28, 54); calls AudioManager.toggleMute() and returns early to prevent tap-to-start/retry firing
+- Mute check runs before FSM state checks — works in all states
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- Browser verified: title screen renders with mute icon in top-right
+- **Learnings for future iterations:**
+  - Mute icon click handler already existed at ~line 1942; touch handler mirrors same coord math
+  - Always check mute icon first in touchend, then FSM state — prevents accidental retry/start on icon tap
+  - `e.changedTouches[0]` gives the finger that just lifted (correct for touchend)
+---
+
 ## 2026-03-13 - US-003
 - Added `touchend` listener on canvas for tap-to-start (titleState) and tap-to-retry (gameOverState)
 - `e.preventDefault()` on touchend eliminates 300ms delay; `{ passive: false }` required
