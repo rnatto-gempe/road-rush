@@ -158,6 +158,7 @@ const VEHICLE_TYPES = {
     speedRatio: 0.6,
     minTime: 0,
     behavior: 'none',
+    phase: 'road',
   },
   truck: {
     color: '#616161',
@@ -166,6 +167,7 @@ const VEHICLE_TYPES = {
     speedRatio: 0.4,
     minTime: 0,
     behavior: 'none',
+    phase: 'road',
   },
   sports: {
     color: '#B71C1C',
@@ -176,6 +178,7 @@ const VEHICLE_TYPES = {
     behavior: 'laneChange',
     laneChangeMin: 2,
     laneChangeMax: 4,
+    phase: 'road',
   },
   moto: {
     color: '#FFC107',
@@ -186,11 +189,17 @@ const VEHICLE_TYPES = {
     behavior: 'weave',
     laneChangeMin: 1,
     laneChangeMax: 2,
+    phase: 'road',
   },
 };
 
 // Debug mode
 let debugMode = false;
+
+// Easing utility
+function easeInOutCubic (t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
 // ─── Audio Manager (Web Audio API) ───
 const AudioManager = {
@@ -1626,6 +1635,9 @@ let playerVisible = true;         // set to false during explosion sequence
 
 // Post-collision spawn pause (US-014)
 let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
+
+// Phase transition flags — ensure each transition triggers exactly once
+let phaseTriggered = { sky: false, space: false };
 
 // Near miss / combo state
 let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
@@ -3120,6 +3132,9 @@ const gameState = {
   // Shield items
   shieldItems: [],
   nextShieldSpawnDistance: SHIELD_SPAWN_MIN,
+  // Phase system
+  phase: 'road',
+  phaseTransition: { progress: 0, active: false, from: '', to: '' },
 };
 
 function resetGameState () {
@@ -3211,6 +3226,10 @@ function resetGameState () {
   explosionState.fadeInAlpha = 0;
   explosionState.textAlpha = 0;
   explosionState.timer = 0;
+  // Reset phase system
+  gameState.phase = 'road';
+  gameState.phaseTransition = { progress: 0, active: false, from: '', to: '' };
+  phaseTriggered = { sky: false, space: false };
 }
 
 // --- Scroll Speed Ramp ---
@@ -4909,6 +4928,30 @@ const playingState = {
 
     // Lerp displayed score toward actual score
     gameState.displayedScore += (gameState.score - gameState.displayedScore) * Math.min(1, SCORE_LERP_RATE * dt);
+
+    // Phase transition triggers
+    if (!phaseTriggered.sky && gameState.score >= 25000) {
+      phaseTriggered.sky = true;
+      gameState.phase = 'sky';
+      gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'road', to: 'sky' };
+    }
+    if (!phaseTriggered.space && gameState.score >= 50000) {
+      phaseTriggered.space = true;
+      gameState.phase = 'space';
+      gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'sky', to: 'space' };
+    }
+
+    // Advance active phase transition (3 second duration with easing)
+    if (gameState.phaseTransition.active) {
+      const TRANSITION_DURATION = 3;
+      gameState.phaseTransition._timer = Math.min(TRANSITION_DURATION, gameState.phaseTransition._timer + dt);
+      const linearT = gameState.phaseTransition._timer / TRANSITION_DURATION;
+      gameState.phaseTransition.progress = easeInOutCubic(linearT);
+      if (gameState.phaseTransition._timer >= TRANSITION_DURATION) {
+        gameState.phaseTransition.active = false;
+        gameState.phaseTransition.progress = 1;
+      }
+    }
 
     // Drain fuel proportional to effective speed
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
