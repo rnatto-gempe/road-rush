@@ -231,6 +231,26 @@ const VEHICLE_TYPES = {
     laneChangeMax: 3,
     phase: 'sky',
   },
+  airplane: {
+    color: '#B0BEC5',
+    width: 50,
+    height: 70,
+    speedRatio: 0.35,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'sky',
+  },
+  helicopter: {
+    color: '#78909C',
+    width: 44,
+    height: 50,
+    speedRatio: 0.5,
+    minTime: 0,
+    behavior: 'laneChange',
+    laneChangeMin: 2.5,
+    laneChangeMax: 5,
+    phase: 'sky',
+  },
 };
 
 // Debug mode
@@ -4345,6 +4365,67 @@ function renderTraffic (ctx) {
       ctx.closePath();
       ctx.fill();
       ctx.restore();
+    } else if (v.type === 'airplane') {
+      // Airplane: fuselage + horizontal wings + tail + windows
+      const ax = v.x;
+      const ay = v.y;
+      const acx = ax + v.width / 2; // center x
+      // Fuselage (narrow roundRect centered)
+      ctx.fillStyle = '#B0BEC5';
+      ctx.beginPath();
+      ctx.roundRect(acx - 8, ay, 16, 70, 4);
+      ctx.fill();
+      // Horizontal wings (centered at ~40% from top)
+      ctx.fillRect(ax, ay + 25, 50, 10);
+      // Tail (triangle at top)
+      ctx.beginPath();
+      ctx.moveTo(acx, ay);
+      ctx.lineTo(acx - 10, ay + 14);
+      ctx.lineTo(acx + 10, ay + 14);
+      ctx.closePath();
+      ctx.fill();
+      // Windows (4 blue dots in a row along fuselage)
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+      for (let wi = 0; wi < 4; wi++) {
+        ctx.fillRect(acx - 1, ay + 32 + wi * 8, 2, 2);
+      }
+    } else if (v.type === 'helicopter') {
+      // Helicopter: oval body + spinning rotor + skids
+      const hcx = v.x + v.width / 2;
+      const hcy = v.y + v.height / 2;
+      // Body (oval)
+      ctx.fillStyle = '#78909C';
+      ctx.beginPath();
+      ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Rotor (spinning line at top)
+      const rotorAngle = gameState.elapsedTime * 15;
+      ctx.save();
+      ctx.translate(hcx, v.y + 8);
+      ctx.rotate(rotorAngle);
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-20, 0);
+      ctx.lineTo(20, 0);
+      ctx.stroke();
+      ctx.restore();
+      // Rotor hub
+      ctx.fillStyle = '#546E7A';
+      ctx.beginPath();
+      ctx.arc(hcx, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Skids at base (2 horizontal lines)
+      ctx.strokeStyle = '#455A64';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(v.x + 6, v.y + v.height - 4);
+      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + 10, v.y + v.height - 1);
+      ctx.lineTo(v.x + v.width - 10, v.y + v.height - 1);
+      ctx.stroke();
     }
 
     // Near miss flash: white strip on the side closest to the player

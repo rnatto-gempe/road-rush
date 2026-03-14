@@ -124,7 +124,7 @@
         "Verificar no browser usando dev-browser skill — pássaro aparece, asas batem, colisão funciona"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Este US instala o filtro de fase em chooseVehicleType — os próximos US de obstáculos dependem disso estar pronto."
     },
     {

@@ -15,6 +15,9 @@ Started: Sat Mar 14 19:39:09 -03 2026
 - `lerpColor(hex1, hex2, t)` utility near top of file for RGB interpolation between hex colors
 - Transition rendering uses `ctx.globalAlpha` to fade elements in/out — always save/restore `globalAlpha`
 - `renderPlayer()` uses early-return per phase — add new phases as `if (phase === 'X' || transitioning to/from X) { ... return; }` before default road car code. Order matters: space block before sky block (sky→space transition has `from === 'sky'`)
+- `chooseVehicleType()` filters by `t.phase === gameState.phase` — new vehicle types MUST have a `phase` property to appear in the correct phase
+- When a phase has only aggressive vehicle types (no passive), `chooseVehicleType` falls back to all available types to avoid empty pool crash
+- Vehicle sprites are rendered in `renderTraffic()` with `else if (v.type === 'typeName')` chain — add new types there
 
 ---
 
@@ -105,4 +108,17 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - Crossfade between two sprite styles requires drawing BOTH sprites with complementary globalAlpha values (1-progress and progress)
   - Flame animation uses `gameState.elapsedTime * 10` for fast oscillation — multiply by higher values for faster animation
   - Two flames offset by constant (sin(t) and sin(t+2)) create natural asymmetric flicker
+---
+
+## 2026-03-14 - US-007
+- Added `bird` vehicle type to `VEHICLE_TYPES` with phase 'sky', behavior 'weave', 24×20 bounding box
+- Modified `chooseVehicleType()` to filter vehicle types by `t.phase === gameState.phase` — this is the foundation for all phase-specific obstacles
+- Added fallback in `chooseVehicleType()` when passive pool is empty (sky phase only has aggressive bird type)
+- Added bird sprite in `renderTraffic()`: brown oval body (ellipse 12×8) + 2 triangular wings oscillating at sin(elapsedTime*8) × 30°
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Phase filtering in `chooseVehicleType` applies to ALL types — existing road types already have `phase: 'road'` so they naturally stop spawning in sky/space
+  - When adding a phase with only aggressive types (like sky with only bird initially), need fallback `passive.length > 0 ? passive : available` to avoid crash
+  - Bird wing oscillation uses `sin(elapsedTime * 8)` — frequency 8 gives fast flapping look
+  - Bird sprite uses save/restore for wing rotation transforms
 ---
