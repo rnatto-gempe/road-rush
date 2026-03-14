@@ -115,7 +115,7 @@
         "Verify in browser using dev-browser skill: road surface wavy distortion visible at max speed"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

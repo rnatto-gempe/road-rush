@@ -2,6 +2,22 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-007
+- Implemented heat haze / road shimmer at high speed
+- Added `hazeCanvas`/`hazeCtx` offscreen canvas at module level (zero per-frame allocation)
+- Added `renderHeatHaze(scrollOffset)`: renders road to hazeCanvas via `renderRoad(hazeCtx, scrollOffset)`, draws full canvas undistorted first, then overdraw lower 40% (y >= 0.6*CH) with per-band x-offset using `sinOffset = Math.sin(time*3 + y*0.08) * intensity`; returns `true` when active
+- Intensity: 0 at 500 px/s → max 3px at 800 px/s (linear ramp)
+- In `playingState.render()`: replaced `renderRoad(ctx, ...)` with `if (!renderHeatHaze(...)) { renderRoad(ctx, ...) }` — fallback to normal road when below threshold
+- Effect naturally absent from explosionState/gameOverState since only called in playingState.render()
+- Band height: 4px horizontal strips for performance (175 drawImage calls max for lower 40%)
+- Browser verification: game loaded and rendered correctly; haze inactive at start speed (200 px/s); activates above 500 px/s
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Per-band distortion pattern: draw full source undistorted first, then overdraw target region with shifted strips — avoids edge gap artifacts from x-shift
+  - `renderRoad(hazeCtx, scrollOffset)` works unchanged since renderRoad takes ctx as param — no refactor needed
+  - Band height 4px gives good quality/performance balance; 175 drawImage calls per frame is acceptable at 60fps
+---
+
 ## 2026-03-13 - US-006
 - Implemented camera roll on lateral movement
 - Added `cameraRoll` module-level variable (degrees); updated in `updatePlayer()` at the end after border handling
@@ -33,6 +49,7 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Particle type flags: add typed flags (e.g., `isNitro: true`) at spawn time rather than comparing color strings in the render loop
 - Perspective trapezoid road: only draw geometry changes (fovTopLeft/fovTopRight at y=0, ROAD_LEFT/ROAD_RIGHT at y=CANVAS_HEIGHT); all game logic keeps using original constants. Converging lane lines use `xAtY(y) = laneXTop + (laneXBottom-laneXTop)*(y/CANVAS_HEIGHT)` extended beyond canvas for scrollable dashes
 - Camera roll pattern: `ctx.save()` → `ctx.translate(CW/2, CH/2)` → `ctx.rotate(roll*PI/180)` → `ctx.translate(-CW/2,-CH/2)` → draw world → `ctx.restore()` → draw HUD; post-process effects (chroma snapshot) go after restore
+- Per-band horizontal distortion pattern: draw full source canvas undistorted first, then overdraw target region with per-band `drawImage` slices each shifted by `sinOffset` — avoids edge gap artifacts; 4px band height balances quality vs draw calls
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights
