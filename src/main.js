@@ -1728,6 +1728,27 @@ function handleNameSubmit() {
 
 nameSubmitEl.addEventListener('click', handleNameSubmit);
 
+function fetchRanking() {
+  gameOverState.rankingStatus = 'loading';
+  gameOverState.rankingData = [];
+  fetch(SCORE_WEBHOOK_URL)
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      const entries = Array.isArray(data) ? data : [];
+      gameOverState.rankingData = entries
+        .filter((e) => e && typeof e.name === 'string' && typeof e.score === 'number')
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 50);
+      gameOverState.rankingStatus = 'loaded';
+    })
+    .catch(() => {
+      gameOverState.rankingStatus = 'error';
+    });
+}
+
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
@@ -3680,6 +3701,10 @@ const gameOverState = {
   isNewBest: false,
   causeOfDeath: '', // 'collision' or 'fuel_empty'
   statsPreset: false, // true when explosionState pre-sets final stats
+  rankingData: [], // array of {name, score, distance} sorted by score desc
+  rankingStatus: 'idle', // 'idle' | 'loading' | 'loaded' | 'error'
+  rankingScroll: 0, // index of first visible row
+  rankingDotTime: 0, // for animated loading dots
 
   onEnter() {
     this.pulseTime = 0;
@@ -3695,8 +3720,11 @@ const gameOverState = {
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    this.rankingScroll = 0;
+    this.rankingDotTime = 0;
     AudioManager.startGameOverDrone();
     showNameForm();
+    fetchRanking();
   },
 
   onExit() {
@@ -3706,10 +3734,16 @@ const gameOverState = {
 
   update(dt) {
     this.pulseTime += dt;
+    this.rankingDotTime += dt;
     if (consumeKey('Enter')) {
       AudioManager.playDrumRoll();
       resetGameState();
       fsm.transition(playingState);
+    }
+    if (this.rankingStatus === 'loaded' && this.rankingData.length > 10) {
+      const maxScroll = this.rankingData.length - 10;
+      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
+      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
     }
   },
 
@@ -3756,11 +3790,79 @@ const gameOverState = {
       ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
     }
 
-    // Pulsing retry text (moved down to make room for name input overlay)
+    // --- Ranking section (below HTML name form overlay, canvas y≈535+) ---
+    const RANK_Y = 537;
+    const RANK_ROW_H = 11;
+    const RANK_VISIBLE = 10;
+    ctx.textBaseline = 'top';
+    ctx.font = '10px monospace';
+
+    if (this.rankingStatus === 'loading') {
+      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Loading ranking${dots}`, CANVAS_WIDTH / 2, RANK_Y + 8);
+    } else if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.textAlign = 'center';
+      ctx.fillText('Could not load ranking', CANVAS_WIDTH / 2, RANK_Y + 8);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillText('Retry on next game over', CANVAS_WIDTH / 2, RANK_Y + 20);
+    } else if (this.rankingStatus === 'loaded') {
+      if (this.rankingData.length === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText('No scores yet', CANVAS_WIDTH / 2, RANK_Y + 8);
+      } else {
+        const hasMore = this.rankingData.length > RANK_VISIBLE;
+        // Header row
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'left';
+        ctx.fillText('TOP SCORES' + (hasMore ? '  ▲▼ scroll' : ''), 16, RANK_Y);
+        // Divider
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(16, RANK_Y + 12, CANVAS_WIDTH - 32, 1);
+        // Entries
+        const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+        const visibleEntries = this.rankingData.slice(
+          this.rankingScroll,
+          this.rankingScroll + RANK_VISIBLE
+        );
+        visibleEntries.forEach((entry, i) => {
+          const rank = this.rankingScroll + i + 1;
+          const isPlayer = playerName.length >= 2 && entry.name === playerName;
+          const rowY = RANK_Y + 15 + i * RANK_ROW_H;
+          ctx.fillStyle = isPlayer ? '#FFD700' : (i % 2 === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.65)');
+          ctx.textAlign = 'left';
+          const nameStr = String(entry.name || '').substring(0, 12);
+          ctx.fillText(`${String(rank).padStart(2, '\u00a0')} ${nameStr}`, 16, rowY);
+          ctx.textAlign = 'right';
+          const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+          ctx.fillText(`${entry.score}  ${dist}m`, CANVAS_WIDTH - 16, rowY);
+        });
+        // Scroll indicators
+        if (this.rankingScroll > 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▲', CANVAS_WIDTH - 12, RANK_Y + 14);
+        }
+        if (this.rankingScroll + RANK_VISIBLE < this.rankingData.length) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▼', CANVAS_WIDTH - 12, RANK_Y + 15 + RANK_VISIBLE * RANK_ROW_H);
+        }
+      }
+    }
+
+    ctx.textBaseline = 'middle';
+
+    // Pulsing retry text
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
-    ctx.font = '16px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 30);
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
   },
 };

@@ -151,7 +151,7 @@
         "Verify in browser using dev-browser skill: ranking table visible on game over with correct data"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

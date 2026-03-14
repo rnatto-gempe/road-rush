@@ -122,3 +122,20 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - input.addEventListener('keydown', e => e.stopPropagation()) is the correct way to prevent game controls while typing — window keydown listeners won't fire for that event
   - page.evaluate() in Playwright MCP can navigate to about:blank on error; use browser_press_key + browser_take_screenshot for reliable browser testing of canvas games
 ---
+
+## 2026-03-13 - US-008
+- Ranking display via webhook GET was already fully implemented in main.js (co-implemented during US-007 iteration)
+- fetchRanking() calls GET SCORE_WEBHOOK_URL in gameOverState.onEnter(), stores results in rankingData (top 50, sorted by score desc)
+- Ranking rendered on canvas at RANK_Y=537 (below HTML name form overlay) with 10 visible rows, RANK_ROW_H=11px per row
+- Arrow key scrolling (ArrowUp/ArrowDown) implemented in gameOverState.update() with rankingScroll index
+- Current player highlighted in yellow (#FFD700) by matching entry.name === nameInputEl.value.trim()
+- Animated loading dots use rankingDotTime: `'.'.repeat(Math.floor(rankingDotTime * 2) % 4)`
+- Error state shows 'Could not load ranking' + 'Retry on next game over'
+- Empty/malformed response shows 'No scores yet'
+- Files changed: ralph/prd.json (updated passes: true for US-008)
+- Browser verified: game over screen shows ranking section with graceful empty state ("No scores yet")
+- **Learnings for future iterations:**
+  - Arrow key scroll in gameOverState conflicts with name input focus — ArrowUp/ArrowDown events stopPropagation when name input is focused, so scrolling only works after input loses focus or is hidden
+  - consumeKey() is consumed in gameOverState.update(); ranking scroll and retry (Enter) share the same update loop so ordering matters
+  - rankingData is populated async; render() must guard on rankingStatus (idle/loading/loaded/error) before accessing rankingData
+---
