@@ -1,93 +1,105 @@
 ## 2026-03-14 - US-006
-- Updated `index.html` viewport meta to add `user-scalable=no, maximum-scale=1.0`
-- Added `touch-action: none` to canvas CSS rule in index.html
-- Added `document.body` touchmove listener that calls `e.preventDefault()` when target is canvas, touchLeft, or touchRight
-- Files changed: index.html, src/main.js, ralph/prd.json, ralph/progress.txt
+- Created `#feedback-btn` (💡 Sugerir Melhoria, amber pill style) created once; visible in titleState and gameOverState, hidden in playingState, explosionState, titleRankingState
+- Created `positionFeedbackBtn()` at canvas logical y≈640; called in `resizeCanvas()`
+- Created `#feedback-modal` overlay with dark backdrop (closes on backdrop click), card with title/subtitle/textarea/name input/error/submit/close-X
+- All text inputs font-size 16px; card max-height 90vh; overflow-y auto
+- `#feedback-name` pre-filled from localStorage 'roadRushPlayerName' on open
+- keydown on textarea/name calls e.stopPropagation(); ESC key closes modal
+- Submit validates non-empty fields; POST JSON {name, suggestion} to FEEDBACK_WEBHOOK_URL; shows 'Enviando...' → 'Obrigado! ✓' → close after 1500ms; error → re-enable button
+- Subtitle uses realistic language (no AI promises): 'Sua sugestão será analisada pela equipe...'
+- Files changed: src/main.js
 - **Learnings for future iterations:**
-  - `touch-action: none` in CSS + `{ passive: false }` + `e.preventDefault()` in JS both needed for full suppression
-  - body touchmove listener must check `e.target` to avoid suppressing all page scrolling
-  - `touchLeft` and `touchRight` already in scope at the point of the body listener (declared earlier in the file)
+  - Modal built entirely in JS (no HTML changes needed); all elements created with document.createElement pattern
+  - feedbackBtnEl declared null early like other UI elements; follows same show/hide in onEnter/onExit pattern
+  - Modal z-index:100 (above ad at z-index:50, above game buttons at z-index:20)
+  - Backdrop click detection: `if (e.target === feedbackModalEl)` — only fires when clicking the overlay itself, not the card
 ---
 
-## 2026-03-13 - US-005
-- Added `touchstart` listener on canvas to capture `touchStartY` in canvas coordinates
-- `touchend` in gameOverState: computes delta = touchStartY - cy; |delta| < 10px = tap (retry), >= 10px = swipe
-- Swipe scrolls `gameOverState.rankingScroll` by `Math.round(delta / 30)`, clamped to 0..maxScroll
-- Scroll only applied when rankingStatus === 'loaded' and rankingData.length > 10
-- Tap-to-retry preserved: triggers when |delta| < 10
-- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+## 2026-03-14 - US-005
+- Added AdSense script placeholder to index.html `<head>` with publisher ID comment
+- Added `<div id='ad-gameover'>` to index.html body after canvas (hidden by default, z-index 50)
+- Created `gameOverAdLabelEl` ('PUBLICIDADE' label) programmatically in main.js after resizeCanvas()
+- Created `positionGameOverAd()` using getBoundingClientRect() + scale; positions ad at logical y≈90, max-width 300px (or 90vw on mobile); label 14px above ad
+- Created `showGameOverAd()`: reads/increments sessionStorage 'roadrush_game_count'; shows ad on even counts (0,2,4...)
+- Created `hideGameOverAd()`: sets both ad+label to display:none
+- `gameOverState.onEnter()` calls `showGameOverAd()`; `gameOverState.onExit()` calls `hideGameOverAd()`
+- Added `positionGameOverAd()` call to `resizeCanvas()`; declared `gameOverAdEl = null` early before first resizeCanvas() call
+- Files changed: index.html, src/main.js
 - **Learnings for future iterations:**
-  - `touchstart` listener needed alongside `touchend` to capture start position; store in module-level variable
-  - `e.changedTouches[0]` used for both start and end to track same finger
-  - delta = startY - endY: positive = swipe up = scroll down (higher rankingScroll = further down list)
----
-
-## 2026-03-13 - US-004
-- Added mute icon touch detection inside the existing canvas `touchend` listener
-- Touch coords mapped via getBoundingClientRect + scale ratio (same pattern as click handler)
-- 44×44px hit area centered on (CANVAS_WIDTH-28, 54); calls AudioManager.toggleMute() and returns early to prevent tap-to-start/retry firing
-- Mute check runs before FSM state checks — works in all states
-- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
-- Browser verified: title screen renders with mute icon in top-right
-- **Learnings for future iterations:**
-  - Mute icon click handler already existed at ~line 1942; touch handler mirrors same coord math
-  - Always check mute icon first in touchend, then FSM state — prevents accidental retry/start on icon tap
-  - `e.changedTouches[0]` gives the finger that just lifted (correct for touchend)
----
-
-## 2026-03-13 - US-003
-- Added `touchend` listener on canvas for tap-to-start (titleState) and tap-to-retry (gameOverState)
-- `e.preventDefault()` on touchend eliminates 300ms delay; `{ passive: false }` required
-- Tap during playingState is ignored (explicit check before acting)
-- titleState.render: shows "Press Enter or Tap to Start" when `'ontouchstart' in window`
-- gameOverState.render: shows "Press Enter or Tap to Retry" when `'ontouchstart' in window`
-- Touch listener placed before the mute click listener (~line 1923 in main.js)
-- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
-- Browser verified: title screen shows "Press Enter to Start" on desktop (correct)
-- **Learnings for future iterations:**
-  - `fsm.currentState` can be compared directly to state objects (e.g., `=== titleState`)
-  - Tap-to-start must replicate the full Enter handler: AudioManager.init, resume, startTitleDrone, playRiser, resetGameState, then transition
-  - `'ontouchstart' in window` is reliable for detecting touch-capable devices at render time
----
-
-## 2026-03-13 - US-002
-- Added CSS `<style>` tag injected into `document.head` for `.touch-left/.touch-right` and `.active` class styles
-- Arrow icons ◄/► set via `el.textContent`; idle opacity 0.30, active 0.90
-- `setupTouchBtn` updated to call `el.classList.add('active')` on touchstart/touchmove and `el.classList.remove('active')` on touchend/touchcancel
-- Background `rgba(255,255,255,0.15)` applied via `.active` class
-- Both buttons can be held simultaneously with no flicker (independent class state per element)
-- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
-- Browser verified: ◄/► icons visible at 30% opacity during playingState
-- **Learnings for future iterations:**
-  - Inject a `<style>` tag into `document.head` for class-based transitions — avoids fighting inline cssText
-  - Multi-touch flicker avoided by keeping `.active` state fully per-element (no shared flag)
-  - `transition: background 0.05s, opacity 0.05s` gives snappy but smooth feedback
+  - `#ad-gameover` div lives in index.html (not created in JS); fetched via `document.getElementById()` after resizeCanvas() call, following same null-guard pattern as other elements
+  - `PUBLICIDADE` label is created programmatically (not in HTML) so it can be shown/hidden alongside the ad element
+  - Ad slot has no pointer-events:none — required by AdSense policy for clickability
+  - showGameOverAd() uses count BEFORE increment to determine show/hide; increments regardless of whether ad shows
 ---
 
 ## Codebase Patterns
-- FSM states: titleState, playingState, explosionState, gameOverState — all have onEnter/onExit/update/render
-- titleState (not startState) is the initial state — "Press Enter to Start" transitions to playingState
-- `keys` object is global: set keys['ArrowLeft']/keys['ArrowRight'] to control player movement
-- `resizeCanvas()` computes displayWidth/displayHeight via letterbox math — canvas is centered using flexbox
-- Touch button divs must use `position:fixed` (not absolute) since they overlay the full viewport
-- `{ passive: false }` required on touch event listeners to allow e.preventDefault()
-- Touch button positioning: left = (innerWidth - displayWidth) / 2, top = (innerHeight - displayHeight) / 2 + displayHeight * 0.80
+- Road rendering is in `renderRoad(ctx, scrollOffset)` — rumble strips and lane dashes both use scrollOffset modulo their period to compute starting y position
+- To scroll visuals top-to-bottom (toward player), use `y = offset - PERIOD` (not `y = -offset`)
+- Game states are objects with `onEnter()`, `onExit()`, `update(dt)`, `render(ctx)` methods managed by `fsm`
+- gameOverState.render() is fully independent of renderRoad() — no scroll-related regression risk when modifying road rendering
+- Opponents spawn at `y = -type.height` (above screen) and move down via `v.y += visualSpeed * dt`
+- Speed lines already scroll correctly (positive offset direction via modulo wrap)
+- FEEDBACK_WEBHOOK_URL constant was pre-added to main.js (needed for US-006)
+- Opponent visual speed formula: `visualSpeed = getEffectiveScrollSpeed() * (1 - speedRatio)` — always positive, computed dynamically each frame (not stored at spawn)
+- Game state variables (fsm, gameOverState, etc.) are module-scoped, NOT accessible from Playwright evaluate() — browser testing limited to visual screenshots
+- Avoid long `sleep` between Playwright actions — browser context closes; navigate+act+screenshot must be done in rapid sequence
+- `renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName)` is now a shared function at line ~4486 — use it for any new state that needs a ranking panel
+- HTML overlay buttons (#ranking-btn, #ranking-back-btn) are created once at startup, positioned via positionRankingBtn()/positionRankingBackBtn() called in resizeCanvas() — show/hide in each state's onEnter()/onExit()
+- `titleRankingAbortController` aborts pending fetches when titleRankingState.onEnter() is called again — prevents stale data on repeat opens
+- Declare HTML element vars as `null` BEFORE the initial resizeCanvas() call so position guard functions don't crash; create the actual elements AFTER
 
 # Ralph Progress Log
-Started: Fri Mar 13 23:50:56 -03 2026
+Started: Sat Mar 14 16:57:25 -03 2026
 ---
 
-## 2026-03-13 - US-001
-- Implemented two touch button divs (.touch-left, .touch-right) appended to document.body
-- Positioned via `positionTouchButtons()` called from `resizeCanvas()` — bottom 20% of canvas display area, 50/50 split
-- Touch event handlers (touchstart/touchmove/touchend/touchcancel) wire into keys['ArrowLeft'] / keys['ArrowRight']
-- `{ passive: false }` + `e.preventDefault()` on all events to suppress scroll/zoom
-- `touch-action: none` on both divs via inline CSS
-- Buttons shown in playingState.onEnter, hidden (and keys cleared) in playingState.onExit
-- Browser verified: buttons are `display:block` during playingState, correctly positioned
-- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+## 2026-03-14 17:05 - US-001
+- Reversed lane dash and rumble strip scroll direction from bottom-to-top to top-to-bottom
+- Changed rumble strip offset: `y = -rumbleOffset` → `y = rumbleOffset - RUMBLE_PERIOD`
+- Changed dash offset: `-dashScrollOffset` → `dashScrollOffset - DASH_PERIOD`
+- Files changed: src/main.js
 - **Learnings for future iterations:**
-  - The canvas uses CSS flexbox centering; touch overlays need `position:fixed` with computed offsets
-  - `keys` is just a plain object — any code can read/write keys['ArrowLeft'] etc.
-  - playingState.onExit must also reset keys to false to prevent stuck-key on state transitions
+  - The offset math is: `y = offset - PERIOD` makes visuals scroll downward (toward player) as scrollOffset increases
+  - gameOverState rendering is completely independent of renderRoad — no regression risk
+  - Browser testing with Playwright is flaky due to context closures on long waits — use short evaluate calls
+  - scrollOffset increases monotonically: `effSpeed * dt` where effSpeed is always positive
+---
+
+## 2026-03-14 - US-002
+- Changed opponent ownSpeed from static (set at spawn) to dynamic (recomputed every frame): `v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio`
+- Changed visualSpeed formula: `getEffectiveScrollSpeed() - v.ownSpeed` → `getEffectiveScrollSpeed() * (1 - type.speedRatio)` — ensures always-positive (downward) displacement
+- Fixed `relativeVy` in collision handler to use same formula: `getEffectiveScrollSpeed() * (1 - speedRatio)`
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Game state variables (fsm, gameOverState, etc.) are module-scoped — cannot be accessed via Playwright evaluate(); browser testing is limited to visual screenshots
+  - Avoid `sleep` between Playwright calls — browser context closes; navigate+act+screenshot must run in rapid sequence without long pauses
+  - gameOverState is independent of traffic/speed physics — speed formula changes carry zero game over regression risk
+  - ownSpeed was previously set once at spawn time and became stale as scrollSpeed ramped up; now recomputed each frame for correct dynamic behavior
+---
+
+## 2026-03-14 - US-003
+- Extracted ranking rendering logic from gameOverState.render() into standalone `renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName)` function
+- gameOverState.render() now delegates to renderRankingPanel, passing `nameInputEl.value.trim()` as highlightName
+- Visual output is identical — same RANK_Y=537, row heights, colors, scroll indicators
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - renderRankingPanel is defined just before `// --- GameOver State ---` — any new state (e.g. titleRankingState) can call it directly
+  - highlightName replaces the old `nameInputEl.value.trim()` inline lookup — callers supply the name string
+  - Build passes with `npm run build`; title screen renders correctly via Playwright
+---
+
+## 2026-03-14 - US-004
+- Created #ranking-btn (glassmorphism pill, text '🏆 RANKING') created once at startup; shown in titleState.onEnter(), hidden in onExit() and all other states' onEnter()
+- Created positionRankingBtn() and positionRankingBackBtn() called inside resizeCanvas()
+- Added R/r key handler in titleState.update() → fsm.transition(titleRankingState)
+- Created titleRankingState with own rankingData/rankingStatus/rankingScroll/rankingDotTime
+- titleRankingState.onEnter() aborts previous fetch via titleRankingAbortController, starts fresh fetch with 10s AbortController timeout → sets errorMessage 'Timeout — tente novamente'
+- titleRankingState.render() draws background + gold '🏆 RANKING GLOBAL' title + calls renderRankingPanel for loading/loaded; handles error case with custom errorMessage
+- Created #ranking-back-btn 'VOLTAR'; click → titleState; ESC key in titleRankingState.update() → titleState
+- Added titleRankingState swipe scroll handling in canvas touchend handler
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - State buttons pattern: declare `let btnEl = null` before resizeCanvas(), create element after; position function guards against null
+  - titleRankingState uses its own fetch separate from fetchRanking() (which writes to gameOverState) — two independent fetch chains
+  - renderRankingPanel RANK_Y is hardcoded at 537 — for titleRankingState this creates natural space for the header (title + subtitle at y=55–85)
+  - Error branch in titleRankingState.render() handles error directly (not via renderRankingPanel) to support custom error message from AbortController timeout
 ---
