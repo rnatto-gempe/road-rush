@@ -1899,6 +1899,7 @@ nameInputEl.addEventListener('keydown', (e) => {
 });
 
 const SCORE_WEBHOOK_URL = 'https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0';
+const FEEDBACK_WEBHOOK_URL = 'https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0/feedback';
 
 function handleNameSubmit() {
   const name = nameInputEl.value.trim();
@@ -2672,8 +2673,8 @@ function renderRoad(ctx, scrollOffset) {
     const stripX = side === 0 ? 0 : ROAD_RIGHT;
     const stripW = ROAD_LEFT; // 40px
 
-    // Draw segments from above screen to below
-    let y = -rumbleOffset;
+    // Draw segments from above screen to below (top→bottom scroll)
+    let y = rumbleOffset - RUMBLE_PERIOD;
     let colorIndex = 0;
     while (y < CANVAS_HEIGHT) {
       ctx.fillStyle = colorIndex % 2 === 0 ? '#E53935' : '#FFFFFF';
@@ -2729,7 +2730,7 @@ function renderRoad(ctx, scrollOffset) {
     const dx = laneXBottom - laneXTop; // horizontal shift per CANVAS_HEIGHT of vertical travel
     const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
     ctx.beginPath();
-    ctx.moveTo(xAtY(-dashScrollOffset), -dashScrollOffset);
+    ctx.moveTo(xAtY(dashScrollOffset - DASH_PERIOD), dashScrollOffset - DASH_PERIOD);
     ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
