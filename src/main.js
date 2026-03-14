@@ -1920,6 +1920,24 @@ function fetchRanking() {
     });
 }
 
+// --- Tap to Start / Tap to Retry ---
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (fsm.currentState === titleState) {
+    AudioManager.init();
+    AudioManager.resume();
+    AudioManager.startTitleDrone();
+    AudioManager.playRiser();
+    resetGameState();
+    fsm.transition(playingState);
+  } else if (fsm.currentState === gameOverState) {
+    AudioManager.playDrumRoll();
+    resetGameState();
+    fsm.transition(playingState);
+  }
+  // No tap action during playingState
+}, { passive: false });
+
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
@@ -3838,7 +3856,8 @@ const titleState = {
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
     ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Start', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+    const startLabel = ('ontouchstart' in window) ? 'Press Enter or Tap to Start' : 'Press Enter to Start';
+    ctx.fillText(startLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
     ctx.globalAlpha = 1;
   },
 };
@@ -4536,7 +4555,8 @@ const gameOverState = {
     ctx.font = '14px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
+    const retryLabel = ('ontouchstart' in window) ? 'Press Enter or Tap to Retry' : 'Press Enter to Retry';
+    ctx.fillText(retryLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
   },
 };
