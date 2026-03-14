@@ -1813,7 +1813,7 @@ function handleNameSubmit() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       nameSubmitEl.textContent = 'Score submitted! ✓';
       nameSubmitEl.disabled = true;
-      fetchRanking();
+      setTimeout(fetchRanking, 2000);
     })
     .catch(() => {
       nameSubmitEl.textContent = 'Failed to submit. Try again';
