@@ -1,3 +1,16 @@
+## 2026-03-13 - US-005
+- Added `touchstart` listener on canvas to capture `touchStartY` in canvas coordinates
+- `touchend` in gameOverState: computes delta = touchStartY - cy; |delta| < 10px = tap (retry), >= 10px = swipe
+- Swipe scrolls `gameOverState.rankingScroll` by `Math.round(delta / 30)`, clamped to 0..maxScroll
+- Scroll only applied when rankingStatus === 'loaded' and rankingData.length > 10
+- Tap-to-retry preserved: triggers when |delta| < 10
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - `touchstart` listener needed alongside `touchend` to capture start position; store in module-level variable
+  - `e.changedTouches[0]` used for both start and end to track same finger
+  - delta = startY - endY: positive = swipe up = scroll down (higher rankingScroll = further down list)
+---
+
 ## 2026-03-13 - US-004
 - Added mute icon touch detection inside the existing canvas `touchend` listener
 - Touch coords mapped via getBoundingClientRect + scale ratio (same pattern as click handler)
