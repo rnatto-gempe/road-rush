@@ -13,6 +13,25 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Render order in playingState.render(): road → [motion ghost] → traffic/items → player → particles → [capture ghost] → overlays → HUD (draw HUD last so overlays don't darken it)
 - Motion blur ghost: draw offscreen canvas AFTER renderRoad() (so background is fresh) but BEFORE renderTraffic(); capture AFTER renderParticles() but BEFORE overlays — keeps HUD and overlays ghost-free
 - The game runs at 60fps fixed timestep (FIXED_DT = 1/60); scrollSpeed ramps from 200 to 800 px/s over the run
+- Bloom pattern: clear offscreen canvas, set `filter = 'blur(8px)'`, draw shapes at 2× scale, reset `filter = 'none'`, composite onto main canvas with `globalCompositeOperation = 'lighter'`; must call AFTER captureGhostFrame
+- Particle type flags: add typed flags (e.g., `isNitro: true`) at spawn time rather than comparing color strings in the render loop
+
+## 2026-03-13 - US-004
+- Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights
+- Added `bloomCanvas` / `bloomCtx` offscreen canvas at module level (zero per-frame allocation)
+- `renderBloom()`: clears bloomCanvas, sets `filter = 'blur(8px)'`, draws each collectible at 2× scale in its color at globalAlpha 0.6, draws headlights as white circles, resets filter, then composites bloomCanvas onto main canvas with `globalCompositeOperation = 'lighter'` at globalAlpha 0.5
+- Added two white headlight circles (radius 4) to `renderPlayer()` at the front of the car (top edge)
+- Modified `renderParticles()`: nitro particles now use `globalCompositeOperation = 'lighter'`; at scrollSpeed > 600 their alpha is boosted by +0.15 and radius by ×1.3
+- Added `isNitro: true` flag to nitro particle objects at spawn time to identify them in renderParticles
+- Called `renderBloom()` in `playingState.render()` after `captureGhostFrame()` so bloom is not captured into the motion ghost
+- Browser verification: golden glow visible around coins; player headlights visible as white circles at car front
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Canvas `filter = 'blur(8px)'` on an offscreen canvas then composited with 'lighter' is a clean way to do bloom without WebGL — no per-frame re-allocation
+  - Must reset `bloomCtx.filter = 'none'` after drawing blurred content or it bleeds into subsequent draws
+  - Bloom should be drawn AFTER captureGhostFrame so it doesn't contribute to the motion blur ghost
+  - Nitro particle `isNitro` flag avoids color-string comparison to identify particle type
+---
 
 ## 2026-03-13 22:48 - US-001
 - Implemented renderSpeedVignette(ctx): full-canvas radial gradient darkening edges at high speed
