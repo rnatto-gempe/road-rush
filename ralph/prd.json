@@ -80,7 +80,7 @@
         "Verify in browser using dev-browser skill — test: title → overlay (wait for loading) → VOLTAR → title → overlay again (must reload)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

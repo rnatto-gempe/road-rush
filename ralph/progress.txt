@@ -10,6 +10,9 @@
 - Game state variables (fsm, gameOverState, etc.) are module-scoped, NOT accessible from Playwright evaluate() — browser testing limited to visual screenshots
 - Avoid long `sleep` between Playwright actions — browser context closes; navigate+act+screenshot must be done in rapid sequence
 - `renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName)` is now a shared function at line ~4486 — use it for any new state that needs a ranking panel
+- HTML overlay buttons (#ranking-btn, #ranking-back-btn) are created once at startup, positioned via positionRankingBtn()/positionRankingBackBtn() called in resizeCanvas() — show/hide in each state's onEnter()/onExit()
+- `titleRankingAbortController` aborts pending fetches when titleRankingState.onEnter() is called again — prevents stale data on repeat opens
+- Declare HTML element vars as `null` BEFORE the initial resizeCanvas() call so position guard functions don't crash; create the actual elements AFTER
 
 # Ralph Progress Log
 Started: Sat Mar 14 16:57:25 -03 2026
@@ -48,4 +51,21 @@ Started: Sat Mar 14 16:57:25 -03 2026
   - renderRankingPanel is defined just before `// --- GameOver State ---` — any new state (e.g. titleRankingState) can call it directly
   - highlightName replaces the old `nameInputEl.value.trim()` inline lookup — callers supply the name string
   - Build passes with `npm run build`; title screen renders correctly via Playwright
+---
+
+## 2026-03-14 - US-004
+- Created #ranking-btn (glassmorphism pill, text '🏆 RANKING') created once at startup; shown in titleState.onEnter(), hidden in onExit() and all other states' onEnter()
+- Created positionRankingBtn() and positionRankingBackBtn() called inside resizeCanvas()
+- Added R/r key handler in titleState.update() → fsm.transition(titleRankingState)
+- Created titleRankingState with own rankingData/rankingStatus/rankingScroll/rankingDotTime
+- titleRankingState.onEnter() aborts previous fetch via titleRankingAbortController, starts fresh fetch with 10s AbortController timeout → sets errorMessage 'Timeout — tente novamente'
+- titleRankingState.render() draws background + gold '🏆 RANKING GLOBAL' title + calls renderRankingPanel for loading/loaded; handles error case with custom errorMessage
+- Created #ranking-back-btn 'VOLTAR'; click → titleState; ESC key in titleRankingState.update() → titleState
+- Added titleRankingState swipe scroll handling in canvas touchend handler
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - State buttons pattern: declare `let btnEl = null` before resizeCanvas(), create element after; position function guards against null
+  - titleRankingState uses its own fetch separate from fetchRanking() (which writes to gameOverState) — two independent fetch chains
+  - renderRankingPanel RANK_Y is hardcoded at 537 — for titleRankingState this creates natural space for the header (title + subtitle at y=55–85)
+  - Error branch in titleRankingState.render() handles error directly (not via renderRankingPanel) to support custom error message from AbortController timeout
 ---
