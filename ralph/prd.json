@@ -157,7 +157,7 @@
         "Verificar no browser usando dev-browser skill — asteroide aparece, gira lentamente, colisão funciona"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "vertices gerados uma vez no spawn e armazenados no objeto do veículo."
     },
     {

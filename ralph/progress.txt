@@ -18,6 +18,8 @@ Started: Sat Mar 14 19:39:09 -03 2026
 - `chooseVehicleType()` filters by `t.phase === gameState.phase` — new vehicle types MUST have a `phase` property to appear in the correct phase
 - When a phase has only aggressive vehicle types (no passive), `chooseVehicleType` falls back to all available types to avoid empty pool crash
 - Vehicle sprites are rendered in `renderTraffic()` with `else if (v.type === 'typeName')` chain — add new types there
+- Rotating vehicle sprites: add `rotation` property in `spawnVehicle()`, increment in `updateTraffic()` via `if (v.rotation !== undefined)`, render with `ctx.save/translate/rotate/restore`
+- Per-vehicle spawn-time data (e.g. `vertices`, `rotation`): add in `spawnVehicle()` with a `if (candidate.typeName === 'X')` block after base object creation
 
 ---
 
@@ -134,4 +136,18 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - Airplane is `behavior: 'none'` (passive/slow), helicopter is `behavior: 'laneChange'` (aggressive) — sky phase now has a good mix of passive and aggressive types, removing the need for the fallback pool logic
   - Helicopter rotor uses `elapsedTime * 15` for fast spinning — higher multiplier than bird wings (8) since rotor should be fast
   - Airplane sprite is centered using `acx = v.x + v.width / 2` then drawing fuselage offset from center — pattern for centered sprites
+---
+
+## 2026-03-14 - US-009
+- Added `asteroid` vehicle type to `VEHICLE_TYPES`: `{ width: 36, height: 36, speedRatio: 0.3, behavior: 'none', phase: 'space' }`
+- Pre-generates 7 irregular polygon vertices in `spawnVehicle()` when type is asteroid (radius 18px ± 4px random), stored in `v.vertices`
+- Added `v.rotation` property initialized to 0, incremented by `dt * 0.5` in `updateTraffic()`
+- Asteroid sprite rendered with `ctx.rotate(v.rotation)` for visual spin, does not affect AABB hitbox
+- Sprite uses fill `#795548` with border `#5D4037`, lineWidth 2
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Rotation update uses generic check `if (v.rotation !== undefined)` — any future rotating type just needs `rotation` property
+  - Vertices pre-generated once at spawn and stored on the vehicle object — avoids per-frame allocation
+  - `ctx.save/translate/rotate/restore` pattern for rotating sprites — translate to center, rotate, draw relative to origin
+  - Asteroid is `behavior: 'none'` (passive) — space phase will need aggressive types too (fighter in US-010)
 ---
