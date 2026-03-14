@@ -1607,6 +1607,12 @@ ghostCanvas.height = CANVAS_HEIGHT;
 const ghostCtx = ghostCanvas.getContext('2d');
 let ghostValid = false; // true once first capture has been taken above 600 px/s
 
+// Offscreen canvas for bloom / glow effects (US-004) — initialized once
+const bloomCanvas = document.createElement('canvas');
+bloomCanvas.width = CANVAS_WIDTH;
+bloomCanvas.height = CANVAS_HEIGHT;
+const bloomCtx = bloomCanvas.getContext('2d');
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
   const windowWidth = window.innerWidth;
@@ -1852,6 +1858,98 @@ function captureGhostFrame() {
   ghostValid = true;
 }
 
+// Bloom / glow effect for collectibles and player headlights (US-004)
+// Renders each target at 2× scale with blur onto bloomCanvas, then composites 'lighter' onto main canvas.
+function renderBloom() {
+  bloomCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  bloomCtx.filter = 'blur(8px)';
+
+  // Coin halos (gold)
+  bloomCtx.fillStyle = '#FFD700';
+  for (const coin of gameState.coins) {
+    if (coin.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(coin.x, coin.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Fuel halos (green)
+  bloomCtx.fillStyle = '#43A047';
+  for (const item of gameState.fuelItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, FUEL_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Nitro halos (yellow triangle)
+  bloomCtx.fillStyle = '#FFD600';
+  for (const item of gameState.nitroItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    const s = NITRO_ITEM_HALF;
+    bloomCtx.beginPath();
+    bloomCtx.moveTo(0, -s);
+    bloomCtx.lineTo(s, s);
+    bloomCtx.lineTo(-s, s);
+    bloomCtx.closePath();
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Shield halos (blue circle)
+  bloomCtx.fillStyle = '#42A5F5';
+  for (const item of gameState.shieldItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, SHIELD_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Player headlights (front two white circles) — skip during invulnerability blink frames
+  const blinkHidden = invulnTimer > 0 && Math.floor(invulnTimer / BLINK_INTERVAL) % 2 === 1;
+  if (!blinkHidden) {
+    const p = gameState.player;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.7;
+    bloomCtx.fillStyle = '#FFFFFF';
+    bloomCtx.beginPath();
+    bloomCtx.arc(p.x + 8, p.y + 5, 5, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.beginPath();
+    bloomCtx.arc(p.x + PLAYER_WIDTH - 8, p.y + 5, 5, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  bloomCtx.filter = 'none';
+
+  // Composite bloom canvas onto main canvas using 'lighter' for additive glow
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.5;
+  ctx.drawImage(bloomCanvas, 0, 0);
+  ctx.restore();
+}
+
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
 function renderSpeedLines(ctx) {
   const speed = gameState.scrollSpeed;
@@ -1908,12 +2006,26 @@ function updateParticles(dt) {
 }
 
 function renderParticles(ctx) {
+  const highSpeed = gameState.scrollSpeed > 600;
   for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fill();
+    const baseAlpha = Math.max(0, p.life / p.maxLife);
+    if (p.isNitro) {
+      // Nitro exhaust: additive 'lighter' compositing; boost size and alpha at high speed (US-004)
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, baseAlpha + (highSpeed ? 0.15 : 0));
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (highSpeed ? 1.3 : 1), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.globalAlpha = baseAlpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -2263,6 +2375,15 @@ function renderPlayer(ctx, player) {
 
   // Rear window
   ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+  // Headlights (front two white circles — bloom glow added in renderBloom)
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // --- Traffic System ---
@@ -3324,6 +3445,7 @@ const playingState = {
           maxLife: 0.3,
           color: '#42A5F5',
           size: 2 + Math.random() * 2,
+          isNitro: true,
         });
       }
     }
@@ -3415,6 +3537,9 @@ const playingState = {
     renderParticles(ctx);
     // Capture road/traffic/player/particles layer for motion blur next frame (US-003)
     captureGhostFrame();
+
+    // Bloom / glow on collectibles and headlights (US-004)
+    renderBloom();
 
     // Red flash overlay on frontal collision
     if (redFlash.alpha > 0) {
