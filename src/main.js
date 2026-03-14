@@ -230,6 +230,14 @@ function easeInOutCubic (t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// Color interpolation for phase transitions
+function lerpColor (hex1, hex2, t) {
+  const r1 = parseInt(hex1.slice(1, 3), 16), g1 = parseInt(hex1.slice(3, 5), 16), b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16), g2 = parseInt(hex2.slice(3, 5), 16), b2 = parseInt(hex2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t), g = Math.round(g1 + (g2 - g1) * t), b = Math.round(b1 + (b2 - b1) * t);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
 // ─── Audio Manager (Web Audio API) ───
 const AudioManager = {
   ctx: null,
@@ -3294,6 +3302,13 @@ function getRoadFovFactor () {
 
 function renderRoad (ctx, scrollOffset) {
   const phase = gameState.phase;
+  const pt = gameState.phaseTransition;
+
+  // During active transition, blend between from and to phases
+  if (pt.active) {
+    renderRoadTransition(ctx, scrollOffset, pt);
+    return;
+  }
 
   if (phase === 'sky') {
     renderRoadSky(ctx, scrollOffset);
@@ -3384,31 +3399,156 @@ function renderRoad (ctx, scrollOffset) {
 }
 
 function renderRoadSky (ctx, scrollOffset) {
-  // Sky background gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   gradient.addColorStop(0, '#4A90D9');
   gradient.addColorStop(1, '#87CEEB');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  renderSkyElements(ctx, scrollOffset);
+}
 
-  // Clouds scrolling at 0.3× speed (parallax)
+function renderRoadSpace (ctx, scrollOffset) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#0A0A1A');
+  gradient.addColorStop(1, '#0D1B2A');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  renderSpaceElements(ctx, scrollOffset);
+}
+
+// Phase background color definitions for transitions
+const PHASE_BG_COLORS = {
+  road:  { top: '#1A1A2E', bottom: '#16213E' },
+  sky:   { top: '#4A90D9', bottom: '#87CEEB' },
+  space: { top: '#0A0A1A', bottom: '#0D1B2A' }
+};
+
+function renderRoadTransition (ctx, scrollOffset, pt) {
+  const progress = pt.progress;
+  const fromPhase = pt.from;
+  const toPhase = pt.to;
+
+  // 1. Interpolated background gradient
+  const fromColors = PHASE_BG_COLORS[fromPhase];
+  const toColors = PHASE_BG_COLORS[toPhase];
+  const blendTop = lerpColor(fromColors.top, toColors.top, progress);
+  const blendBottom = lerpColor(fromColors.bottom, toColors.bottom, progress);
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, blendTop);
+  gradient.addColorStop(1, blendBottom);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // 2. Fade out elements of the "from" phase
+  const fadeOut = 1 - progress;
+  const savedAlpha = ctx.globalAlpha;
+
+  if (fromPhase === 'road') {
+    // Fade out rumble strips
+    ctx.globalAlpha = fadeOut;
+    renderRoadRumbleStrips(ctx, scrollOffset);
+    renderRoadSurface(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  } else if (fromPhase === 'sky') {
+    // Fade out clouds, sky corridor, wind borders, sky lanes
+    ctx.globalAlpha = fadeOut;
+    renderSkyElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  }
+
+  // 3. Fade in elements of the "to" phase
+  if (toPhase === 'sky') {
+    ctx.globalAlpha = progress;
+    renderSkyElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  } else if (toPhase === 'space') {
+    ctx.globalAlpha = progress;
+    renderSpaceElements(ctx, scrollOffset);
+    ctx.globalAlpha = savedAlpha;
+  }
+}
+
+// Extracted: road rumble strips
+function renderRoadRumbleStrips (ctx, scrollOffset) {
+  const rumbleOffset = scrollOffset % RUMBLE_PERIOD;
+  for (let side = 0; side < 2; side++) {
+    const stripX = side === 0 ? 0 : ROAD_RIGHT;
+    const stripW = ROAD_LEFT;
+    let y = rumbleOffset - RUMBLE_PERIOD;
+    let colorIndex = 0;
+    while (y < CANVAS_HEIGHT) {
+      ctx.fillStyle = colorIndex % 2 === 0 ? '#E53935' : '#FFFFFF';
+      ctx.fillRect(stripX, y, stripW, RUMBLE_SEGMENT);
+      y += RUMBLE_SEGMENT;
+      colorIndex++;
+    }
+  }
+}
+
+// Extracted: road surface (asphalt trapezoid + borders + lanes)
+function renderRoadSurface (ctx, scrollOffset) {
+  const fovFactor = getRoadFovFactor();
+  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2;
+  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
+  const fovTopLeft = roadCenter - topHalfWidth;
+  const fovTopRight = roadCenter + topHalfWidth;
+
+  const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  roadGradient.addColorStop(0, '#2A2A3E');
+  roadGradient.addColorStop(1, '#26314E');
+  ctx.fillStyle = roadGradient;
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneXBottom = ROAD_LEFT + i * LANE_WIDTH;
+    const laneXTop = roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor);
+    const dx = laneXBottom - laneXTop;
+    const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
+    ctx.beginPath();
+    ctx.moveTo(xAtY(dashScrollOffset - DASH_PERIOD), dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+// Extracted: sky phase elements (clouds + corridor + borders + lanes)
+function renderSkyElements (ctx, scrollOffset) {
   const cloudScrollY = (scrollOffset * 0.3) % SKY_CLOUD_PERIOD;
   ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
   for (const cloud of skyCloudData) {
     let cy = (cloud.yPhase + cloudScrollY) % SKY_CLOUD_PERIOD - 20;
-    // wrap to keep clouds on screen
     if (cy < -20) cy += SKY_CLOUD_PERIOD;
-    const cx = cloud.x - 20; // center → top-left
+    const cx = cloud.x - 20;
     ctx.beginPath();
     ctx.roundRect(cx, cy, 40, 15, 7);
     ctx.fill();
   }
 
-  // Sky corridor: light-blue gradient overlay
   ctx.fillStyle = 'rgba(107, 179, 224, 0.15)';
   ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
 
-  // Wind border lines (replace rumble strips)
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
@@ -3421,12 +3561,10 @@ function renderRoadSky (ctx, scrollOffset) {
   ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
   ctx.stroke();
 
-  // Dotted lane markers (replace dashed road lines)
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
   ctx.lineWidth = 2;
   ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
-
   for (let i = 1; i < LANE_COUNT; i++) {
     const laneX = ROAD_LEFT + i * LANE_WIDTH;
     ctx.beginPath();
@@ -3434,36 +3572,25 @@ function renderRoadSky (ctx, scrollOffset) {
     ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
-
   ctx.setLineDash([]);
 }
 
-function renderRoadSpace (ctx, scrollOffset) {
-  // Space background gradient
-  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, '#0A0A1A');
-  gradient.addColorStop(1, '#0D1B2A');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-  // Starfield: two parallax layers
+// Extracted: space phase elements (stars + corridor + borders + lanes)
+function renderSpaceElements (ctx, scrollOffset) {
   for (const star of spaceStarData) {
     const speed = star.layer === 1 ? 0.1 : 0.2;
     const starScrollY = (scrollOffset * speed) % SPACE_STAR_PERIOD;
     let sy = (star.yPhase + starScrollY) % SPACE_STAR_PERIOD;
     if (sy < 0) sy += SPACE_STAR_PERIOD;
-    // Only draw if visible
     if (sy >= -2 && sy <= CANVAS_HEIGHT + 2) {
       ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
       ctx.fillRect(star.x, sy, star.size, star.size);
     }
   }
 
-  // Space corridor: dark subtle overlay
   ctx.fillStyle = 'rgba(13, 27, 42, 0.3)';
   ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
 
-  // Cyan border lines
   ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
@@ -3476,12 +3603,10 @@ function renderRoadSpace (ctx, scrollOffset) {
   ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
   ctx.stroke();
 
-  // Dotted cyan lane markers
   ctx.strokeStyle = 'rgba(0, 229, 255, 0.1)';
   ctx.lineWidth = 2;
   ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
-
   for (let i = 1; i < LANE_COUNT; i++) {
     const laneX = ROAD_LEFT + i * LANE_WIDTH;
     ctx.beginPath();
@@ -3489,7 +3614,6 @@ function renderRoadSpace (ctx, scrollOffset) {
     ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
-
   ctx.setLineDash([]);
 }
 

@@ -9,7 +9,21 @@ Started: Sat Mar 14 19:39:09 -03 2026
 - Easing/utility functions go near top of file after constants section
 - Phase transition update goes in `playingState.update()` after the score update block
 - Build: `node_modules/.bin/vite build` (vite not in PATH; use local binary)
+- Pre-generated data arrays (speedLineData, skyCloudData, spaceStarData) go near top of file after constants, use IIFE pattern
 
+---
+
+## 2026-03-14 - US-003
+- Implemented static space scenario rendering
+- Added `spaceStarData` pre-generated array (40 stars with x, yPhase, size, brightness, layer) near `skyCloudData`
+- Added `SPACE_STAR_PERIOD = CANVAS_HEIGHT + 100` wrap constant
+- Added `renderRoadSpace()` function: space gradient (#0A0A1A → #0D1B2A), 2-layer parallax starfield (0.1× and 0.2× speed), rgba(13,27,42,0.3) corridor overlay, cyan border lines (rgba(0,229,255,0.6)), dotted cyan lane markers (rgba(0,229,255,0.1))
+- Added space phase dispatch in `renderRoad()`: `if (phase === 'space') { renderRoadSpace(ctx, scrollOffset); return; }`
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Star scroll formula mirrors cloud formula: `sy = (star.yPhase + scrollOffset * speed) % PERIOD` with visibility check before drawing
+  - Stars use `fillRect` instead of `arc` for performance (1-2px squares are visually identical to circles at this size)
+  - Cyan color `#00E5FF` as rgba: `rgba(0, 229, 255, alpha)` — used for space borders and lanes
 ---
 
 ## 2026-03-14 - US-002

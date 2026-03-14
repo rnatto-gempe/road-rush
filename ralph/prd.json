@@ -56,7 +56,7 @@
         "Verificar no browser usando dev-browser skill — cenário space visível, lanes reconhecíveis"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Starfield deve usar array fixo pré-gerado (como speedLineData) para evitar alocação no game loop."
     },
     {
