@@ -200,7 +200,15 @@ const AudioManager = {
     if (this.ctx) return;
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.connect(this.ctx.destination);
+    // Limiter/compressor on the master bus to prevent clipping
+    const compressor = this.ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-6, this.ctx.currentTime);
+    compressor.ratio.setValueAtTime(10, this.ctx.currentTime);
+    compressor.knee.setValueAtTime(3, this.ctx.currentTime);
+    compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
+    compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
+    this.masterGain.connect(compressor);
+    compressor.connect(this.ctx.destination);
   },
 
   resume() {
@@ -289,8 +297,9 @@ const AudioManager = {
     this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
     // Filter cutoff maps 400→800Hz
     this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
-    // Volume ramps 0.08→0.20 with speed
-    const vol = 0.08 + t * 0.12;
+    // Volume: reduced to ~0.1 when musical elements are active (pad/bass/arpeggio)
+    const musicActive = this.pad.active || this.bass.running;
+    const vol = musicActive ? 0.10 : (0.08 + t * 0.12);
     this.engine.gain.gain.setTargetAtTime(vol, now, 0.05);
   },
 
@@ -430,11 +439,28 @@ const AudioManager = {
     source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
   },
 
+  // Duck all long-lived musical elements (pad, bass) to 0.3x for 0.5s on impact
+  duckMusicElements() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const endTime = now + 0.5;
+    if (this.pad.active && this.pad.gain) {
+      const v = this.pad.gain.gain.value;
+      this.pad.gain.gain.setValueAtTime(v * 0.3, now);
+      this.pad.gain.gain.setTargetAtTime(v, endTime, 0.05);
+    }
+    if (this.bass.running && this.bass.gain) {
+      this.bass.gain.gain.setValueAtTime(0.3, now);
+      this.bass.gain.gain.setTargetAtTime(1.0, endTime, 0.05);
+    }
+  },
+
   // ─── Collision & Explosion SFX ───
 
   // Metallic crash: short noise burst (high-pass ~2kHz) + low-freq impact thump (sine ~60Hz)
   playCrash() {
     if (!this.ctx) return;
+    this.duckMusicElements();
     const now = this.ctx.currentTime;
 
     // High-pass noise burst (metallic clang)
@@ -477,6 +503,7 @@ const AudioManager = {
   // Layered explosion boom: low sine sweep + noise burst + crackle
   playExplosion() {
     if (!this.ctx) return;
+    this.duckMusicElements();
     const now = this.ctx.currentTime;
 
     // Low sine sweep 80→30Hz over 0.5s

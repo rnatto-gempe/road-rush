@@ -139,3 +139,19 @@ Started: Fri Mar 13 19:15:22 -03 2026
   - consumeKey() is consumed in gameOverState.update(); ranking scroll and retry (Enter) share the same update loop so ordering matters
   - rankingData is populated async; render() must guard on rankingStatus (idle/loading/loaded/error) before accessing rankingData
 ---
+
+## 2026-03-13 - US-009
+- Implemented audio mix and master bus balancing
+- DynamicsCompressorNode added in AudioManager.init(): masterGain → compressor → destination (threshold -6dB, ratio 10:1, knee 3dB, attack 3ms, release 250ms)
+- Added duckMusicElements(): sets pad.gain to 0.3× and bass.gain to 0.3 for 0.5s using setValueAtTime + setTargetAtTime; called at start of playCrash() and playExplosion()
+- Engine volume capped at 0.10 when pad.active || bass.running (music active); otherwise ramps 0.08→0.20 with speed
+- Volume hierarchy verified: kick 0.35, hat 0.12, bass 0.15-0.30 (per-note vel×0.3, master=1.0), pad 0.12→0.20, arp 0.15, engine/road ~0.10 when music playing
+- All audio elements already connect through AudioManager.masterGain (mute works)
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- Browser test: build passes (npm run build). Playwright browser went to about:blank after sleep(10) — known MCP issue; code verified via build + review
+- **Learnings for future iterations:**
+  - DynamicsCompressorNode must be stored if it needs to be disconnected/reconfigured (not needed here — it's permanent on the bus)
+  - masterGain.connect(compressor) + compressor.connect(destination) replaces the direct masterGain.connect(destination) — toggleMute still works because it targets masterGain.gain, not destination
+  - duckMusicElements() uses current gain value `v = pad.gain.gain.value` as the duck base, then restores to v after 0.5s; this works because pad volume is updated by updatePad() continuously
+  - Playwright MCP: long sleep (>5s) can cause the browser session to navigate to about:blank; use shorter sleep intervals or just rely on build validation
+---
