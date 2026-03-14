@@ -220,6 +220,17 @@ const VEHICLE_TYPES = {
     laneChangeMax: 2,
     phase: 'road',
   },
+  bird: {
+    color: '#5D4037',
+    width: 24,
+    height: 20,
+    speedRatio: 0.75,
+    minTime: 0,
+    behavior: 'weave',
+    laneChangeMin: 1.5,
+    laneChangeMax: 3,
+    phase: 'sky',
+  },
 };
 
 // Debug mode
@@ -4103,7 +4114,8 @@ function getAggressiveWeight (elapsed) {
 }
 
 function chooseVehicleType (elapsed) {
-  const available = Object.entries(VEHICLE_TYPES).filter(([, t]) => elapsed >= t.minTime);
+  const currentPhase = gameState.phase;
+  const available = Object.entries(VEHICLE_TYPES).filter(([, t]) => elapsed >= t.minTime && t.phase === currentPhase);
   const aggressive = available.filter(([, t]) => t.behavior !== 'none');
   const passive = available.filter(([, t]) => t.behavior === 'none');
 
@@ -4111,7 +4123,7 @@ function chooseVehicleType (elapsed) {
   if (aggressive.length > 0 && Math.random() < getAggressiveWeight(elapsed)) {
     pool = aggressive;
   } else {
-    pool = passive;
+    pool = passive.length > 0 ? passive : available;
   }
 
   const [typeName] = pool[Math.floor(Math.random() * pool.length)];
@@ -4301,6 +4313,38 @@ function renderTraffic (ctx) {
       // Rider silhouette
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+    } else if (v.type === 'bird') {
+      // Bird: oval body + oscillating wings
+      const bx = v.x + v.width / 2;
+      const by = v.y + v.height / 2;
+      const wingAngle = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6); // ±30 degrees
+      ctx.fillStyle = '#5D4037';
+      // Body oval
+      ctx.beginPath();
+      ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Left wing
+      ctx.save();
+      ctx.translate(bx - 8, by);
+      ctx.rotate(-wingAngle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-10, -6);
+      ctx.lineTo(-2, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // Right wing
+      ctx.save();
+      ctx.translate(bx + 8, by);
+      ctx.rotate(wingAngle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(10, -6);
+      ctx.lineTo(2, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
     }
 
     // Near miss flash: white strip on the side closest to the player
