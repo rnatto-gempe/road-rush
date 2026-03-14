@@ -1974,6 +1974,13 @@ canvas.addEventListener('touchend', (e) => {
   // No tap action during playingState
 }, { passive: false });
 
+// --- Prevent scroll/zoom when touching canvas or touch buttons ---
+document.body.addEventListener('touchmove', (e) => {
+  if (e.target === canvas || e.target === touchLeft || e.target === touchRight) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
