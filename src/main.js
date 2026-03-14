@@ -2466,6 +2466,9 @@ const shake = { time: 0, maxTime: SHAKE_DURATION, intensity: SHAKE_INTENSITY };
 function triggerShake (duration, intensity) {
   const dur = duration !== undefined ? duration : SHAKE_DURATION;
   const inten = intensity !== undefined ? intensity : SHAKE_INTENSITY;
+  // Priority system: only apply if new intensity >= remaining intensity of current shake
+  const remainingIntensity = shake.time > 0 ? shake.intensity * (shake.time / shake.maxTime) : 0;
+  if (inten < remainingIntensity) return; // don't override stronger shake in progress
   shake.time = dur;
   shake.maxTime = dur;
   shake.intensity = inten;
@@ -2817,6 +2820,9 @@ function triggerNearMiss (v) {
   if (comboMultiplier === 3 || comboMultiplier === 5 || comboMultiplier === 8) {
     comboMilestoneFlash = 0.1;
   }
+
+  // Near miss screen shake — intensity scales with combo, won't override stronger collision shake
+  triggerShake(0.12, Math.min(2 + comboMultiplier, 5));
 
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
