@@ -2840,6 +2840,28 @@ function triggerNearMiss (v) {
     ? '+' + pts
     : 'x' + preCombo + ' +' + pts + '!';
   spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT * 0.3, floatLabel, comboColor, floatScale);
+
+  // Near miss spark particles from player's side closest to vehicle (US-005)
+  const vehicleIsRight = vCenterX > playerCenterX;
+  const sparkX = vehicleIsRight
+    ? gameState.player.x + PLAYER_WIDTH
+    : gameState.player.x;
+  const sparkY = gameState.player.y + PLAYER_HEIGHT * 0.4;
+  const sparkCount = Math.min(20, 8 + (comboMultiplier - 1) * 3);
+  const sparkColor = comboColor;
+  const lateralDir = vehicleIsRight ? 1 : -1;
+  for (let i = 0; i < sparkCount; i++) {
+    particles.push({
+      x: sparkX,
+      y: sparkY + (Math.random() - 0.5) * PLAYER_HEIGHT * 0.5,
+      vx: lateralDir * (80 + Math.random() * 70),
+      vy: (Math.random() - 0.5) * 100,
+      life: 0.3 + Math.random() * 0.2,
+      maxLife: 0.5,
+      color: sparkColor,
+      size: 1.5 + Math.random() * 2,
+    });
+  }
 }
 
 function updateParticles (dt) {
