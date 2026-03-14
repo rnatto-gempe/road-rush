@@ -208,7 +208,7 @@
         "Verificar no browser usando dev-browser skill — partículas visíveis durante transição"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Usa particle shape existente: { x, y, vx, vy, life, maxLife, color, size } + isTransition."
     },
     {

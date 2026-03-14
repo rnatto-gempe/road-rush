@@ -181,3 +181,18 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - Phase transition SFX are fire-and-forget: create osc+gain, schedule start/stop, cleanup in onended — same pattern as `playRiser()`
   - `exponentialRampToValueAtTime` is better than `linearRamp` for frequency sweeps (perceptually linear pitch change)
 ---
+
+## 2026-03-14 - US-012
+- Added `spawnTransitionParticles(fromPhase, toPhase)` function before `renderParticles()`
+- road→sky: spawns 20 white particles with negative vy (rising), vx ±50, life 2s
+- sky→space: spawns 30 cyan (#00E5FF) particles with vy=0, vx ±200 (horizontal streaking), life 1.5s
+- All transition particles have `isTransition: true` flag
+- Modified `renderParticles()` to render `isTransition` particles as velocity-oriented lines (lineWidth 2, length proportional to speed, max 20px)
+- Called `spawnTransitionParticles()` from phase trigger blocks in `playingState.update()`, right after `AudioManager.playPhaseTransition()`
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Transition particles reuse the existing `particles[]` array and `updateParticles()` — no new update logic needed, just spawn and render differently
+  - Line rendering for streaking particles: normalize velocity vector, draw line from position backward along velocity direction with length proportional to speed
+  - `isTransition` flag check goes before the default `else` branch in `renderParticles()` — same pattern as `isNitro`
+  - Particle count capped at 20 (sky) and 30 (space) per the AC — spawned once at transition start, not per-frame
+---
