@@ -10,6 +10,11 @@ Started: Sat Mar 14 19:39:09 -03 2026
 - Phase transition update goes in `playingState.update()` after the score update block
 - Build: `node_modules/.bin/vite build` (vite not in PATH; use local binary)
 - Pre-generated data arrays (speedLineData, skyCloudData, spaceStarData) go near top of file after constants, use IIFE pattern
+- Phase-specific rendering uses extracted helper functions: `renderSkyElements()`, `renderSpaceElements()`, `renderRoadRumbleStrips()`, `renderRoadSurface()` — reused by both static and transition renderers
+- `PHASE_BG_COLORS` maps phase names to `{top, bottom}` hex colors for gradient interpolation
+- `lerpColor(hex1, hex2, t)` utility near top of file for RGB interpolation between hex colors
+- Transition rendering uses `ctx.globalAlpha` to fade elements in/out — always save/restore `globalAlpha`
+- `renderPlayer()` uses early-return per phase — add new phases as `if (phase === 'X' || transitioning to/from X) { ... return; }` before default road car code. Order matters: space block before sky block (sky→space transition has `from === 'sky'`)
 
 ---
 
@@ -54,4 +59,50 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - `_timer` pattern: store raw linear time in `phaseTransition._timer`, compute eased `progress` from it each frame — avoids compounding easing errors
   - The score trigger logic must fire even when phaseTriggered.sky is already set (space check is independent), so both checks run every frame
   - Build runs as `node_modules/.bin/vite build` since `vite` is not in PATH
+---
+
+## 2026-03-14 - US-004
+- Implemented animated transition between phase scenarios
+- Added `lerpColor(hex1, hex2, t)` utility for RGB hex color interpolation
+- Added `PHASE_BG_COLORS` constant mapping phases to gradient top/bottom colors
+- Added `renderRoadTransition(ctx, scrollOffset, pt)` — blends background gradient via lerp, fades out "from" elements with `globalAlpha = 1 - progress`, fades in "to" elements with `globalAlpha = progress`
+- Extracted reusable rendering helpers: `renderSkyElements()`, `renderSpaceElements()`, `renderRoadRumbleStrips()`, `renderRoadSurface()`
+- Refactored `renderRoadSky()` and `renderRoadSpace()` to reuse extracted helpers (DRY)
+- `renderRoad()` now dispatches to `renderRoadTransition()` when `phaseTransition.active`
+- Vehicles rendered separately in `renderTraffic()` — unaffected by transition, continue scrolling normally
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `ctx.globalAlpha` multiplies with all subsequent draw operations — save/restore it to avoid leaking state
+  - Extracting phase-specific elements into reusable helpers (e.g. `renderSkyElements`) makes transition blending trivial via globalAlpha
+  - Background gradients must be interpolated per-channel (RGB lerp) — can't just alpha-blend two gradients on top of each other
+  - The `renderRoadTransition` dispatches both "from" and "to" element renderers, so each phase's elements are drawn independently
+---
+
+## 2026-03-14 - US-005
+- Implemented sky phase player sprite: car with triangular white wings
+- `renderPlayer()` now checks `gameState.phase` and `phaseTransition` to render phase-specific sprites
+- Wings grow from 0→full size during road→sky transition (scale = progress), shrink during sky→space transition (scale = 1-progress)
+- Added 3 white semi-transparent wind trail lines behind the car in sky phase, animated with scrollOffset
+- Hitbox unchanged — wings are purely decorative, drawn outside the car body bounds
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `renderPlayer()` uses early-return pattern per phase — sky sprite block returns early after drawing, default road car is at the bottom
+  - Wing scale tied to `phaseTransition.progress` — for "to" transitions it grows, for "from" transitions it shrinks (1-progress)
+  - Wind trail uses `gameState.scrollOffset * 0.5 % 20` for subtle scroll animation — same pattern can be used for other trail effects
+  - Phase-specific sprite rendering must handle both static phase AND active transitions (check `pt.to` and `pt.from`)
+---
+
+## 2026-03-14 - US-006
+- Implemented space phase player sprite: triangular cyan spaceship with animated thrusters
+- Ship has aerodynamic triangular body (#00E5FF), dark cockpit at top, 2 orange thruster housings (6×10px) at rear
+- Thruster flames oscillate height 8-14px using sin(elapsedTime*10), color interpolates between #FF6600 and #FFCC00
+- Crossfade transition sky→space: sky car+wings drawn with alpha (1-progress), space ship drawn with alpha (progress)
+- Space block placed BEFORE sky block in renderPlayer() — since space phase also involves sky transitions (sky→space), it must be checked first
+- Hitbox unchanged
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Space sprite block must come before sky block because sky→space transition has `from === 'sky'` which would match the sky condition — order matters for early-return pattern
+  - Crossfade between two sprite styles requires drawing BOTH sprites with complementary globalAlpha values (1-progress and progress)
+  - Flame animation uses `gameState.elapsedTime * 10` for fast oscillation — multiply by higher values for faster animation
+  - Two flames offset by constant (sin(t) and sin(t+2)) create natural asymmetric flicker
 ---

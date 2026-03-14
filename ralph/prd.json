@@ -74,7 +74,7 @@
         "Verificar no browser usando dev-browser skill — transição suave road→sky e sky→space, sem flicker"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Depende de US-002 e US-003 estarem implementados. Apenas modifica renderRoad() para usar o progress do phaseTransition."
     },
     {
@@ -91,7 +91,7 @@
         "Verificar no browser usando dev-browser skill — carro com asas visível, crescimento suave durante transição"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Asas são puramente decorativas — fora do hitbox."
     },
     {
@@ -108,7 +108,7 @@
         "Verificar no browser usando dev-browser skill — nave visível, propulsores animados, transição suave"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
