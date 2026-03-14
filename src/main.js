@@ -1573,6 +1573,9 @@ let chromaIntensity = 1.0;  // peak intensity: 1.0 = full (collision), 0.6 = nit
 // Shield state
 let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
 
+// Camera roll state (US-006)
+let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -2157,6 +2160,8 @@ function resetGameState() {
   chromaTimer = 0;
   // Reset motion blur ghost (US-003)
   ghostValid = false;
+  // Reset camera roll (US-006)
+  cameraRoll = 0;
   // Reset shield state
   gameState.player.hasShield = false;
   gameState.shieldItems = [];
@@ -2344,6 +2349,11 @@ function updatePlayer(dt) {
       ddaCleanTimer = 0;
     }
   }
+
+  // Camera roll: ease toward target based on lateral input (US-006)
+  const rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  cameraRoll += (rollTarget - cameraRoll) * 0.12;
+  cameraRoll = Math.max(-3, Math.min(3, cameraRoll));
 }
 
 function renderPlayer(ctx, player) {
@@ -3552,6 +3562,15 @@ const playingState = {
   },
 
   render(ctx) {
+    // --- World layer with camera roll (US-006) ---
+    // Rotate canvas around its center; HUD is drawn after restore so it stays level
+    ctx.save();
+    if (cameraRoll !== 0) {
+      ctx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      ctx.rotate(cameraRoll * Math.PI / 180);
+      ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
+    }
+
     renderRoad(ctx, gameState.scrollOffset);
     // Motion blur: ghost of previous frame composited behind current world (US-003)
     renderMotionGhost();
@@ -3578,7 +3597,11 @@ const playingState = {
     // Speed vignette — tunnel vision effect (darkens edges at high speed)
     renderSpeedVignette(ctx);
 
+    ctx.restore();
+    // --- End world layer ---
+
     // Chromatic aberration — RGB split on collision/nitro (US-002)
+    // Applied after restore so it post-processes the full rolled frame
     renderChromaticAberration();
 
     // Fuel bar HUD (full-width bar at top + low-fuel vignette)
