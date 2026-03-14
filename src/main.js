@@ -1798,6 +1798,7 @@ function resizeCanvas() {
   positionTouchButtons(displayWidth, displayHeight);
   positionRankingBtn();
   positionRankingBackBtn();
+  positionGameOverAd();
 }
 
 function positionTouchButtons(displayWidth, displayHeight) {
@@ -1824,6 +1825,9 @@ let nameFormEl = null;
 // Declared early so positionRankingBtn/positionRankingBackBtn guard works when resizeCanvas() is called below
 let rankingBtnEl = null;
 let rankingBackBtnEl = null;
+// Declared early so positionGameOverAd() guard works when resizeCanvas() is called below
+let gameOverAdEl = null;
+let gameOverAdLabelEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -2035,6 +2039,54 @@ function positionRankingBackBtn() {
   const scale = rect.width / CANVAS_WIDTH;
   rankingBackBtnEl.style.left = `${rect.left + rect.width / 2 - 60}px`;
   rankingBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+}
+
+// --- Game Over Ad Slot (US-005) ---
+gameOverAdEl = document.getElementById('ad-gameover');
+gameOverAdLabelEl = document.createElement('div');
+gameOverAdLabelEl.id = 'ad-gameover-label';
+gameOverAdLabelEl.textContent = 'PUBLICIDADE';
+gameOverAdLabelEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:50',
+  'color:rgba(255,255,255,0.45)',
+  'font:10px monospace',
+  'text-align:center',
+].join(';') + ';';
+document.body.appendChild(gameOverAdLabelEl);
+
+function positionGameOverAd() {
+  if (!gameOverAdEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const maxW = window.innerWidth <= 480 ? Math.min(300, window.innerWidth * 0.9) : 300;
+  const centerX = rect.left + rect.width / 2;
+  const adTop = rect.top + 90 * scale;
+  gameOverAdEl.style.left = `${centerX - maxW / 2}px`;
+  gameOverAdEl.style.top = `${adTop}px`;
+  gameOverAdEl.style.width = `${maxW}px`;
+  gameOverAdEl.style.maxWidth = `${maxW}px`;
+  if (gameOverAdLabelEl) {
+    gameOverAdLabelEl.style.left = `${centerX - maxW / 2}px`;
+    gameOverAdLabelEl.style.top = `${adTop - 14}px`;
+    gameOverAdLabelEl.style.width = `${maxW}px`;
+  }
+}
+
+function showGameOverAd() {
+  const count = parseInt(sessionStorage.getItem('roadrush_game_count') || '0', 10);
+  sessionStorage.setItem('roadrush_game_count', String(count + 1));
+  if (count % 2 === 0) {
+    positionGameOverAd();
+    if (gameOverAdEl) gameOverAdEl.style.display = 'block';
+    if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'block';
+  }
+}
+
+function hideGameOverAd() {
+  if (gameOverAdEl) gameOverAdEl.style.display = 'none';
+  if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'none';
 }
 
 // Abort controller for title ranking fetch
@@ -4677,11 +4729,13 @@ const gameOverState = {
     AudioManager.startGameOverDrone();
     showNameForm();
     fetchRanking();
+    showGameOverAd();
   },
 
   onExit() {
     AudioManager.stopGameOverDrone();
     hideNameForm();
+    hideGameOverAd();
   },
 
   update(dt) {
