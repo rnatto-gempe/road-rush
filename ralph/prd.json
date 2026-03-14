@@ -190,7 +190,7 @@
         "Build passa sem erros (npm run build)"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "AudioManager pattern: check this.ctx, create osc+gain, connect to masterGain, schedule, cleanup onended."
     },
     {

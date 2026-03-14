@@ -166,3 +166,18 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - Blinking lights use `Math.floor(elapsedTime / 0.5) % 2` for 0.5s toggle — simple pattern for any blinking effect
   - Fire trail flame interpolation: use sin() for height oscillation and lerp factor between two colors simultaneously
 ---
+
+## 2026-03-14 - US-011
+- Added `playPhaseTransition(fromPhase, toPhase)` method to AudioManager
+- road→sky: ascending sawtooth sweep 200Hz→600Hz over 2s, gain 0.15 with fade out
+- sky→space: bass drop sine 120Hz→40Hz over 1.5s (gain 0.2) + ethereal sine 800Hz (gain 0.05, 1.5s, starts at 0.5s offset)
+- Modified `updateEngine()` to be phase-aware: sky phase applies +50% frequency boost, space phase switches to sine wave 80Hz at gain 0.05
+- `updateEngine()` restores sawtooth waveform when not in space phase (handles reset back to road)
+- Called `AudioManager.playPhaseTransition()` from phase trigger blocks in `playingState.update()`
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `updateEngine()` accesses `gameState.phase` directly — phase-aware audio modifications go here for persistent drone changes
+  - `osc.type` can be changed on a live oscillator without stopping it — useful for smooth waveform transitions
+  - Phase transition SFX are fire-and-forget: create osc+gain, schedule start/stop, cleanup in onended — same pattern as `playRiser()`
+  - `exponentialRampToValueAtTime` is better than `linearRamp` for frequency sweeps (perceptually linear pitch change)
+---
