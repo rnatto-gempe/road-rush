@@ -83,7 +83,7 @@
         "Verify in browser using dev-browser skill: road visibly narrows at high speed; traffic/player position unchanged"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

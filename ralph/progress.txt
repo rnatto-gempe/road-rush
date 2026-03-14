@@ -15,6 +15,7 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - The game runs at 60fps fixed timestep (FIXED_DT = 1/60); scrollSpeed ramps from 200 to 800 px/s over the run
 - Bloom pattern: clear offscreen canvas, set `filter = 'blur(8px)'`, draw shapes at 2× scale, reset `filter = 'none'`, composite onto main canvas with `globalCompositeOperation = 'lighter'`; must call AFTER captureGhostFrame
 - Particle type flags: add typed flags (e.g., `isNitro: true`) at spawn time rather than comparing color strings in the render loop
+- Perspective trapezoid road: only draw geometry changes (fovTopLeft/fovTopRight at y=0, ROAD_LEFT/ROAD_RIGHT at y=CANVAS_HEIGHT); all game logic keeps using original constants. Converging lane lines use `xAtY(y) = laneXTop + (laneXBottom-laneXTop)*(y/CANVAS_HEIGHT)` extended beyond canvas for scrollable dashes
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights
@@ -75,4 +76,21 @@ Started: Fri Mar 13 19:37:51 -03 2026
   - "Previous frame ghost" pattern: capture AFTER world render, draw AFTER background clear but BEFORE current world render — gives trailing effect without affecting HUD
   - `ghostValid` flag prevents a stale ghost from flickering on first frame above threshold
   - scrollSpeed ramps from 200 → 600 over ~80s (phase1Rate=5 px/s/s), so this effect only appears late in runs — hard to verify in browser without a long session
+---
+
+## 2026-03-13 - US-005
+- Implemented Dynamic FOV: road perspective convergence with speed
+- Added `getRoadFovFactor()`: returns convergence factor 0→0.30 (0→15% over 0–600 px/s, 15→30% over 600–800 px/s)
+- Modified `renderRoad()` to draw road as a trapezoid (narrower at top) instead of a rectangle
+- `fovTopLeft`/`fovTopRight`: top edge of road converges toward road center by `(ROAD_WIDTH/2) * fovFactor` on each side
+- Trapezoid path: moveTo(fovTopLeft,0) → lineTo(fovTopRight,0) → lineTo(ROAD_RIGHT, CANVAS_HEIGHT) → lineTo(ROAD_LEFT, CANVAS_HEIGHT)
+- White edge border lines now draw from converging top points to original bottom points (diagonal)
+- Lane markers: each lane's top x = `roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor)`, extended beyond canvas for dash scrolling via the "extend beyond canvas" technique used for vertical lines
+- Game logic (player/traffic positions, ROAD_LEFT/ROAD_RIGHT/LANE_WIDTH) completely unaffected
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Perspective trapezoid: only the DRAW geometry changes — all game logic (collision, spawn, player position) continues to use ROAD_LEFT/ROAD_RIGHT constants
+  - "Extend beyond canvas" dash scrolling technique works for diagonal/converging lines too: compute `xAtY(y) = laneXTop + dx*(y/CANVAS_HEIGHT)` then draw from `(xAtY(-dashScrollOffset), -dashScrollOffset)` to `(xAtY(H+DASH_PERIOD), H+DASH_PERIOD)` — no lineDashOffset needed
+  - roadCenter = 200 is the axis of symmetry for all perspective calculations; fovFactor shrinks each side equally
+  - At 200 px/s (initial speed), fovFactor ≈ 5% — very subtle convergence; visually "no change" matches the AC requirement
 ---
