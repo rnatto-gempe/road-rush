@@ -886,7 +886,7 @@ const AudioManager = {
   },
 
   // ─── Rhythmic beat scheduler ───
-  beat: { running: false, nextBeatTime: 0, beatIndex: 0, scheduledUpTo: 0 },
+  beat: { running: false, nextBeatTime: 0, beatIndex: 0, scheduledUpTo: 0, pendingBeats: [] },
 
   startBeat() {
     if (!this.ctx) return;
@@ -894,12 +894,14 @@ const AudioManager = {
     this.beat.nextBeatTime = this.ctx.currentTime + 0.1; // slight delay to sync
     this.beat.beatIndex = 0;
     this.beat.scheduledUpTo = this.beat.nextBeatTime;
+    this.beat.pendingBeats = [];
   },
 
   stopBeat() {
     this.beat.running = false;
     this.beat.beatIndex = 0;
     this.beat.scheduledUpTo = 0;
+    this.beat.pendingBeats = [];
   },
 
   // Schedule individual beat sounds at precise times
@@ -975,6 +977,9 @@ const AudioManager = {
 
       // Kick on every beat
       this._scheduleKick(beatTime);
+      // Queue beat time for visual HUD pulse (US-008)
+      this.beat.pendingBeats.push(beatTime);
+      if (this.beat.pendingBeats.length > 24) this.beat.pendingBeats.shift();
 
       // Sidechain-like duck: briefly reduce bass gain when kick fires
       if (this.bass.running && this.bass.gain) {
@@ -1575,6 +1580,15 @@ let shieldBreakFlash = 0; // countdown for bright border flash after shield abso
 
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
+
+// Beat-pulse HUD state (US-008)
+// Each pulse value decays from 1→0 exponentially; drives scale/alpha in HUD render functions
+let beatPulse = 0;    // fires on every kick beat → animates score + speed indicator
+let nitroPulse = 0;   // fires on beat when nitro is active → animates nitro meter glow
+let coinPulse = 0;    // fires on coin collect (not beat-driven) → animates score scale
+// Precompute per-frame decay factors: reach ~0.1% of initial value by target duration at 60 fps
+const BEAT_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.08); // ~0 by 80 ms
+const COIN_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.06); // ~0 by 60 ms
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -2197,6 +2211,10 @@ function resetGameState() {
   ghostValid = false;
   // Reset camera roll (US-006)
   cameraRoll = 0;
+  // Reset beat-pulse HUD state (US-008)
+  beatPulse = 0;
+  nitroPulse = 0;
+  coinPulse = 0;
   // Reset shield state
   gameState.player.hasShield = false;
   gameState.shieldItems = [];
@@ -3013,6 +3031,7 @@ function updateCoins(dt) {
       coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
       AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
+      coinPulse = 1.0; // beat-pulse HUD: coin counter bounce (US-008)
     }
   }
 
@@ -3309,6 +3328,16 @@ function renderFuelHUD(ctx) {
 function renderScoreHUD(ctx) {
   const scoreStr = Math.floor(gameState.displayedScore).toString();
 
+  // Beat-pulse scale (US-008): beat → 1.08×, coin collect → 1.15×, take larger
+  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse);
+  // Scale around score anchor (top-right)
+  const anchorX = CANVAS_WIDTH - 8;
+  const anchorY = 20;
+  ctx.save();
+  ctx.translate(anchorX, anchorY);
+  ctx.scale(scoreScale, scoreScale);
+  ctx.translate(-anchorX, -anchorY);
+
   ctx.font = 'bold 24px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
@@ -3320,6 +3349,22 @@ function renderScoreHUD(ctx) {
   ctx.fillStyle = '#FFFFFF';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 8, 8);
 
+  ctx.restore();
+
+  // Speed indicator — small text below score, pulses with beat (US-008)
+  const speedKmh = Math.round(gameState.scrollSpeed * 0.36);
+  const speedScale = 1 + 0.08 * beatPulse;
+  ctx.save();
+  ctx.translate(anchorX, anchorY + 22);
+  ctx.scale(speedScale, speedScale);
+  ctx.translate(-anchorX, -(anchorY + 22));
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.fillText(`${speedKmh} km/h`, CANVAS_WIDTH - 8, anchorY + 22);
+  ctx.restore();
+
   // Survivor flash
   if (survivorFlash !== null) {
     ctx.globalAlpha = Math.min(1, survivorFlash.timer) * Math.min(1, survivorFlash.timer / 0.3);
@@ -3330,6 +3375,37 @@ function renderScoreHUD(ctx) {
     ctx.fillText('SURVIVOR +300', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
     ctx.globalAlpha = 1;
   }
+}
+
+// --- Nitro Meter HUD (US-008) ---
+// Small bar at bottom-center; visible when nitro is active; glows on beat.
+function renderNitroHUD(ctx) {
+  if (nitroTimer <= 0 && nitroEaseTimer <= 0) return;
+  const pct = nitroTimer > 0
+    ? nitroTimer / NITRO_BOOST_DURATION
+    : (nitroEaseTimer / NITRO_EASE_DURATION) * 0.5; // ease-out shows at half intensity
+  const baseAlpha = 0.7 + 0.3 * nitroPulse; // glows brighter (+0.3 max) on each beat
+
+  const barW = 80;
+  const barH = 5;
+  const x = CANVAS_WIDTH / 2 - barW / 2;
+  const y = CANVAS_HEIGHT - 18;
+
+  ctx.save();
+  ctx.globalAlpha = baseAlpha;
+  // Background track
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, barW, barH);
+  // Cyan fill
+  ctx.fillStyle = '#00FFFF';
+  ctx.fillRect(x, y, barW * pct, barH);
+  // Label
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#00FFFF';
+  ctx.fillText('NITRO', CANVAS_WIDTH / 2, y - 1);
+  ctx.restore();
 }
 
 // --- Mute Icon HUD ---
@@ -3482,6 +3558,21 @@ const playingState = {
     AudioManager.updateBeat(gameState.scrollSpeed);
     AudioManager.updatePad(gameState.scrollSpeed);
     AudioManager.updateArp(gameState.scrollSpeed);
+
+    // Beat-pulse HUD detection (US-008): fire when AudioContext time crosses a scheduled beat
+    if (AudioManager.ctx && AudioManager.beat.pendingBeats.length > 0) {
+      const now = AudioManager.ctx.currentTime;
+      while (AudioManager.beat.pendingBeats.length > 0 && AudioManager.beat.pendingBeats[0] <= now) {
+        AudioManager.beat.pendingBeats.shift();
+        beatPulse = 1.0;
+        if (nitroTimer > 0) nitroPulse = 1.0;
+      }
+    }
+    // Exponential decay of beat pulses (each approaches 0 by its target duration)
+    if (beatPulse  > 0.001) beatPulse  *= BEAT_PULSE_DECAY; else beatPulse  = 0;
+    if (nitroPulse > 0.001) nitroPulse *= BEAT_PULSE_DECAY; else nitroPulse = 0;
+    if (coinPulse  > 0.001) coinPulse  *= COIN_PULSE_DECAY; else coinPulse  = 0;
+
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
@@ -3651,6 +3742,9 @@ const playingState = {
 
     // Combo counter (center-top, shown when combo >= 2)
     renderComboHUD(ctx);
+
+    // Nitro meter (bottom-center, visible during boost; beat-reactive glow) (US-008)
+    renderNitroHUD(ctx);
 
     // Show elapsed time overlay
     ctx.font = '14px monospace';
