@@ -1593,6 +1593,8 @@ let comboExpireShakeTimer = 0; // brief shake when combo expires (0.15s)
 let comboExpireFadeTimer = 0;  // fade-out after combo expires (0.3s)
 let comboMilestoneFlash = 0;   // white flash at milestone levels (0.1s)
 let comboGlowAlpha = 0;        // combo edge glow intensity (fades in/out)
+let scorePunchScale = 0;       // score punch animation (0 = none, decays to 0)
+let scorePunchColor = null;    // score punch color from combo tier
 
 // Near miss tracking for game over stats
 let nearMissCount = 0;
@@ -2851,6 +2853,10 @@ function triggerNearMiss (v) {
   // Near miss screen shake — intensity scales with combo, won't override stronger collision shake
   triggerShake(0.12, Math.min(2 + comboMultiplier, 5));
 
+  // Score punch animation (US-007)
+  scorePunchScale = Math.min(0.4, 0.15 + comboMultiplier * 0.05);
+  scorePunchColor = getComboColor(comboMultiplier);
+
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
   const vCenterX = v.x + v.width / 2;
@@ -3043,6 +3049,8 @@ function resetGameState () {
   comboExpireFadeTimer = 0;
   comboMilestoneFlash = 0;
   comboGlowAlpha = 0;
+  scorePunchScale = 0;
+  scorePunchColor = null;
   nearMissCount = 0;
   bestCombo = 0;
   nearMissBonusTotal = 0;
@@ -4216,7 +4224,8 @@ function renderScoreHUD (ctx) {
   const scoreStr = Math.floor(gameState.displayedScore).toString();
 
   // Beat-pulse scale (US-008): beat → 1.08×, coin collect → 1.15×, take larger
-  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse);
+  // Score punch (US-007): adds combo-scaled punch on near miss
+  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse) + scorePunchScale;
   // Scale around score anchor (top-right)
   const anchorX = CANVAS_WIDTH - 8;
   const anchorY = 20;
@@ -4232,8 +4241,8 @@ function renderScoreHUD (ctx) {
   // Drop shadow
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 6, 10);
-  // Main score
-  ctx.fillStyle = '#FFFFFF';
+  // Main score — flash combo color during punch, blend back to white as it decays
+  ctx.fillStyle = (scorePunchScale > 0 && scorePunchColor) ? scorePunchColor : '#FFFFFF';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 8, 8);
 
   ctx.restore();
@@ -4820,6 +4829,9 @@ const playingState = {
     } else if (glowTarget < comboGlowAlpha) {
       comboGlowAlpha = Math.max(0, comboGlowAlpha - dt / 0.5);
     }
+
+    // Decay score punch scale (US-007)
+    if (scorePunchScale > 0) scorePunchScale = Math.max(0, scorePunchScale - dt * 3);
 
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
