@@ -99,6 +99,8 @@ const SCORE_LERP_RATE = 8;       // display score lerp speed
 const NEAR_MISS_DIST = 20;           // px sprite-edge to sprite-edge threshold
 const NEAR_MISS_BASE_POINTS = 50;    // base points per near miss (× combo multiplier)
 const NEAR_MISS_FLASH_DURATION = 0.3; // seconds for vehicle side flash
+const DANGER_FLASH_PROXIMITY = 120;  // px center-to-center vertical dist for danger flash (US-010)
+const DANGER_FLASH_DECAY = 0.3;      // seconds for danger flash to decay to zero (US-010)
 const COMBO_RESET_TIME = 3.0;        // seconds without near miss before combo resets
 const COMBO_SCALE_DURATION = 0.2;    // scale-in animation duration
 
@@ -108,7 +110,7 @@ const COIN_POINTS = 100;               // points per coin collected
 const COIN_SPAWN_MIN = 600;            // px traveled min between cluster spawns
 const COIN_SPAWN_MAX = 1000;           // px traveled max between cluster spawns
 const COIN_COLLECT_ANIM_DURATION = 0.2;
-const COIN_FLOAT_DURATION = 0.8;       // float '+100' text duration
+const FLOAT_TEXT_DURATION = 0.9;       // float pickup text duration (US-009)
 
 // Nitro boost constants
 const NITRO_ITEM_HALF = 10;            // half-size (so sprite is ~20px)
@@ -190,6 +192,1383 @@ const VEHICLE_TYPES = {
 // Debug mode
 let debugMode = false;
 
+// ─── Audio Manager (Web Audio API) ───
+const AudioManager = {
+  ctx: null,
+  masterGain: null,
+  muted: false,
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    // Limiter/compressor on the master bus to prevent clipping
+    const compressor = this.ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-6, this.ctx.currentTime);
+    compressor.ratio.setValueAtTime(10, this.ctx.currentTime);
+    compressor.knee.setValueAtTime(3, this.ctx.currentTime);
+    compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
+    compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
+    this.masterGain.connect(compressor);
+    compressor.connect(this.ctx.destination);
+  },
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  },
+
+  toggleMute() {
+    if (!this.ctx) return;
+    this.muted = !this.muted;
+    this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 1, this.ctx.currentTime, 0.01);
+  },
+
+  // Play a tone with gain envelope to avoid clicks
+  playTone(freq, duration, type, gainValue) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(gainValue || 0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + duration - 0.01);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + duration);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // ─── Engine drone (long-lived nodes) ───
+  engine: { osc: null, filter: null, gain: null },
+
+  // ─── Road ambience (long-lived noise node) ───
+  road: { source: null, filter: null, gain: null, buffer: null },
+
+  // ─── Nitro boost harmonic ───
+  nitro: { osc: null, gain: null, active: false },
+
+  startEngine() {
+    if (!this.ctx) return;
+    this.stopEngine(); // clean up any existing
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, now);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.15, now, 0.05); // smooth ramp up
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    this.engine = { osc, filter, gain };
+  },
+
+  stopEngine() {
+    if (!this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    this.engine.gain.gain.setTargetAtTime(0, now, 0.05);
+    const osc = this.engine.osc;
+    const filter = this.engine.filter;
+    const gain = this.engine.gain;
+    // Stop after fade-out completes (~0.25s)
+    setTimeout(() => {
+      try { osc.stop(); } catch (_) {}
+      osc.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 250);
+    this.engine = { osc: null, filter: null, gain: null };
+  },
+
+  // Update engine pitch/volume based on scroll speed (call every frame)
+  updateEngine(scrollSpeed) {
+    if (!this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    // Map scrollSpeed 200→800 to frequency 60→180Hz
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    let freq = 60 + t * 120;
+    // Nitro boost: raise pitch by ~30%
+    if (this.nitro.active) freq *= 1.3;
+    this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
+    // Filter cutoff maps 400→800Hz
+    this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
+    // Volume: reduced to ~0.1 when musical elements are active (pad/bass/arpeggio)
+    const musicActive = this.pad.active || this.bass.running;
+    const vol = musicActive ? 0.10 : (0.08 + t * 0.12);
+    this.engine.gain.gain.setTargetAtTime(vol, now, 0.05);
+  },
+
+  // ─── Road ambience (long-lived looping noise) ───
+  startRoad() {
+    if (!this.ctx) return;
+    this.stopRoad();
+    const now = this.ctx.currentTime;
+    // Create a long white noise buffer (2s, looped)
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this.road.buffer) {
+      this.road.buffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this.road.buffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.road.buffer;
+    source.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(500, now);
+    filter.Q.setValueAtTime(0.8, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.04, now, 0.05);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    this.road.source = source;
+    this.road.filter = filter;
+    this.road.gain = gain;
+  },
+
+  stopRoad() {
+    if (!this.road.source) return;
+    const now = this.ctx.currentTime;
+    this.road.gain.gain.setTargetAtTime(0, now, 0.05);
+    const source = this.road.source;
+    const filter = this.road.filter;
+    const gain = this.road.gain;
+    setTimeout(() => {
+      try { source.stop(); } catch (_) {}
+      source.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 250);
+    this.road.source = null;
+    this.road.filter = null;
+    this.road.gain = null;
+  },
+
+  updateRoad(scrollSpeed) {
+    if (!this.road.source) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    // Filter center 300→800Hz with speed
+    this.road.filter.frequency.setTargetAtTime(300 + t * 500, now, 0.05);
+    // Bandwidth widens with speed (Q decreases = wider)
+    this.road.filter.Q.setTargetAtTime(0.8 - t * 0.4, now, 0.05);
+    // Volume 0.03→0.10 with speed
+    const vol = 0.03 + t * 0.07;
+    this.road.gain.gain.setTargetAtTime(vol, now, 0.05);
+  },
+
+  // ─── Nitro boost audio effect ───
+  startNitro() {
+    if (!this.ctx || !this.engine.osc) return;
+    if (this.nitro.active) return;
+    const now = this.ctx.currentTime;
+    // Add high-freq sawtooth harmonic at ~2x engine freq
+    const engineFreq = this.engine.osc.frequency.value;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(engineFreq * 2, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.08, now, 0.05);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    this.nitro.osc = osc;
+    this.nitro.gain = gain;
+    this.nitro.active = true;
+    // Engine pitch boost handled by updateEngine via nitro.active flag
+  },
+
+  stopNitro() {
+    if (!this.nitro.active) return;
+    const now = this.ctx.currentTime;
+    if (this.nitro.gain) {
+      this.nitro.gain.gain.setTargetAtTime(0, now, 0.05);
+    }
+    const osc = this.nitro.osc;
+    const gain = this.nitro.gain;
+    setTimeout(() => {
+      try { if (osc) osc.stop(); } catch (_) {}
+      if (osc) osc.disconnect();
+      if (gain) gain.disconnect();
+    }, 250);
+    this.nitro.osc = null;
+    this.nitro.gain = null;
+    this.nitro.active = false;
+  },
+
+  updateNitro() {
+    if (!this.nitro.active || !this.nitro.osc || !this.engine.osc) return;
+    const now = this.ctx.currentTime;
+    // Keep nitro harmonic tracking ~2x the boosted engine freq
+    const engineFreq = this.engine.osc.frequency.value;
+    this.nitro.osc.frequency.setTargetAtTime(engineFreq * 2, now, 0.05);
+  },
+
+  // Create filtered noise burst
+  createNoise(duration, filterFreq, filterType) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = filterType || 'lowpass';
+    filter.frequency.setValueAtTime(filterFreq || 1000, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + duration - 0.01);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Duck all long-lived musical elements (pad, bass) to 0.3x for 0.5s on impact
+  duckMusicElements() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const endTime = now + 0.5;
+    if (this.pad.active && this.pad.gain) {
+      const v = this.pad.gain.gain.value;
+      this.pad.gain.gain.setValueAtTime(v * 0.3, now);
+      this.pad.gain.gain.setTargetAtTime(v, endTime, 0.05);
+    }
+    if (this.bass.running && this.bass.gain) {
+      this.bass.gain.gain.setValueAtTime(0.3, now);
+      this.bass.gain.gain.setTargetAtTime(1.0, endTime, 0.05);
+    }
+  },
+
+  // ─── Collision & Explosion SFX ───
+
+  // Metallic crash: short noise burst (high-pass ~2kHz) + low-freq impact thump (sine ~60Hz)
+  playCrash() {
+    if (!this.ctx) return;
+    this.duckMusicElements();
+    const now = this.ctx.currentTime;
+
+    // High-pass noise burst (metallic clang)
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.15);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const hpFilter = this.ctx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.setValueAtTime(2000, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.5, now + 0.005);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    noiseSrc.connect(hpFilter);
+    hpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.15);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); hpFilter.disconnect(); noiseGain.disconnect(); };
+
+    // Low-freq impact thump
+    const thump = this.ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(60, now);
+    const thumpGain = this.ctx.createGain();
+    thumpGain.gain.setValueAtTime(0, now);
+    thumpGain.gain.linearRampToValueAtTime(0.5, now + 0.005);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+    thump.start(now);
+    thump.stop(now + 0.15);
+    thump.onended = () => { thump.disconnect(); thumpGain.disconnect(); };
+  },
+
+  // Layered explosion boom: low sine sweep + noise burst + crackle
+  playExplosion() {
+    if (!this.ctx) return;
+    this.duckMusicElements();
+    const now = this.ctx.currentTime;
+
+    // Low sine sweep 80→30Hz over 0.5s
+    const boom = this.ctx.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(80, now);
+    boom.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+    const boomGain = this.ctx.createGain();
+    boomGain.gain.setValueAtTime(0, now);
+    boomGain.gain.linearRampToValueAtTime(0.8, now + 0.01);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    boom.connect(boomGain);
+    boomGain.connect(this.masterGain);
+    boom.start(now);
+    boom.stop(now + 0.5);
+    boom.onended = () => { boom.disconnect(); boomGain.disconnect(); };
+
+    // Noise burst with decaying low-pass filter
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.8);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const lpFilter = this.ctx.createBiquadFilter();
+    lpFilter.type = 'lowpass';
+    lpFilter.frequency.setValueAtTime(4000, now);
+    lpFilter.frequency.exponentialRampToValueAtTime(200, now + 0.8);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.7, now + 0.01);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+    noiseSrc.connect(lpFilter);
+    lpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.8);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); lpFilter.disconnect(); noiseGain.disconnect(); };
+
+    // Crackle: 4 random short noise bursts spaced over 1.5s
+    for (let i = 0; i < 4; i++) {
+      const delay = 0.2 + Math.random() * 1.3;
+      const crackleLen = Math.floor(sampleRate * 0.06);
+      const crackleBuf = this.ctx.createBuffer(1, crackleLen, sampleRate);
+      const crackleData = crackleBuf.getChannelData(0);
+      for (let j = 0; j < crackleLen; j++) crackleData[j] = Math.random() * 2 - 1;
+      const crackleSrc = this.ctx.createBufferSource();
+      crackleSrc.buffer = crackleBuf;
+      const crackleFilter = this.ctx.createBiquadFilter();
+      crackleFilter.type = 'highpass';
+      crackleFilter.frequency.setValueAtTime(1500, now);
+      const crackleGain = this.ctx.createGain();
+      crackleGain.gain.setValueAtTime(0, now + delay);
+      crackleGain.gain.linearRampToValueAtTime(0.3, now + delay + 0.005);
+      crackleGain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.06);
+      crackleSrc.connect(crackleFilter);
+      crackleFilter.connect(crackleGain);
+      crackleGain.connect(this.masterGain);
+      crackleSrc.start(now + delay);
+      crackleSrc.stop(now + delay + 0.06);
+      crackleSrc.onended = () => { crackleSrc.disconnect(); crackleFilter.disconnect(); crackleGain.disconnect(); };
+    }
+  },
+
+  // Shield break: crystalline shatter — high-freq sine sweep 2kHz→500Hz + short noise burst
+  playShieldBreak() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // High-freq sine sweep 2kHz→500Hz over 0.2s
+    const sweep = this.ctx.createOscillator();
+    sweep.type = 'sine';
+    sweep.frequency.setValueAtTime(2000, now);
+    sweep.frequency.exponentialRampToValueAtTime(500, now + 0.2);
+    const sweepGain = this.ctx.createGain();
+    sweepGain.gain.setValueAtTime(0, now);
+    sweepGain.gain.linearRampToValueAtTime(0.4, now + 0.01);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    sweep.connect(sweepGain);
+    sweepGain.connect(this.masterGain);
+    sweep.start(now);
+    sweep.stop(now + 0.2);
+    sweep.onended = () => { sweep.disconnect(); sweepGain.disconnect(); };
+
+    // Short noise burst
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.1);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const hpFilter = this.ctx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.setValueAtTime(3000, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.35, now + 0.005);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    noiseSrc.connect(hpFilter);
+    hpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.1);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); hpFilter.disconnect(); noiseGain.disconnect(); };
+  },
+
+  // ─── Collectible Pickup SFX ───
+
+  // Coin cluster sequence counter (ascending pitch per rapid coin)
+  coinSeq: { count: 0, resetTimer: 0 },
+
+  // Fuel pickup: quick major triad chord (~0.15s) derived from current chord root
+  playFuelPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const root = this.PAD_CHORDS[chordIdx][0]; // root note of current chord
+    // Major triad: root, major 3rd (+4 semitones), perfect 5th (+7 semitones)
+    const triadFreqs = [root, root * Math.pow(2, 4 / 12), root * Math.pow(2, 7 / 12)];
+    for (const freq of triadFreqs) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+      gain.gain.linearRampToValueAtTime(0, now + 0.14);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Coin pickup: note from A minor pentatonic (steps up one scale degree per consecutive coin)
+  playCoinPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Track rapid coin sequence
+    this.coinSeq.count++;
+    this.coinSeq.resetTimer = 0.4; // reset after 0.4s gap
+    // Use arp notes for current chord; step up one note per coin in cluster
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const arpNotes = this.ARPS_BY_CHORD[chordIdx];
+    const freq = arpNotes[(this.coinSeq.count - 1) % arpNotes.length];
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, now); // sharp attack
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Nitro pickup: ascending sawtooth sweep ending on tonic A4 (440Hz) over 0.3s
+  playNitroPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now); // A3 — start an octave below tonic
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.3); // A4 — tonic
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.35, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Shield pickup: two notes a perfect 5th apart from current scale with tremolo (LFO ~8Hz), 0.4s
+  playShieldPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const root = this.PAD_CHORDS[chordIdx][0]; // root note of current chord
+    const fifth = root * 1.5;                  // perfect 5th above
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+    gain.gain.linearRampToValueAtTime(0, now + 0.39);
+    gain.connect(this.masterGain);
+
+    // LFO tremolo at 8Hz: oscillates gain by ±0.08
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(8, now);
+    const lfoDepth = this.ctx.createGain();
+    lfoDepth.gain.setValueAtTime(0.08, now);
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(gain.gain);
+    lfo.start(now);
+    lfo.stop(now + 0.4);
+    lfo.onended = () => { lfo.disconnect(); lfoDepth.disconnect(); };
+
+    let endedCount = 0;
+    for (const freq of [root, fifth]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.4);
+      osc.onended = () => {
+        osc.disconnect();
+        endedCount++;
+        if (endedCount === 2) gain.disconnect();
+      };
+    }
+  },
+
+  // ─── Near Miss, Combo, and Bonus SFX ───
+
+  // Near miss: short chromatic grace note — one semitone below tonic A4 (G#4 = 415.3Hz), 0.05s
+  playNearMiss() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // G#4/Ab4 = 440 / 2^(1/12) ≈ 415.3Hz — one semitone below tonic A4
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(415.3, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.05);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Combo multiplier: power chord (root + 5th) where root rises with combo level, 0.15s
+  playComboUp(combo) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Root steps up through arp notes of current chord with each combo level
+    const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+    const arpNotes = this.ARPS_BY_CHORD[chordIdx];
+    const root = arpNotes[(combo - 1) % arpNotes.length];
+    const fifth = root * 1.5; // perfect 5th
+    for (const freq of [root, fifth]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Survivor bonus: triumphant short major chord (400/500/600Hz sines, 0.3s)
+  playSurvivorBonus() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const freqs = [400, 500, 600];
+    for (const freq of freqs) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.3);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Overtake bonus: subtle low filtered sawtooth vroom, 0.15s
+  playOvertake() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + 0.15);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(300, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Update coin sequence timer (call from game update loop)
+  updateCoinSeq(dt) {
+    if (this.coinSeq.count > 0) {
+      this.coinSeq.resetTimer -= dt;
+      if (this.coinSeq.resetTimer <= 0) {
+        this.coinSeq.count = 0;
+      }
+    }
+  },
+
+  // --- Title screen ambient drone ---
+  titleDrone: { osc: null, lfo: null, lfoGain: null, noiseSource: null, noiseGain: null, gain: null },
+
+  startTitleDrone() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Low sine drone (~55Hz) with LFO amplitude modulation (~0.3Hz)
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(55, now);
+
+    const droneGain = this.ctx.createGain();
+    droneGain.gain.setValueAtTime(0, now);
+    droneGain.gain.linearRampToValueAtTime(0.15, now + 0.5); // slow fade-in
+
+    // LFO for amplitude modulation
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(0.3, now);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(0.06, now); // modulation depth
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(droneGain.gain); // modulates the drone gain
+
+    osc.connect(droneGain);
+    droneGain.connect(this.masterGain);
+
+    osc.start(now);
+    lfo.start(now);
+
+    // Soft filtered noise pad (low-pass ~200Hz, very low gain)
+    const noiseDur = 60; // long buffer
+    const bufferSize = this.ctx.sampleRate * noiseDur;
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    noiseSource.loop = true;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(200, now);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.04, now + 0.5);
+
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSource.start(now);
+
+    this.titleDrone.osc = osc;
+    this.titleDrone.lfo = lfo;
+    this.titleDrone.lfoGain = lfoGain;
+    this.titleDrone.noiseSource = noiseSource;
+    this.titleDrone.noiseGain = noiseGain;
+    this.titleDrone.gain = droneGain;
+  },
+
+  stopTitleDrone() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const d = this.titleDrone;
+
+    if (d.gain) {
+      d.gain.gain.cancelScheduledValues(now);
+      d.gain.gain.setTargetAtTime(0, now, 0.1); // ~0.3s crossfade
+    }
+    if (d.noiseGain) {
+      d.noiseGain.gain.cancelScheduledValues(now);
+      d.noiseGain.gain.setTargetAtTime(0, now, 0.1);
+    }
+
+    // Stop nodes after crossfade completes
+    const stopTime = now + 0.4;
+    if (d.osc) { try { d.osc.stop(stopTime); } catch(e) {} d.osc.onended = () => { d.osc.disconnect(); d.gain.disconnect(); }; }
+    if (d.lfo) { try { d.lfo.stop(stopTime); } catch(e) {} d.lfo.onended = () => { d.lfo.disconnect(); d.lfoGain.disconnect(); }; }
+    if (d.noiseSource) { try { d.noiseSource.stop(stopTime); } catch(e) {} d.noiseSource.onended = () => { d.noiseSource.disconnect(); d.noiseGain.disconnect(); }; }
+
+    this.titleDrone = { osc: null, lfo: null, lfoGain: null, noiseSource: null, noiseGain: null, gain: null };
+  },
+
+  // ─── Rhythmic beat scheduler ───
+  beat: { running: false, nextBeatTime: 0, beatIndex: 0, scheduledUpTo: 0, pendingBeats: [] },
+
+  startBeat() {
+    if (!this.ctx) return;
+    this.beat.running = true;
+    this.beat.nextBeatTime = this.ctx.currentTime + 0.1; // slight delay to sync
+    this.beat.beatIndex = 0;
+    this.beat.scheduledUpTo = this.beat.nextBeatTime;
+    this.beat.pendingBeats = [];
+  },
+
+  stopBeat() {
+    this.beat.running = false;
+    this.beat.beatIndex = 0;
+    this.beat.scheduledUpTo = 0;
+    this.beat.pendingBeats = [];
+  },
+
+  // Schedule individual beat sounds at precise times
+  _scheduleKick(time) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(50, time + 0.1);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.11);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  _scheduleHiHat(time) {
+    if (!this.ctx) return;
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 0.05);
+    const buffer = this.ctx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(8000, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.12, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(time);
+    source.stop(time + 0.06);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  _scheduleSubBass(time) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(45, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.25, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + 0.21);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Called every frame from playingState.update — schedules beats ahead using AudioContext timing
+  updateBeat(scrollSpeed) {
+    if (!this.ctx || !this.beat.running) return;
+    const now = this.ctx.currentTime;
+    // Map scrollSpeed 200→800 to BPM 90→150
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    const bpm = 90 + t * 60;
+    const beatInterval = 60 / bpm; // seconds per beat (quarter note)
+    const halfBeat = beatInterval / 2; // for off-beat hi-hat
+
+    // Schedule ~4 beats ahead
+    const lookAhead = beatInterval * 4;
+    while (this.beat.scheduledUpTo < now + lookAhead) {
+      const beatTime = this.beat.scheduledUpTo;
+      const idx = this.beat.beatIndex;
+
+      // Kick on every beat
+      this._scheduleKick(beatTime);
+      // Queue beat time for visual HUD pulse (US-008)
+      this.beat.pendingBeats.push(beatTime);
+      if (this.beat.pendingBeats.length > 24) this.beat.pendingBeats.shift();
+
+      // Sidechain-like duck: briefly reduce bass gain when kick fires
+      if (this.bass.running && this.bass.gain) {
+        this.bass.gain.gain.setValueAtTime(0.3, beatTime);
+        this.bass.gain.gain.setTargetAtTime(1.0, beatTime + 0.05, 0.02);
+      }
+
+      // Hi-hat on off-beats (halfway between beats)
+      this._scheduleHiHat(beatTime + halfBeat);
+
+      // Sub bass on every 4th beat
+      if (idx % 4 === 0) {
+        this._scheduleSubBass(beatTime);
+        // DnB bass pattern: root + syncopated ghosts at 2.5 and 3.5
+        if (this.bass.running) {
+          const bassChordIdx = Math.floor(idx / 4) % 4;
+          this._scheduleBassBeat(beatTime, beatInterval, bassChordIdx);
+        }
+      }
+
+      this.beat.scheduledUpTo += beatInterval;
+      this.beat.beatIndex++;
+      // Update chord pad on each newly scheduled beat
+      this.updatePadChord(this.beat.beatIndex);
+    }
+  },
+
+  // Fuel warning beep state
+  fuelWarning: { timer: 0 },
+
+  // Play a single fuel warning beep: square wave ~800Hz, 0.08s
+  playFuelBeep() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(800, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + 0.07);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.08);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Update fuel warning beep timer — call from playingState.update after fuel drain
+  updateFuelWarning(dt, fuelPct) {
+    if (fuelPct >= 0.25) {
+      // Above threshold — reset timer so next beep is immediate when fuel drops
+      this.fuelWarning.timer = 0;
+      return;
+    }
+    // Determine beep interval based on fuel level
+    let interval;
+    if (fuelPct < 0.05) {
+      interval = 0.08 + 0.12; // 0.2s cycle (rapid)
+    } else if (fuelPct < 0.15) {
+      interval = 0.08 + 0.25; // 0.33s cycle (fast)
+    } else {
+      interval = 0.08 + 0.4;  // 0.48s cycle (normal)
+    }
+    this.fuelWarning.timer -= dt;
+    if (this.fuelWarning.timer <= 0) {
+      this.playFuelBeep();
+      this.fuelWarning.timer = interval;
+    }
+  },
+
+  // ─── Explosion rumble (low ominous filtered noise during explosionState) ───
+  explosionRumble: { source: null, filter: null, gain: null },
+
+  startExplosionRumble() {
+    if (!this.ctx) return;
+    this.stopExplosionRumble();
+    const now = this.ctx.currentTime;
+    // Reuse or create noise buffer
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this._rumbleBuffer) {
+      this._rumbleBuffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this._rumbleBuffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const source = this.ctx.createBufferSource();
+    source.buffer = this._rumbleBuffer;
+    source.loop = true;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(80, now);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 1.0); // slow fade-in over 1s
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(now);
+    this.explosionRumble = { source, filter, gain };
+  },
+
+  stopExplosionRumble() {
+    const r = this.explosionRumble;
+    if (!r.source) return;
+    const now = this.ctx.currentTime;
+    r.gain.gain.cancelScheduledValues(now);
+    r.gain.gain.setTargetAtTime(0, now, 0.1); // ~0.3s fade
+    const { source, filter, gain } = r;
+    setTimeout(() => {
+      try { source.stop(); } catch (_) {}
+      source.disconnect(); filter.disconnect(); gain.disconnect();
+    }, 400);
+    this.explosionRumble = { source: null, filter: null, gain: null };
+  },
+
+  // ─── Title→Playing riser (1s white noise ascending sweep + crescendo) ───
+  playRiser() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const dur = 1.0;
+
+    const bufferSize = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(200, now);
+    filter.frequency.exponentialRampToValueAtTime(8000, now + dur);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + dur * 0.8);
+    gain.gain.linearRampToValueAtTime(0, now + dur);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + dur);
+    src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // ─── Collision tape-stop effect (pitch drops to 20% over 0.3s then silence) ───
+  playTapeStop() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const dur = 0.3;
+
+    // Tape-stop the pad: ramp all oscillator frequencies to 20% over dur
+    if (this.pad.active) {
+      for (const grp of this.pad.noteGroups) {
+        for (const osc of grp.oscs) {
+          const curFreq = osc.frequency.value;
+          osc.frequency.cancelScheduledValues(now);
+          osc.frequency.setValueAtTime(curFreq, now);
+          osc.frequency.exponentialRampToValueAtTime(Math.max(1, curFreq * 0.2), now + dur);
+        }
+      }
+      this.pad.gain.gain.cancelScheduledValues(now);
+      this.pad.gain.gain.setValueAtTime(this.pad.gain.gain.value, now);
+      this.pad.gain.gain.setTargetAtTime(0, now + dur * 0.7, 0.02);
+
+      // Schedule cleanup; mark inactive so stopPad() in onExit is a no-op
+      const { noteGroups, filter, gain } = this.pad;
+      setTimeout(() => {
+        for (const grp of noteGroups) {
+          for (const osc of grp.oscs) { try { osc.stop(); } catch (_) {} osc.disconnect(); }
+          grp.noteGain.disconnect();
+        }
+        if (filter) filter.disconnect();
+        if (gain) gain.disconnect();
+      }, 500);
+      this.pad.noteGroups = [];
+      this.pad.filter = null;
+      this.pad.gain = null;
+      this.pad.active = false;
+      this.pad.chordIdx = -1;
+    }
+
+    // Stop beat, arp, bass immediately (their short-lived notes just cut off)
+    this.stopBeat();
+    this.stopArp();
+    this.stopBass();
+  },
+
+  // ─── Retry drum roll fill (4 rapid kicks over 0.3s) ───
+  playDrumRoll() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const interval = 0.075; // 4 kicks → 0.3s total
+    for (let i = 0; i < 4; i++) {
+      this._scheduleKick(now + i * interval);
+    }
+  },
+
+  // ─── Game over somber drone (two detuned low sines + filtered noise tail) ───
+  gameOverDrone: { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null, dimOsc1: null, dimOsc2: null, dimOsc3: null, dimGain: null },
+
+  startGameOverDrone() {
+    if (!this.ctx) return;
+    this.stopGameOverDrone();
+    const now = this.ctx.currentTime;
+
+    // Two detuned low sines creating dissonance (~48Hz and ~51Hz)
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(48, now);
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(51, now);
+
+    const oscGain = this.ctx.createGain();
+    oscGain.gain.setValueAtTime(0, now);
+    oscGain.gain.linearRampToValueAtTime(0.15, now + 0.8); // fade in
+
+    osc1.connect(oscGain);
+    osc2.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc1.start(now);
+    osc2.start(now);
+
+    // Very soft filtered noise tail
+    const sampleRate = this.ctx.sampleRate;
+    const length = Math.floor(sampleRate * 2);
+    if (!this._rumbleBuffer) {
+      this._rumbleBuffer = this.ctx.createBuffer(1, length, sampleRate);
+      const data = this._rumbleBuffer.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = this._rumbleBuffer;
+    noiseSource.loop = true;
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.setValueAtTime(150, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.04, now + 1.0);
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSource.start(now);
+
+    // Diminished minor chord (A dim: A2=110Hz, C3=130.8Hz, Eb3=155.6Hz)
+    // Fades in 0.3s, then resolves (fades out) over 2s for cinematic tension
+    const dimFreqs = [110, 130.8, 155.6];
+    const dimGain = this.ctx.createGain();
+    dimGain.gain.setValueAtTime(0, now);
+    dimGain.gain.linearRampToValueAtTime(0.10, now + 0.3);
+    dimGain.gain.setTargetAtTime(0, now + 0.3, 0.7); // slow resolve over ~2s
+    dimGain.connect(this.masterGain);
+
+    const dimOscs = dimFreqs.map(freq => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq, now);
+      o.connect(dimGain);
+      o.start(now);
+      return o;
+    });
+
+    this.gameOverDrone = { osc1, osc2, oscGain, noiseSource, noiseGain, dimOscs, dimGain };
+  },
+
+  stopGameOverDrone() {
+    const d = this.gameOverDrone;
+    if (!d.osc1) return;
+    const now = this.ctx.currentTime;
+
+    d.oscGain.gain.cancelScheduledValues(now);
+    d.oscGain.gain.setTargetAtTime(0, now, 0.05);
+    if (d.noiseGain) {
+      d.noiseGain.gain.cancelScheduledValues(now);
+      d.noiseGain.gain.setTargetAtTime(0, now, 0.05);
+    }
+    if (d.dimGain) {
+      d.dimGain.gain.cancelScheduledValues(now);
+      d.dimGain.gain.setTargetAtTime(0, now, 0.05);
+    }
+
+    const { osc1, osc2, oscGain, noiseSource, noiseGain, dimOscs, dimGain } = d;
+    setTimeout(() => {
+      try { osc1.stop(); } catch (_) {}
+      try { osc2.stop(); } catch (_) {}
+      try { if (noiseSource) noiseSource.stop(); } catch (_) {}
+      osc1.disconnect(); osc2.disconnect(); oscGain.disconnect();
+      if (noiseSource) noiseSource.disconnect();
+      if (noiseGain) noiseGain.disconnect();
+      if (dimOscs) { for (const o of dimOscs) { try { o.stop(); } catch (_) {} o.disconnect(); } }
+      if (dimGain) dimGain.disconnect();
+    }, 300);
+    this.gameOverDrone = { osc1: null, osc2: null, oscGain: null, noiseSource: null, noiseGain: null, dimOsc1: null, dimOsc2: null, dimOsc3: null, dimGain: null };
+  },
+
+  // ─── Harmonic chord pad (supersaw) ───
+  // Am → F → C → G progression, chord changes every 4 beats (1 bar), 4-bar loop
+  PAD_CHORDS: [
+    [440.0, 523.3, 659.3],  // Am: A4, C5, E5
+    [349.2, 440.0, 523.3],  // F:  F4, A4, C5
+    [261.6, 329.6, 392.0],  // C:  C4, E4, G4
+    [392.0, 493.9, 587.3],  // G:  G4, B4, D5
+  ],
+  PAD_DETUNE: [-15, 0, 15], // cents detune per oscillator (supersaw width)
+  pad: { noteGroups: [], filter: null, gain: null, active: false, chordIdx: -1 },
+
+  startPad() {
+    if (!this.ctx) return;
+    this.stopPad();
+    const now = this.ctx.currentTime;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(600, now);
+    filter.Q.setValueAtTime(0.5, now);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(0.12, now, 0.1); // fade-in ~0.3s
+
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    const chordFreqs = this.PAD_CHORDS[0]; // start with Am
+    const noteGroups = [];
+    for (let n = 0; n < 3; n++) {
+      const noteGain = this.ctx.createGain();
+      noteGain.gain.setValueAtTime(0.33, now); // equal weight per note
+      noteGain.connect(filter);
+
+      const oscs = [];
+      for (let d = 0; d < 3; d++) {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(chordFreqs[n], now);
+        osc.detune.setValueAtTime(this.PAD_DETUNE[d], now);
+        osc.connect(noteGain);
+        osc.start(now);
+        oscs.push(osc);
+      }
+      noteGroups.push({ oscs, noteGain });
+    }
+
+    this.pad.noteGroups = noteGroups;
+    this.pad.filter = filter;
+    this.pad.gain = gain;
+    this.pad.active = true;
+    this.pad.chordIdx = 0;
+  },
+
+  stopPad() {
+    if (!this.pad.active) return;
+    const now = this.ctx.currentTime;
+    this.pad.gain.gain.cancelScheduledValues(now);
+    this.pad.gain.gain.setTargetAtTime(0, now, 0.1); // fade out ~0.3s
+
+    const { noteGroups, filter, gain } = this.pad;
+    setTimeout(() => {
+      for (const grp of noteGroups) {
+        for (const osc of grp.oscs) {
+          try { osc.stop(); } catch (_) {}
+          osc.disconnect();
+        }
+        grp.noteGain.disconnect();
+      }
+      filter.disconnect();
+      gain.disconnect();
+    }, 400);
+
+    this.pad.noteGroups = [];
+    this.pad.filter = null;
+    this.pad.gain = null;
+    this.pad.active = false;
+    this.pad.chordIdx = -1;
+  },
+
+  updatePad(scrollSpeed) {
+    if (!this.pad.active || !this.pad.gain) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    // Filter cutoff 400→1200Hz with speed
+    this.pad.filter.frequency.setTargetAtTime(400 + t * 800, now, 0.1);
+    // Volume 0.12→0.20 with speed
+    this.pad.gain.gain.setTargetAtTime(0.12 + t * 0.08, now, 0.1);
+  },
+
+  // Call from updateBeat — advances chord when beat index crosses a 4-beat bar boundary
+  updatePadChord(beatIndex) {
+    if (!this.pad.active || this.pad.noteGroups.length === 0) return;
+    const chordIdx = Math.floor(beatIndex / 4) % 4;
+    if (chordIdx === this.pad.chordIdx) return;
+
+    this.pad.chordIdx = chordIdx;
+    const now = this.ctx.currentTime;
+    const chordFreqs = this.PAD_CHORDS[chordIdx];
+    for (let n = 0; n < 3; n++) {
+      for (const osc of this.pad.noteGroups[n].oscs) {
+        osc.frequency.setTargetAtTime(chordFreqs[n], now, 0.05);
+      }
+    }
+  },
+
+  // ─── Synchronized DnB bass line ───
+  // Root notes for Am→F→C→G progression, 40–100 Hz range
+  BASS_ROOTS: [55.0, 87.3, 65.4, 98.0], // A1, F2, C2, G2 (Hz)
+  bass: { running: false, gain: null },
+
+  startBass() {
+    if (!this.ctx) return;
+    this.stopBass();
+    const now = this.ctx.currentTime;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.setTargetAtTime(1.0, now, 0.1); // fade-in ~0.3s
+    gain.connect(this.masterGain);
+    this.bass.gain = gain;
+    this.bass.running = true;
+  },
+
+  stopBass() {
+    if (!this.bass.running) return;
+    const now = this.ctx.currentTime;
+    this.bass.gain.gain.cancelScheduledValues(now);
+    this.bass.gain.gain.setTargetAtTime(0, now, 0.1); // fade-out ~0.3s
+    const gain = this.bass.gain;
+    setTimeout(() => { gain.disconnect(); }, 400);
+    this.bass.gain = null;
+    this.bass.running = false;
+  },
+
+  // Schedule a single bass note: sawtooth → lowpass ~200 Hz → per-note envelope
+  _scheduleBassNote(time, freq, vel) {
+    if (!this.ctx || !this.bass.gain) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, time);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(200, time);
+    filter.Q.setValueAtTime(0.5, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(vel * 0.3, time + 0.008); // attack <0.01s
+    gain.gain.setTargetAtTime(0, time + 0.02, 0.05);            // decay ~0.15s
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bass.gain);
+    osc.start(time);
+    osc.stop(time + 0.5);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Schedule DnB bass pattern for one bar: beat-1 root + syncopated ghost notes at 2.5 and 3.5
+  _scheduleBassBeat(beatTime, beatInterval, chordIdx) {
+    const root = this.BASS_ROOTS[chordIdx];
+    this._scheduleBassNote(beatTime,                          root, 1.0);  // beat 1: full
+    this._scheduleBassNote(beatTime + 1.5 * beatInterval,    root, 0.5);  // beat 2.5: ghost
+    this._scheduleBassNote(beatTime + 2.5 * beatInterval,    root, 0.5);  // beat 3.5: ghost
+  },
+
+  // ─── Procedural arpeggio melody ───
+  // Notes from A minor pentatonic (A, C, D, E, G) by chord for harmonic match
+  ARPS_BY_CHORD: [
+    [440.0, 523.3, 659.3, 880.0],  // Am: A4, C5, E5, A5
+    [440.0, 523.3, 587.3, 784.0],  // F:  A4, C5, D5, G5
+    [392.0, 523.3, 659.3, 784.0],  // C:  G4, C5, E5, G5
+    [392.0, 440.0, 587.3, 784.0],  // G:  G4, A4, D5, G5
+  ],
+  arp: { running: false, scheduledUpTo: 0, noteIndex: 0 },
+
+  startArp() {
+    if (!this.ctx) return;
+    this.arp.running = true;
+    // Sync start time with beat scheduler (or now + small offset)
+    this.arp.scheduledUpTo = this.beat.scheduledUpTo > 0
+      ? this.beat.scheduledUpTo
+      : this.ctx.currentTime + 0.1;
+    this.arp.noteIndex = 0;
+  },
+
+  stopArp() {
+    this.arp.running = false;
+    this.arp.scheduledUpTo = 0;
+    this.arp.noteIndex = 0;
+  },
+
+  // Schedule a single arpeggio note: square wave + bandpass filter
+  _scheduleArpNote(time, freq, duration) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, time);
+    osc.detune.setValueAtTime(5, time); // slight detune
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(freq * 1.5, time);
+    filter.Q.setValueAtTime(3, time);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.15, time + 0.01);
+    gain.gain.linearRampToValueAtTime(0, time + duration * 0.85);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(time);
+    osc.stop(time + duration);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
+  },
+
+  // Called every frame — schedules arp notes ahead using AudioContext timing
+  updateArp(scrollSpeed) {
+    if (!this.ctx || !this.arp.running) return;
+    const now = this.ctx.currentTime;
+    const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
+    const bpm = 90 + t * 60; // matches beat BPM
+    const beatInterval = 60 / bpm;
+
+    // Sub-division: quarter notes at slow, sixteenth at fast
+    // t < 0.33 → 1 note/beat, t < 0.67 → 2 notes/beat, else 4 notes/beat
+    const subDiv = t < 0.33 ? 1 : t < 0.67 ? 2 : 4;
+    const noteInterval = beatInterval / subDiv;
+    const noteDuration = noteInterval * 0.75; // 75% gate for crispness
+
+    const lookAhead = beatInterval * 4;
+    while (this.arp.scheduledUpTo < now + lookAhead) {
+      const time = this.arp.scheduledUpTo;
+      const ni = this.arp.noteIndex;
+
+      // Get notes from current chord (A minor pentatonic, chord-matched)
+      const chordIdx = this.pad.chordIdx < 0 ? 0 : this.pad.chordIdx;
+      const notes = this.ARPS_BY_CHORD[chordIdx];
+
+      // Pattern type changes every 8 bars (32 beats)
+      const barIdx = Math.floor(this.beat.beatIndex / 4);
+      const patternType = Math.floor(barIdx / 8) % 3;
+
+      let noteArrayIdx;
+      if (patternType === 0) {
+        // Ascending
+        noteArrayIdx = ni % notes.length;
+      } else if (patternType === 1) {
+        // Descending (inversion)
+        noteArrayIdx = (notes.length - 1) - (ni % notes.length);
+      } else {
+        // Offset inversion: start from index 1
+        noteArrayIdx = (ni + 1) % notes.length;
+      }
+
+      this._scheduleArpNote(time, notes[noteArrayIdx], noteDuration);
+      this.arp.scheduledUpTo += noteInterval;
+      this.arp.noteIndex++;
+    }
+  },
+};
+
 // Survivor flash text state
 let survivorFlash = null; // {timer: 2.0} when active
 
@@ -198,6 +1577,8 @@ let speedPenaltyMultiplier = 1.0; // multiplicative speed reduction factor (1.0 
 let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
+let dangerFlashAlpha = 0;         // screen-edge red flash when traffic is nearby (US-010)
+let hitStopFrames = 0;            // frames remaining in hit-stop freeze (US-011); update() skipped while > 0
 const particles = [];             // spark particles
 let playerVisible = true;         // set to false during explosion sequence
 
@@ -213,15 +1594,43 @@ let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
 let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, cap 1.5; halves on collision
 
-// Coin float text state (populated on coin collection, rendered over game elements)
-const coinFloatTexts = []; // {x, y, timer}
+// Floating pickup text state (US-009): all item collects + near-miss, rendered above world below HUD
+const floatTexts = []; // {x, y, timer, text, color}
 
 // Nitro state
 let nitroTimer = 0;      // countdown during active boost (3s → 0)
 let nitroEaseTimer = 0;  // countdown during ease-out (0.5s → 0)
 
+// Chromatic aberration state (US-002)
+let chromaTimer = 0;        // countdown (s); 0 = inactive
+let chromaDuration = 0.4;   // total duration of current trigger (for decay calc)
+let chromaIntensity = 1.0;  // peak intensity: 1.0 = full (collision), 0.6 = nitro
+
 // Shield state
 let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
+
+// Camera roll state (US-006)
+let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
+
+// Beat-pulse HUD state (US-008)
+// Each pulse value decays from 1→0 exponentially; drives scale/alpha in HUD render functions
+let beatPulse = 0;    // fires on every kick beat → animates score + speed indicator
+let nitroPulse = 0;   // fires on beat when nitro is active → animates nitro meter glow
+let coinPulse = 0;    // fires on coin collect (not beat-driven) → animates score scale
+// Precompute per-frame decay factors: reach ~0.1% of initial value by target duration at 60 fps
+const BEAT_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.08); // ~0 by 80 ms
+const COIN_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.06); // ~0 by 60 ms
+
+// Adaptive HUD opacity constants (US-012)
+const HUD_OPACITY_STEADY   = 0.65; // base opacity during steady state
+const HUD_OPACITY_RAMP_IN  = 0.1;  // seconds to ramp to 1.0 on change
+const HUD_OPACITY_HOLD     = 1.5;  // seconds to hold at 1.0 after last change
+const HUD_OPACITY_RAMP_OUT = 0.5;  // seconds to fade back to STEADY
+// Per-element trackers: {trackedValue, lastChanged, currentAlpha}
+const hudOpacity = {
+  score: { trackedValue: -1, lastChanged: -9999, currentAlpha: HUD_OPACITY_STEADY },
+  fuel:  { trackedValue: -1, lastChanged: -9999, currentAlpha: HUD_OPACITY_STEADY },
+};
 
 // Dash pattern constants
 const DASH_LENGTH = 30;
@@ -238,6 +1647,36 @@ const ctx = canvas.getContext('2d');
 // Set logical resolution
 canvas.width = CANVAS_WIDTH;
 canvas.height = CANVAS_HEIGHT;
+
+// Offscreen canvases for chromatic aberration (US-002) — initialized once
+const chromaCanvasR = document.createElement('canvas');
+chromaCanvasR.width = CANVAS_WIDTH;
+chromaCanvasR.height = CANVAS_HEIGHT;
+const chromaCtxR = chromaCanvasR.getContext('2d');
+
+const chromaCanvasB = document.createElement('canvas');
+chromaCanvasB.width = CANVAS_WIDTH;
+chromaCanvasB.height = CANVAS_HEIGHT;
+const chromaCtxB = chromaCanvasB.getContext('2d');
+
+// Offscreen canvas for motion blur / frame ghosting (US-003) — initialized once
+const ghostCanvas = document.createElement('canvas');
+ghostCanvas.width = CANVAS_WIDTH;
+ghostCanvas.height = CANVAS_HEIGHT;
+const ghostCtx = ghostCanvas.getContext('2d');
+let ghostValid = false; // true once first capture has been taken above 600 px/s
+
+// Offscreen canvas for bloom / glow effects (US-004) — initialized once
+const bloomCanvas = document.createElement('canvas');
+bloomCanvas.width = CANVAS_WIDTH;
+bloomCanvas.height = CANVAS_HEIGHT;
+const bloomCtx = bloomCanvas.getContext('2d');
+
+// Offscreen canvas for heat haze / road shimmer (US-007) — initialized once
+const hazeCanvas = document.createElement('canvas');
+hazeCanvas.width = CANVAS_WIDTH;
+hazeCanvas.height = CANVAS_HEIGHT;
+const hazeCtx = hazeCanvas.getContext('2d');
 
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
@@ -258,10 +1697,164 @@ function resizeCanvas() {
 
   canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
+  positionNameForm();
 }
+
+// Declared early so positionNameForm() guard works when resizeCanvas() is called below
+let nameFormEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// --- Name Input Overlay (US-006) ---
+nameFormEl = document.createElement('div');
+nameFormEl.style.cssText = 'display:none;position:fixed;flex-direction:column;align-items:center;gap:6px;';
+
+const nameInputEl = document.createElement('input');
+nameInputEl.type = 'text';
+nameInputEl.placeholder = 'Enter your name';
+nameInputEl.maxLength = 15;
+nameInputEl.style.cssText = [
+  'font:16px monospace',
+  'padding:6px 10px',
+  'background:#1a1a2e',
+  'color:#fff',
+  'border:2px solid #555',
+  'border-radius:4px',
+  'width:200px',
+  'text-align:center',
+  'outline:none',
+].join(';') + ';';
+
+const nameErrorEl = document.createElement('span');
+nameErrorEl.style.cssText = 'color:#E53935;font:12px monospace;visibility:hidden;';
+nameErrorEl.textContent = 'Name too short';
+
+const nameSubmitEl = document.createElement('button');
+nameSubmitEl.textContent = 'Submit Score';
+nameSubmitEl.style.cssText = [
+  'font:14px monospace',
+  'padding:7px 18px',
+  'background:#E53935',
+  'color:#fff',
+  'border:none',
+  'border-radius:4px',
+  'cursor:pointer',
+].join(';') + ';';
+
+nameFormEl.append(nameInputEl, nameErrorEl, nameSubmitEl);
+document.body.appendChild(nameFormEl);
+
+// Restore saved name
+nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+
+function positionNameForm() {
+  if (!nameFormEl || nameFormEl.style.display === 'none') return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const centerX = rect.left + rect.width / 2;
+  // Position below stats block — canvas logical y ≈ 460
+  nameFormEl.style.left = `${centerX - 120}px`;
+  nameFormEl.style.top = `${rect.top + 460 * scale}px`;
+}
+
+function showNameForm() {
+  nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+  nameErrorEl.style.visibility = 'hidden';
+  nameSubmitEl.textContent = 'Submit Score';
+  nameSubmitEl.disabled = false;
+  nameFormEl.style.display = 'flex';
+  positionNameForm();
+  nameInputEl.focus();
+}
+
+function hideNameForm() {
+  nameFormEl.style.display = 'none';
+}
+
+// Prevent game controls when typing in name input
+nameInputEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleNameSubmit();
+  }
+});
+
+const SCORE_WEBHOOK_URL = 'https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0';
+
+function handleNameSubmit() {
+  const name = nameInputEl.value.trim();
+  if (name.length < 2) {
+    nameErrorEl.style.visibility = 'visible';
+    return;
+  }
+  nameErrorEl.style.visibility = 'hidden';
+  localStorage.setItem('roadRushPlayerName', name);
+
+  nameSubmitEl.textContent = 'Sending...';
+  nameSubmitEl.disabled = true;
+
+  const payload = {
+    name,
+    score: gameOverState.finalScore,
+    distance: Math.floor(gameOverState.finalDistance / 100), // meters
+    time: parseFloat(gameOverState.finalTime.toFixed(1)),
+    causeOfDeath: gameOverState.causeOfDeath || 'collision',
+    coinsCollected: gameOverState.coinsCollected,
+  };
+
+  fetch(SCORE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      nameSubmitEl.textContent = 'Score submitted! ✓';
+      nameSubmitEl.disabled = true;
+    })
+    .catch(() => {
+      nameSubmitEl.textContent = 'Failed to submit. Try again';
+      nameSubmitEl.disabled = false;
+    });
+}
+
+nameSubmitEl.addEventListener('click', handleNameSubmit);
+
+function fetchRanking() {
+  gameOverState.rankingStatus = 'loading';
+  gameOverState.rankingData = [];
+  fetch(SCORE_WEBHOOK_URL)
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      const entries = Array.isArray(data) ? data : [];
+      gameOverState.rankingData = entries
+        .filter((e) => e && typeof e.name === 'string' && typeof e.score === 'number')
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 50);
+      gameOverState.rankingStatus = 'loaded';
+    })
+    .catch(() => {
+      gameOverState.rankingStatus = 'error';
+    });
+}
+
+// --- Mute icon click detection ---
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const cx = (e.clientX - rect.left) * scaleX;
+  const cy = (e.clientY - rect.top) * scaleY;
+  // Icon area: top-right corner, 32x32 region
+  if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
+    AudioManager.toggleMute();
+  }
+});
 
 // --- Input tracking ---
 const keys = {};
@@ -382,6 +1975,230 @@ function renderShockwaveRings(ctx) {
   ctx.restore();
 }
 
+// Dynamic speed vignette — darkens screen edges progressively with speed (tunnel vision)
+// US-001: distinct from the red fuel-warning vignette; uses black/dark-grey
+function renderSpeedVignette(ctx) {
+  const speed = gameState.scrollSpeed;
+  let alpha;
+  if (speed < 300) {
+    return; // invisible below 300 px/s
+  } else if (speed < 600) {
+    alpha = ((speed - 300) / 300) * 0.25; // 0 → 0.25 over 300–600 px/s
+  } else {
+    alpha = 0.25 + ((speed - 600) / 200) * 0.30; // 0.25 → 0.55 over 600–800 px/s
+    alpha = Math.min(alpha, 0.55);
+  }
+  const vignette = ctx.createRadialGradient(
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.25,
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.85
+  );
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, `rgba(0,0,0,${alpha})`);
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
+// Screen-edge danger flash — red radial glow from edges when traffic is nearby (US-010)
+// Zero cost when dangerFlashAlpha === 0; only active during playingState.
+function renderDangerFlash(ctx) {
+  if (dangerFlashAlpha <= 0) return;
+  const grad = ctx.createRadialGradient(
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.2,
+    CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_HEIGHT * 0.8
+  );
+  grad.addColorStop(0, 'rgba(255,0,0,0)');
+  grad.addColorStop(1, `rgba(255,0,0,${dangerFlashAlpha})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
+// Chromatic aberration — RGB split overlay on impact and nitro (US-002)
+// Snapshots the current canvas frame, extracts red/blue channels via multiply,
+// and re-draws them offset by ±3px with 'screen' compositing.
+// Zero cost when chromaTimer === 0.
+function renderChromaticAberration() {
+  if (chromaTimer <= 0) return;
+  const t = chromaTimer / chromaDuration;        // 1.0 at start → 0.0 at end (linear decay)
+  const intensity = chromaIntensity * t;
+  if (intensity <= 0.005) return;
+
+  const offset = 3 * intensity;
+  const alpha = 0.4 * intensity;
+
+  // Build red-channel snapshot
+  chromaCtxR.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxR.drawImage(canvas, 0, 0);
+  chromaCtxR.globalCompositeOperation = 'multiply';
+  chromaCtxR.fillStyle = 'rgb(255, 0, 0)';
+  chromaCtxR.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxR.globalCompositeOperation = 'source-over';
+
+  // Build blue-channel snapshot
+  chromaCtxB.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxB.drawImage(canvas, 0, 0);
+  chromaCtxB.globalCompositeOperation = 'multiply';
+  chromaCtxB.fillStyle = 'rgb(0, 0, 255)';
+  chromaCtxB.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  chromaCtxB.globalCompositeOperation = 'source-over';
+
+  // Composite onto main canvas with screen blending
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(chromaCanvasR, offset, 0);
+  ctx.drawImage(chromaCanvasB, -offset, 0);
+  ctx.restore();
+}
+
+// Motion blur: composite previous frame as ghost behind current frame (US-003)
+// Called AFTER renderRoad() clears the background, BEFORE renderTraffic()/renderPlayer()
+function renderMotionGhost() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600 || !ghostValid) return;
+  const alpha = speed > 700 ? 0.28 : 0.18;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(ghostCanvas, 0, 0);
+  ctx.restore();
+}
+
+// Capture the road/traffic/player/particles layer to ghostCanvas for use next frame (US-003)
+// Called AFTER renderParticles(), BEFORE overlays and HUD
+function captureGhostFrame() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600) {
+    if (ghostValid) {
+      ghostCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ghostValid = false;
+    }
+    return;
+  }
+  ghostCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  ghostCtx.drawImage(canvas, 0, 0);
+  ghostValid = true;
+}
+
+// Bloom / glow effect for collectibles and player headlights (US-004)
+// Renders each target at 2× scale with blur onto bloomCanvas, then composites 'lighter' onto main canvas.
+function renderBloom() {
+  bloomCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  bloomCtx.filter = 'blur(8px)';
+
+  // Coin halos (gold)
+  bloomCtx.fillStyle = '#FFD700';
+  for (const coin of gameState.coins) {
+    if (coin.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(coin.x, coin.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, COIN_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Fuel halos (green)
+  bloomCtx.fillStyle = '#43A047';
+  for (const item of gameState.fuelItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, FUEL_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Nitro halos (yellow triangle)
+  bloomCtx.fillStyle = '#FFD600';
+  for (const item of gameState.nitroItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    const s = NITRO_ITEM_HALF;
+    bloomCtx.beginPath();
+    bloomCtx.moveTo(0, -s);
+    bloomCtx.lineTo(s, s);
+    bloomCtx.lineTo(-s, s);
+    bloomCtx.closePath();
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Shield halos (blue circle)
+  bloomCtx.fillStyle = '#42A5F5';
+  for (const item of gameState.shieldItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, SHIELD_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Player headlights (front two white circles) — skip during invulnerability blink frames
+  const blinkHidden = invulnTimer > 0 && Math.floor(invulnTimer / BLINK_INTERVAL) % 2 === 1;
+  if (!blinkHidden) {
+    const p = gameState.player;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.7;
+    bloomCtx.fillStyle = '#FFFFFF';
+    bloomCtx.beginPath();
+    bloomCtx.arc(p.x + 8, p.y + 5, 5, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.beginPath();
+    bloomCtx.arc(p.x + PLAYER_WIDTH - 8, p.y + 5, 5, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  bloomCtx.filter = 'none';
+
+  // Composite bloom canvas onto main canvas using 'lighter' for additive glow
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.5;
+  ctx.drawImage(bloomCanvas, 0, 0);
+  ctx.restore();
+}
+
+// Heat haze / road shimmer at high speed (US-007)
+// Renders road to hazeCanvas then draws it back with per-band horizontal offset for the lower 40%.
+// Returns true if haze was rendered (caller should skip normal renderRoad call).
+function renderHeatHaze(scrollOffset) {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 500) return false;
+
+  // Intensity: 0 at 500 px/s → 3px at 800 px/s
+  const intensity = Math.min((speed - 500) / 300, 1) * 3;
+  const time = gameState.elapsedTime;
+  const hazeStartY = Math.floor(CANVAS_HEIGHT * 0.6); // lower 40% of canvas
+  const bandH = 4; // horizontal band height in pixels
+
+  // Render the road layer onto hazeCanvas (renderRoad accepts any ctx)
+  renderRoad(hazeCtx, scrollOffset);
+
+  // Draw hazeCanvas undistorted onto main canvas (fills entire road area)
+  ctx.drawImage(hazeCanvas, 0, 0);
+
+  // Overdraw the lower 40% with per-band x-offset shimmer
+  for (let y = hazeStartY; y < CANVAS_HEIGHT; y += bandH) {
+    const sinOffset = Math.sin(time * 3 + y * 0.08) * intensity;
+    const sliceH = Math.min(bandH, CANVAS_HEIGHT - y);
+    ctx.drawImage(hazeCanvas, 0, y, CANVAS_WIDTH, sliceH, sinOffset, y, CANVAS_WIDTH, sliceH);
+  }
+
+  return true;
+}
+
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
 function renderSpeedLines(ctx) {
   const speed = gameState.scrollSpeed;
@@ -406,6 +2223,12 @@ function renderSpeedLines(ctx) {
   ctx.lineWidth = 1;
 }
 
+// Spawn a floating pickup text at (x, y) (US-009); max 8 simultaneous, oldest removed if exceeded
+function spawnFloatText(x, y, text, color) {
+  if (floatTexts.length >= 8) floatTexts.splice(0, 1);
+  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color });
+}
+
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
 function triggerNearMiss(v) {
   const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
@@ -414,6 +2237,10 @@ function triggerNearMiss(v) {
   comboResetTimer = COMBO_RESET_TIME;
   comboScaleTimer = COMBO_SCALE_DURATION;
 
+  // Near miss whoosh + combo stinger
+  AudioManager.playNearMiss();
+  if (comboMultiplier >= 2) AudioManager.playComboUp(comboMultiplier);
+
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
   const vCenterX = v.x + v.width / 2;
@@ -421,6 +2248,9 @@ function triggerNearMiss(v) {
     side: playerCenterX < vCenterX ? 'left' : 'right',
     timer: NEAR_MISS_FLASH_DURATION,
   };
+
+  // Floating near-miss text (US-009)
+  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT / 2, 'NEAR MISS!', '#FF8800');
 }
 
 function updateParticles(dt) {
@@ -434,12 +2264,26 @@ function updateParticles(dt) {
 }
 
 function renderParticles(ctx) {
+  const highSpeed = gameState.scrollSpeed > 600;
   for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fill();
+    const baseAlpha = Math.max(0, p.life / p.maxLife);
+    if (p.isNitro) {
+      // Nitro exhaust: additive 'lighter' compositing; boost size and alpha at high speed (US-004)
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, baseAlpha + (highSpeed ? 0.15 : 0));
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (highSpeed ? 1.3 : 1), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.globalAlpha = baseAlpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -452,6 +2296,7 @@ function handleVehicleCollision(v) {
   if (player.hasShield) {
     player.hasShield = false;
     shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+    AudioManager.playShieldBreak();
     v.collided = true; // tag vehicle so overtake bonus is skipped
     invulnTimer = Math.max(invulnTimer, INVULN_DURATION);
     spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
@@ -476,6 +2321,8 @@ function handleVehicleCollision(v) {
   ddaCleanTimer = 0;
 
   // Any collision is fatal — trigger explosion immediately
+  AudioManager.playTapeStop(); // pitch-drop all musical elements before explosion
+  AudioManager.playCrash();
   triggerShake(0.5, 10);
   fsm.transition(explosionState);
   return;
@@ -512,6 +2359,7 @@ const gameState = {
   // Coin collectibles
   coins: [],
   nextCoinSpawnDistance: COIN_SPAWN_MIN,
+  coinsCollected: 0,
   // Nitro items
   nitroItems: [],
   nextNitroSpawnDistance: NITRO_SPAWN_MIN,
@@ -536,11 +2384,13 @@ function resetGameState() {
   speedPenaltyTimer = 0;
   invulnTimer = 0;
   redFlash.alpha = 0;
+  dangerFlashAlpha = 0;
   particles.length = 0;
   spawnPauseTimer = 0;
   // Reset fuel state
   gameState.fuel = FUEL_INITIAL;
   gameState.fuelItems = [];
+  AudioManager.fuelWarning.timer = 0;
   gameState.nextFuelSpawnDistance = FUEL_SPAWN_BASE_MIN + Math.random() * (FUEL_SPAWN_BASE_MAX - FUEL_SPAWN_BASE_MIN);
   // Reset scoring
   gameState.score = 0;
@@ -557,12 +2407,32 @@ function resetGameState() {
   // Reset coin state
   gameState.coins = [];
   gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
-  coinFloatTexts.length = 0;
+  floatTexts.length = 0; // US-009
+  gameState.coinsCollected = 0;
   // Reset nitro state
   gameState.nitroItems = [];
   gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
   nitroTimer = 0;
   nitroEaseTimer = 0;
+  // Reset chromatic aberration
+  chromaTimer = 0;
+  // Reset hit stop (US-011)
+  hitStopFrames = 0;
+  // Reset adaptive HUD opacity (US-012)
+  hudOpacity.score.trackedValue = -1;
+  hudOpacity.score.lastChanged = -9999;
+  hudOpacity.score.currentAlpha = HUD_OPACITY_STEADY;
+  hudOpacity.fuel.trackedValue = -1;
+  hudOpacity.fuel.lastChanged = -9999;
+  hudOpacity.fuel.currentAlpha = HUD_OPACITY_STEADY;
+  // Reset motion blur ghost (US-003)
+  ghostValid = false;
+  // Reset camera roll (US-006)
+  cameraRoll = 0;
+  // Reset beat-pulse HUD state (US-008)
+  beatPulse = 0;
+  nitroPulse = 0;
+  coinPulse = 0;
   // Reset shield state
   gameState.player.hasShield = false;
   gameState.shieldItems = [];
@@ -599,6 +2469,16 @@ function updateScrollSpeed(dt) {
 }
 
 // --- Road Rendering ---
+// Returns road perspective convergence factor [0..0.30] based on scroll speed (US-005)
+// At 600 px/s: 15% top-width reduction; at 800 px/s: 30% (maximum)
+function getRoadFovFactor() {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 600) {
+    return 0.15 * (speed / 600);
+  }
+  return 0.15 + 0.15 * Math.min(1, (speed - 600) / 200);
+}
+
 function renderRoad(ctx, scrollOffset) {
   // Asphalt background with vertical gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
@@ -624,36 +2504,54 @@ function renderRoad(ctx, scrollOffset) {
     }
   }
 
-  // Road surface (asphalt, re-drawn on top of rumble edges)
+  // Dynamic FOV: road top edge narrows at high speed (US-005)
+  const fovFactor = getRoadFovFactor();
+  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2; // 200
+  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
+  const fovTopLeft = roadCenter - topHalfWidth;  // > ROAD_LEFT at speed
+  const fovTopRight = roadCenter + topHalfWidth; // < ROAD_RIGHT at speed
+
+  // Road surface (asphalt) as perspective trapezoid
   const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   roadGradient.addColorStop(0, '#2A2A3E');
   roadGradient.addColorStop(1, '#26314E');
   ctx.fillStyle = roadGradient;
-  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.closePath();
+  ctx.fill();
 
-  // White border lines
+  // White border lines — converging edges of the trapezoid
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.moveTo(fovTopLeft, 0);
   ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.moveTo(fovTopRight, 0);
   ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
   ctx.stroke();
 
-  // Dashed lane markers between 4 lanes (3 markers)
+  // Dashed lane markers — converge toward vanishing point at top
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
   ctx.lineWidth = 2;
   ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
 
   for (let i = 1; i < LANE_COUNT; i++) {
-    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    const laneXBottom = ROAD_LEFT + i * LANE_WIDTH;
+    // Converge toward road center at the top of screen
+    const laneXTop = roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor);
+    // Extend the line beyond canvas for smooth dash scrolling (mirrors original approach)
+    const dx = laneXBottom - laneXTop; // horizontal shift per CANVAS_HEIGHT of vertical travel
+    const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
     ctx.beginPath();
-    ctx.moveTo(laneX, -dashScrollOffset);
-    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.moveTo(xAtY(-dashScrollOffset), -dashScrollOffset);
+    ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
 
@@ -709,6 +2607,7 @@ function updatePlayer(dt) {
     if (player.hasShield) {
       player.hasShield = false;
       shieldBreakFlash = SHIELD_BREAK_FLASH_DURATION;
+      AudioManager.playShieldBreak();
       invulnTimer = INVULN_DURATION;
       spawnPauseTimer = DIFFICULTY.traffic.spawnPauseDuration;
     } else {
@@ -721,6 +2620,11 @@ function updatePlayer(dt) {
       ddaCleanTimer = 0;
     }
   }
+
+  // Camera roll: ease toward target based on lateral input (US-006)
+  const rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  cameraRoll += (rollTarget - cameraRoll) * 0.12;
+  cameraRoll = Math.max(-3, Math.min(3, cameraRoll));
 }
 
 function renderPlayer(ctx, player) {
@@ -780,6 +2684,15 @@ function renderPlayer(ctx, player) {
 
   // Rear window
   ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+  // Headlights (front two white circles — bloom glow added in renderBloom)
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // --- Traffic System ---
@@ -1082,7 +2995,10 @@ function updateTraffic(dt) {
   // Remove vehicles that have scrolled past the bottom; award clean overtake bonus
   gameState.traffic = gameState.traffic.filter((v) => {
     if (v.y > 760) {
-      if (!v.collided) gameState.score += OVERTAKE_BONUS;
+      if (!v.collided) {
+        gameState.score += OVERTAKE_BONUS;
+        AudioManager.playOvertake();
+      }
       return false;
     }
     return true;
@@ -1216,7 +3132,9 @@ function updateFuelItems(dt) {
     if (aabbOverlap(ph, itemHb)) {
       const fuelAdd = getFuelCollectAmount(elapsed);
       gameState.fuel = Math.min(FUEL_INITIAL, gameState.fuel + fuelAdd);
+      AudioManager.playFuelPickup();
       item.collectAnim = { timer: FUEL_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+FUEL', '#00FF88'); // US-009
     }
   }
 }
@@ -1329,17 +3247,14 @@ function updateCoins(dt) {
     };
     if (aabbOverlap(ph, coinHb)) {
       gameState.score += COIN_POINTS;
-      coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
+      gameState.coinsCollected++;
+      spawnFloatText(coin.x, coin.y, '+1', '#FFD700'); // US-009
+      AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
+      coinPulse = 1.0; // beat-pulse HUD: coin counter bounce (US-008)
     }
   }
 
-  // Tick float texts
-  for (let i = coinFloatTexts.length - 1; i >= 0; i--) {
-    coinFloatTexts[i].y -= 60 * dt; // float upward at 60 px/s
-    coinFloatTexts[i].timer -= dt;
-    if (coinFloatTexts[i].timer <= 0) coinFloatTexts.splice(i, 1);
-  }
 }
 
 function renderCoins(ctx) {
@@ -1372,17 +3287,6 @@ function renderCoins(ctx) {
     ctx.restore();
   }
 
-  // Floating '+100' text
-  for (const ft of coinFloatTexts) {
-    const alpha = ft.timer / COIN_FLOAT_DURATION;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('+100', ft.x, ft.y);
-  }
-  ctx.globalAlpha = 1;
 }
 
 // --- Nitro Item ---
@@ -1432,7 +3336,13 @@ function updateNitroItems(dt) {
       nitroEaseTimer = 0;
       // Full invulnerability during boost
       invulnTimer = Math.max(invulnTimer, NITRO_BOOST_DURATION);
+      AudioManager.playNitroPickup();
       item.collectAnim = { timer: NITRO_COLLECT_ANIM_DURATION };
+      // Chromatic aberration on nitro activation (US-002)
+      chromaTimer = 0.25;
+      chromaDuration = 0.25;
+      chromaIntensity = 0.6;
+      spawnFloatText(item.x, item.y, '+NITRO', '#00FFFF'); // US-009
     }
   }
 }
@@ -1523,7 +3433,9 @@ function updateShieldItems(dt) {
       if (!gameState.player.hasShield) {
         gameState.player.hasShield = true;
       }
+      AudioManager.playShieldPickup();
       item.collectAnim = { timer: SHIELD_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+SHIELD', '#4488FF'); // US-009
     }
   }
 }
@@ -1590,7 +3502,40 @@ function renderShieldItems(ctx) {
   }
 }
 
+// --- Floating pickup texts (US-009) ---
+// Rendered above world layer, below main HUD panel
+function renderFloatTexts(ctx) {
+  if (floatTexts.length === 0) return;
+  ctx.save();
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const ft of floatTexts) {
+    ctx.globalAlpha = ft.timer / FLOAT_TEXT_DURATION;
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+  }
+  ctx.restore();
+}
+
 // --- Fuel HUD ---
+// US-012: update a single HUD opacity tracker; call each frame during playingState.update()
+function tickHudOpacity(tracker, newValue, elapsedTime) {
+  if (newValue !== tracker.trackedValue) {
+    tracker.trackedValue = newValue;
+    tracker.lastChanged = elapsedTime;
+  }
+  const t = elapsedTime - tracker.lastChanged;
+  if (t < HUD_OPACITY_RAMP_IN) {
+    tracker.currentAlpha = HUD_OPACITY_STEADY + (1 - HUD_OPACITY_STEADY) * (t / HUD_OPACITY_RAMP_IN);
+  } else if (t < HUD_OPACITY_RAMP_IN + HUD_OPACITY_HOLD) {
+    tracker.currentAlpha = 1.0;
+  } else {
+    const fade = (t - HUD_OPACITY_RAMP_IN - HUD_OPACITY_HOLD) / HUD_OPACITY_RAMP_OUT;
+    tracker.currentAlpha = 1.0 - (1 - HUD_OPACITY_STEADY) * Math.min(1, fade);
+  }
+}
+
 function renderFuelHUD(ctx) {
   const fuelPct = gameState.fuel / FUEL_INITIAL;
   const lowFuel = fuelPct < 0.2;
@@ -1621,6 +3566,16 @@ function renderFuelHUD(ctx) {
 function renderScoreHUD(ctx) {
   const scoreStr = Math.floor(gameState.displayedScore).toString();
 
+  // Beat-pulse scale (US-008): beat → 1.08×, coin collect → 1.15×, take larger
+  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse);
+  // Scale around score anchor (top-right)
+  const anchorX = CANVAS_WIDTH - 8;
+  const anchorY = 20;
+  ctx.save();
+  ctx.translate(anchorX, anchorY);
+  ctx.scale(scoreScale, scoreScale);
+  ctx.translate(-anchorX, -anchorY);
+
   ctx.font = 'bold 24px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
@@ -1632,6 +3587,22 @@ function renderScoreHUD(ctx) {
   ctx.fillStyle = '#FFFFFF';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 8, 8);
 
+  ctx.restore();
+
+  // Speed indicator — small text below score, pulses with beat (US-008)
+  const speedKmh = Math.round(gameState.scrollSpeed * 0.36);
+  const speedScale = 1 + 0.08 * beatPulse;
+  ctx.save();
+  ctx.translate(anchorX, anchorY + 22);
+  ctx.scale(speedScale, speedScale);
+  ctx.translate(-anchorX, -(anchorY + 22));
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.fillText(`${speedKmh} km/h`, CANVAS_WIDTH - 8, anchorY + 22);
+  ctx.restore();
+
   // Survivor flash
   if (survivorFlash !== null) {
     ctx.globalAlpha = Math.min(1, survivorFlash.timer) * Math.min(1, survivorFlash.timer / 0.3);
@@ -1642,6 +3613,81 @@ function renderScoreHUD(ctx) {
     ctx.fillText('SURVIVOR +300', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60);
     ctx.globalAlpha = 1;
   }
+}
+
+// --- Nitro Meter HUD (US-008) ---
+// Small bar at bottom-center; visible when nitro is active; glows on beat.
+function renderNitroHUD(ctx) {
+  if (nitroTimer <= 0 && nitroEaseTimer <= 0) return;
+  const pct = nitroTimer > 0
+    ? nitroTimer / NITRO_BOOST_DURATION
+    : (nitroEaseTimer / NITRO_EASE_DURATION) * 0.5; // ease-out shows at half intensity
+  const baseAlpha = 0.7 + 0.3 * nitroPulse; // glows brighter (+0.3 max) on each beat
+
+  const barW = 80;
+  const barH = 5;
+  const x = CANVAS_WIDTH / 2 - barW / 2;
+  const y = CANVAS_HEIGHT - 18;
+
+  ctx.save();
+  ctx.globalAlpha = baseAlpha;
+  // Background track
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, barW, barH);
+  // Cyan fill
+  ctx.fillStyle = '#00FFFF';
+  ctx.fillRect(x, y, barW * pct, barH);
+  // Label
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#00FFFF';
+  ctx.fillText('NITRO', CANVAS_WIDTH / 2, y - 1);
+  ctx.restore();
+}
+
+// --- Mute Icon HUD ---
+function renderMuteIcon(ctx) {
+  const x = CANVAS_WIDTH - 28; // center of icon
+  const y = 54;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.fillStyle = '#FFFFFF';
+
+  // Speaker body (small rectangle)
+  ctx.fillRect(x - 8, y - 5, 6, 10);
+  // Speaker cone (triangle)
+  ctx.beginPath();
+  ctx.moveTo(x - 2, y - 5);
+  ctx.lineTo(x + 4, y - 10);
+  ctx.lineTo(x + 4, y + 10);
+  ctx.lineTo(x - 2, y + 5);
+  ctx.closePath();
+  ctx.fill();
+
+  if (!AudioManager.muted) {
+    // Sound wave arcs
+    ctx.beginPath();
+    ctx.arc(x + 5, y, 7, -Math.PI / 4, Math.PI / 4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + 5, y, 12, -Math.PI / 4, Math.PI / 4);
+    ctx.stroke();
+  } else {
+    // X mark
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 7);
+    ctx.lineTo(x + 16, y + 7);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + 16, y - 7);
+    ctx.lineTo(x + 6, y + 7);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 // --- Combo HUD ---
@@ -1676,11 +3722,24 @@ const titleState = {
 
   onEnter() {
     this.pulseTime = 0;
+    // Start drone if AudioContext already exists (return visits)
+    if (AudioManager.ctx) {
+      AudioManager.startTitleDrone();
+    }
+  },
+
+  onExit() {
+    AudioManager.stopTitleDrone();
   },
 
   update(dt) {
     this.pulseTime += dt;
     if (consumeKey('Enter')) {
+      AudioManager.init();
+      AudioManager.resume();
+      // Start drone briefly — it will crossfade out via onExit
+      AudioManager.startTitleDrone();
+      AudioManager.playRiser();
       resetGameState();
       fsm.transition(playingState);
     }
@@ -1710,12 +3769,48 @@ const titleState = {
 // --- Playing State ---
 const playingState = {
   onEnter() {
-    // Future stories will initialize game objects here
+    AudioManager.startEngine();
+    AudioManager.startRoad();
+    AudioManager.startBeat();
+    AudioManager.startPad();
+    AudioManager.startArp();
+    AudioManager.startBass();
+  },
+
+  onExit() {
+    AudioManager.stopNitro();
+    AudioManager.stopBeat();
+    AudioManager.stopArp();
+    AudioManager.stopBass();
+    AudioManager.stopEngine();
+    AudioManager.stopRoad();
+    AudioManager.stopPad();
   },
 
   update(dt) {
     gameState.elapsedTime += dt;
     updateScrollSpeed(dt);
+    AudioManager.updateEngine(gameState.scrollSpeed);
+    AudioManager.updateRoad(gameState.scrollSpeed);
+    AudioManager.updateNitro();
+    AudioManager.updateBeat(gameState.scrollSpeed);
+    AudioManager.updatePad(gameState.scrollSpeed);
+    AudioManager.updateArp(gameState.scrollSpeed);
+
+    // Beat-pulse HUD detection (US-008): fire when AudioContext time crosses a scheduled beat
+    if (AudioManager.ctx && AudioManager.beat.pendingBeats.length > 0) {
+      const now = AudioManager.ctx.currentTime;
+      while (AudioManager.beat.pendingBeats.length > 0 && AudioManager.beat.pendingBeats[0] <= now) {
+        AudioManager.beat.pendingBeats.shift();
+        beatPulse = 1.0;
+        if (nitroTimer > 0) nitroPulse = 1.0;
+      }
+    }
+    // Exponential decay of beat pulses (each approaches 0 by its target duration)
+    if (beatPulse  > 0.001) beatPulse  *= BEAT_PULSE_DECAY; else beatPulse  = 0;
+    if (nitroPulse > 0.001) nitroPulse *= BEAT_PULSE_DECAY; else nitroPulse = 0;
+    if (coinPulse  > 0.001) coinPulse  *= COIN_PULSE_DECAY; else coinPulse  = 0;
+
     const effSpeed = getEffectiveScrollSpeed();
     gameState.scrollOffset += effSpeed * dt;
     gameState.distanceTraveled += effSpeed * dt;
@@ -1728,12 +3823,24 @@ const playingState = {
     updateCoins(dt);
     updateNitroItems(dt);
     updateShieldItems(dt);
+    // Tick floating pickup texts (US-009)
+    for (let i = floatTexts.length - 1; i >= 0; i--) {
+      floatTexts[i].y -= 60 * dt;
+      floatTexts[i].timer -= dt;
+      if (floatTexts[i].timer <= 0) floatTexts.splice(i, 1);
+    }
+    AudioManager.updateCoinSeq(dt);
     updateParticles(dt);
 
     // Tick nitro boost and ease-out timers; spawn blue particle trail during active boost
+    // Start nitro audio when boost is active and audio isn't playing yet
+    if (nitroTimer > 0 && !AudioManager.nitro.active) AudioManager.startNitro();
     if (nitroTimer > 0) {
       nitroTimer = Math.max(0, nitroTimer - dt);
-      if (nitroTimer === 0) nitroEaseTimer = NITRO_EASE_DURATION;
+      if (nitroTimer === 0) {
+        nitroEaseTimer = NITRO_EASE_DURATION;
+        AudioManager.stopNitro();
+      }
       // Blue particle trail: 4-6 particles per frame at car bottom-center
       const trailCount = 4 + Math.floor(Math.random() * 3);
       for (let i = 0; i < trailCount; i++) {
@@ -1746,10 +3853,14 @@ const playingState = {
           maxLife: 0.3,
           color: '#42A5F5',
           size: 2 + Math.random() * 2,
+          isNitro: true,
         });
       }
     }
     if (nitroEaseTimer > 0) nitroEaseTimer = Math.max(0, nitroEaseTimer - dt);
+
+    // Tick chromatic aberration timer (US-002)
+    if (chromaTimer > 0) chromaTimer = Math.max(0, chromaTimer - dt);
 
     // Tick shield break flash
     if (shieldBreakFlash > 0) shieldBreakFlash = Math.max(0, shieldBreakFlash - dt);
@@ -1763,6 +3874,7 @@ const playingState = {
       gameState.score += SURVIVOR_BONUS;
       gameState.survivorTimer -= SURVIVOR_INTERVAL;
       survivorFlash = { timer: 2.0 };
+      AudioManager.playSurvivorBonus();
     }
 
     // Tick survivor flash
@@ -1785,10 +3897,13 @@ const playingState = {
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
     gameState.fuel = Math.max(0, gameState.fuel - fuelDrain);
     if (gameState.fuel <= 0) {
-      gameOverState.causeOfDeath = 'Fuel Empty';
+      gameOverState.causeOfDeath = 'fuel_empty';
       fsm.transition(gameOverState);
       return;
     }
+
+    // Fuel warning beep when low
+    AudioManager.updateFuelWarning(dt, gameState.fuel / FUEL_INITIAL);
 
     // Tick invulnerability timer
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
@@ -1804,6 +3919,28 @@ const playingState = {
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
 
+    // Screen-edge danger flash: accumulate alpha from nearby traffic vehicles (US-010)
+    {
+      const playerCenterY = gameState.player.y + PLAYER_HEIGHT / 2;
+      let dangerAccum = 0;
+      for (const v of gameState.traffic) {
+        const vehicleCenterY = v.y + v.height / 2;
+        if (Math.abs(vehicleCenterY - playerCenterY) < DANGER_FLASH_PROXIMITY) {
+          dangerAccum += 0.25; // each nearby vehicle contributes 0.25 (2+ vehicles reach cap)
+        }
+      }
+      dangerAccum = Math.min(dangerAccum, 0.5); // cap at 0.5 total
+      if (dangerAccum > dangerFlashAlpha) {
+        dangerFlashAlpha = dangerAccum; // rapid onset: jump to danger level immediately
+      } else {
+        dangerFlashAlpha = Math.max(0, dangerFlashAlpha - dt / DANGER_FLASH_DECAY); // decay over 0.3s
+      }
+    }
+
+    // Adaptive HUD opacity (US-012): update trackers each frame
+    tickHudOpacity(hudOpacity.score, Math.floor(gameState.displayedScore), gameState.elapsedTime);
+    tickHudOpacity(hudOpacity.fuel, Math.floor(gameState.fuel), gameState.elapsedTime);
+
     // AABB collision detection — only when not invulnerable
     if (invulnTimer <= 0) {
       const ph = getPlayerHitbox(gameState.player);
@@ -1817,7 +3954,22 @@ const playingState = {
   },
 
   render(ctx) {
-    renderRoad(ctx, gameState.scrollOffset);
+    // --- World layer with camera roll (US-006) ---
+    // Rotate canvas around its center; HUD is drawn after restore so it stays level
+    ctx.save();
+    if (cameraRoll !== 0) {
+      ctx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      ctx.rotate(cameraRoll * Math.PI / 180);
+      ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
+    }
+
+    // Heat haze / road shimmer (US-007) — renders road with distortion when speed > 500;
+    // falls back to normal renderRoad when below threshold or returns false
+    if (!renderHeatHaze(gameState.scrollOffset)) {
+      renderRoad(ctx, gameState.scrollOffset);
+    }
+    // Motion blur: ghost of previous frame composited behind current world (US-003)
+    renderMotionGhost();
     renderSpeedLines(ctx);
     renderTraffic(ctx);
     renderFuelItems(ctx);
@@ -1826,6 +3978,11 @@ const playingState = {
     renderShieldItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
+    // Capture road/traffic/player/particles layer for motion blur next frame (US-003)
+    captureGhostFrame();
+
+    // Bloom / glow on collectibles and headlights (US-004)
+    renderBloom();
 
     // Red flash overlay on frontal collision
     if (redFlash.alpha > 0) {
@@ -1833,14 +3990,44 @@ const playingState = {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
-    // Fuel bar HUD (full-width bar at top + low-fuel vignette)
-    renderFuelHUD(ctx);
+    // Speed vignette — tunnel vision effect (darkens edges at high speed)
+    renderSpeedVignette(ctx);
 
-    // Score HUD (top-right)
-    renderScoreHUD(ctx);
+    // Screen-edge danger flash — red glow from edges when traffic is nearby (US-010)
+    renderDangerFlash(ctx);
+
+    ctx.restore();
+    // --- End world layer ---
+
+    // Floating pickup texts — above world, below HUD (US-009)
+    renderFloatTexts(ctx);
+
+    // Chromatic aberration — RGB split on collision/nitro (US-002)
+    // Applied after restore so it post-processes the full rolled frame
+    renderChromaticAberration();
+
+    // Fuel bar HUD (full-width bar at top + low-fuel vignette) — US-012: adaptive opacity
+    {
+      const fuelCritical = gameState.fuel < FUEL_INITIAL * 0.3;
+      ctx.save();
+      ctx.globalAlpha = fuelCritical ? 1.0 : hudOpacity.fuel.currentAlpha;
+      renderFuelHUD(ctx);
+      ctx.restore();
+    }
+
+    // Score HUD (top-right) — US-012: adaptive opacity
+    {
+      ctx.save();
+      ctx.globalAlpha = hudOpacity.score.currentAlpha;
+      renderScoreHUD(ctx);
+      ctx.restore();
+    }
 
     // Combo counter (center-top, shown when combo >= 2)
     renderComboHUD(ctx);
+
+    // Nitro meter (bottom-center, visible during boost; beat-reactive glow) (US-008)
+    renderNitroHUD(ctx);
 
     // Show elapsed time overlay
     ctx.font = '14px monospace';
@@ -1891,6 +4078,7 @@ const explosionState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   isNewBest: false,
   bestScore: 0,
   screenFlashAlpha: 0,
@@ -1905,9 +4093,18 @@ const explosionState = {
     this.fadeInAlpha = 0;
     this.textAlpha = 0;
     playerVisible = false;
+    AudioManager.playExplosion();
+    AudioManager.startExplosionRumble();
+    // Hit stop on major collision (US-011): freeze update for 3 frames (~50ms)
+    hitStopFrames = 3;
+    // Chromatic aberration on explosion entry (US-002)
+    chromaTimer = 0.4;
+    chromaDuration = 0.4;
+    chromaIntensity = 1.0;
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
+    this.coinsCollected = gameState.coinsCollected;
     const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
     this.isNewBest = this.finalScore > stored;
     this.bestScore = this.isNewBest ? this.finalScore : stored;
@@ -1972,6 +4169,10 @@ const explosionState = {
     }
   },
 
+  onExit() {
+    AudioManager.stopExplosionRumble();
+  },
+
   update(dt) {
     this.timer -= dt;
     for (const ring of shockwaveRings) ring.elapsed += dt;
@@ -1979,6 +4180,8 @@ const explosionState = {
     if (this.screenFlashAlpha > 0) {
       this.screenFlashAlpha = Math.max(0, this.screenFlashAlpha - dt / 0.2);
     }
+    // Tick chromatic aberration timer (US-002)
+    if (chromaTimer > 0) chromaTimer = Math.max(0, chromaTimer - dt);
     // Update scattered vehicles
     for (const v of gameState.traffic) {
       if (v.scattered) {
@@ -1992,10 +4195,11 @@ const explosionState = {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
       gameOverState.finalScore = this.finalScore;
+      gameOverState.coinsCollected = this.coinsCollected;
       gameOverState.isNewBest = this.isNewBest;
       gameOverState.bestScore = this.bestScore;
       gameOverState.statsPreset = true;
-      gameOverState.causeOfDeath = '';
+      gameOverState.causeOfDeath = 'collision';
       fsm.transition(gameOverState);
     }
     // Fade in dark overlay and text after 1.0s elapsed (timer < 1.0)
@@ -2031,6 +4235,8 @@ const explosionState = {
     // No renderPlayer (car hidden), no collectibles
     renderShockwaveRings(ctx);
     renderParticles(ctx);
+    // Chromatic aberration — RGB split (US-002)
+    renderChromaticAberration();
     // Screen flash: white overlay fading over ~0.2s
     if (this.screenFlashAlpha > 0) {
       ctx.fillStyle = '#FFFFFF';
@@ -2081,10 +4287,15 @@ const gameOverState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   bestScore: 0,
   isNewBest: false,
-  causeOfDeath: '', // set by caller before transition; '' = collision
+  causeOfDeath: '', // 'collision' or 'fuel_empty'
   statsPreset: false, // true when explosionState pre-sets final stats
+  rankingData: [], // array of {name, score, distance} sorted by score desc
+  rankingStatus: 'idle', // 'idle' | 'loading' | 'loaded' | 'error'
+  rankingScroll: 0, // index of first visible row
+  rankingDotTime: 0, // for animated loading dots
 
   onEnter() {
     this.pulseTime = 0;
@@ -2093,19 +4304,37 @@ const gameOverState = {
       this.finalTime = gameState.elapsedTime;
       this.finalDistance = gameState.distanceTraveled;
       this.finalScore = Math.floor(gameState.score);
+      this.coinsCollected = gameState.coinsCollected;
       const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
       this.isNewBest = this.finalScore > stored;
       this.bestScore = this.isNewBest ? this.finalScore : stored;
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    this.rankingScroll = 0;
+    this.rankingDotTime = 0;
+    AudioManager.startGameOverDrone();
+    showNameForm();
+    fetchRanking();
+  },
+
+  onExit() {
+    AudioManager.stopGameOverDrone();
+    hideNameForm();
   },
 
   update(dt) {
     this.pulseTime += dt;
+    this.rankingDotTime += dt;
     if (consumeKey('Enter')) {
+      AudioManager.playDrumRoll();
       resetGameState();
       fsm.transition(playingState);
+    }
+    if (this.rankingStatus === 'loaded' && this.rankingData.length > 10) {
+      const maxScroll = this.rankingData.length - 10;
+      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
+      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
     }
   },
 
@@ -2125,7 +4354,8 @@ const gameOverState = {
     if (this.causeOfDeath) {
       ctx.fillStyle = '#FFC107';
       ctx.font = 'bold 16px monospace';
-      ctx.fillText(this.causeOfDeath, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
+      const codLabel = this.causeOfDeath === 'fuel_empty' ? 'Fuel Empty' : 'Collision';
+      ctx.fillText(codLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
     }
 
     // Stats
@@ -2151,11 +4381,79 @@ const gameOverState = {
       ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
     }
 
+    // --- Ranking section (below HTML name form overlay, canvas y≈535+) ---
+    const RANK_Y = 537;
+    const RANK_ROW_H = 11;
+    const RANK_VISIBLE = 10;
+    ctx.textBaseline = 'top';
+    ctx.font = '10px monospace';
+
+    if (this.rankingStatus === 'loading') {
+      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Loading ranking${dots}`, CANVAS_WIDTH / 2, RANK_Y + 8);
+    } else if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.textAlign = 'center';
+      ctx.fillText('Could not load ranking', CANVAS_WIDTH / 2, RANK_Y + 8);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillText('Retry on next game over', CANVAS_WIDTH / 2, RANK_Y + 20);
+    } else if (this.rankingStatus === 'loaded') {
+      if (this.rankingData.length === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText('No scores yet', CANVAS_WIDTH / 2, RANK_Y + 8);
+      } else {
+        const hasMore = this.rankingData.length > RANK_VISIBLE;
+        // Header row
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'left';
+        ctx.fillText('TOP SCORES' + (hasMore ? '  ▲▼ scroll' : ''), 16, RANK_Y);
+        // Divider
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(16, RANK_Y + 12, CANVAS_WIDTH - 32, 1);
+        // Entries
+        const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+        const visibleEntries = this.rankingData.slice(
+          this.rankingScroll,
+          this.rankingScroll + RANK_VISIBLE
+        );
+        visibleEntries.forEach((entry, i) => {
+          const rank = this.rankingScroll + i + 1;
+          const isPlayer = playerName.length >= 2 && entry.name === playerName;
+          const rowY = RANK_Y + 15 + i * RANK_ROW_H;
+          ctx.fillStyle = isPlayer ? '#FFD700' : (i % 2 === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.65)');
+          ctx.textAlign = 'left';
+          const nameStr = String(entry.name || '').substring(0, 12);
+          ctx.fillText(`${String(rank).padStart(2, '\u00a0')} ${nameStr}`, 16, rowY);
+          ctx.textAlign = 'right';
+          const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+          ctx.fillText(`${entry.score}  ${dist}m`, CANVAS_WIDTH - 16, rowY);
+        });
+        // Scroll indicators
+        if (this.rankingScroll > 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▲', CANVAS_WIDTH - 12, RANK_Y + 14);
+        }
+        if (this.rankingScroll + RANK_VISIBLE < this.rankingData.length) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▼', CANVAS_WIDTH - 12, RANK_Y + 15 + RANK_VISIBLE * RANK_ROW_H);
+        }
+      }
+    }
+
+    ctx.textBaseline = 'middle';
+
     // Pulsing retry text
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
-    ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 100);
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
   },
 };
@@ -2177,9 +4475,18 @@ function gameLoop(timestamp) {
 
   accumulator += frameTime;
 
+  // M key mute toggle (all states)
+  if (consumeKey('m') || consumeKey('M')) {
+    AudioManager.toggleMute();
+  }
+
   while (accumulator >= FIXED_DT) {
     if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
-    fsm.update(FIXED_DT);
+    if (hitStopFrames > 0) {
+      hitStopFrames--;
+    } else {
+      fsm.update(FIXED_DT);
+    }
     accumulator -= FIXED_DT;
   }
 
@@ -2194,6 +4501,8 @@ function gameLoop(timestamp) {
   }
   fsm.render(ctx);
   ctx.restore();
+  // Mute icon rendered outside shake transform, visible in all states
+  renderMuteIcon(ctx);
   requestAnimationFrame(gameLoop);
 }
 
