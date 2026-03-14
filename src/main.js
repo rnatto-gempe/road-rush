@@ -140,6 +140,19 @@ const speedLineData = (() => {
   return data;
 })();
 
+// Sky clouds: pre-generated array of 6 clouds for sky phase background
+const SKY_CLOUD_PERIOD = CANVAS_HEIGHT + 100; // vertical wrap period
+const skyCloudData = (() => {
+  const data = [];
+  for (let i = 0; i < 6; i++) {
+    data.push({
+      x: ROAD_LEFT + Math.random() * ROAD_WIDTH,
+      yPhase: Math.random() * SKY_CLOUD_PERIOD,
+    });
+  }
+  return data;
+})();
+
 // Explosion effects (deprecated — kept for array cleanup in resetGameState)
 const explosions = []; // no longer used; shockwaveRings replaces this
 
@@ -3264,6 +3277,13 @@ function getRoadFovFactor () {
 }
 
 function renderRoad (ctx, scrollOffset) {
+  const phase = gameState.phase;
+
+  if (phase === 'sky') {
+    renderRoadSky(ctx, scrollOffset);
+    return;
+  }
+
   // Asphalt background with vertical gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   gradient.addColorStop(0, '#1A1A2E');
@@ -3336,6 +3356,61 @@ function renderRoad (ctx, scrollOffset) {
     ctx.beginPath();
     ctx.moveTo(xAtY(dashScrollOffset - DASH_PERIOD), dashScrollOffset - DASH_PERIOD);
     ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+}
+
+function renderRoadSky (ctx, scrollOffset) {
+  // Sky background gradient
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#4A90D9');
+  gradient.addColorStop(1, '#87CEEB');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // Clouds scrolling at 0.3× speed (parallax)
+  const cloudScrollY = (scrollOffset * 0.3) % SKY_CLOUD_PERIOD;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  for (const cloud of skyCloudData) {
+    let cy = (cloud.yPhase + cloudScrollY) % SKY_CLOUD_PERIOD - 20;
+    // wrap to keep clouds on screen
+    if (cy < -20) cy += SKY_CLOUD_PERIOD;
+    const cx = cloud.x - 20; // center → top-left
+    ctx.beginPath();
+    ctx.roundRect(cx, cy, 40, 15, 7);
+    ctx.fill();
+  }
+
+  // Sky corridor: light-blue gradient overlay
+  ctx.fillStyle = 'rgba(107, 179, 224, 0.15)';
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+  // Wind border lines (replace rumble strips)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  // Dotted lane markers (replace dashed road lines)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(laneX, dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
   }
 

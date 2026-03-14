@@ -1,127 +1,43 @@
-## Codebase Patterns
-- `getComboColor(level)` returns combo-tier color: x1='#FF8800', x2='#FFD700', x3='#00FFDD', x4+='#FF44FF' — reuse for all combo-colored rendering
-- Near miss tracking vars (`nearMissCount`, `bestCombo`, `nearMissBonusTotal`) are module-scope, reset in `resetGameState()`
-- To apply combo multiplier to a score source: `* (comboMultiplier >= 2 ? comboMultiplier : 1)` — SURVIVOR_BONUS is intentionally excluded
-- `triggerNearMiss(v)` increments combo BEFORE tracking bestCombo, so bestCombo reflects the new level
-- `spawnFloatText(x, y, text, color, scale, duration)` — 6th param overrides FLOAT_TEXT_DURATION for hints/tutorials
-- `triggerShake(duration, intensity)` has priority guard — weaker shakes don't override stronger ones in progress
-- Particle shape: `{ x, y, vx, vy, life, maxLife, color, size }` + optional `isNitro` — add new types without new fields
-- AudioManager SFX pattern: check `this.ctx`, create osc+gain, connect to `this.masterGain`, schedule, cleanup onended
-- `gameOverState.onEnter()` captures module-scope vars as `this.finalXxx` for display
-- Combo HUD expire effects use separate timers (`comboExpireShakeTimer`, `comboExpireFadeTimer`) triggered when `comboResetTimer` hits 0
-- Milestone flash (`comboMilestoneFlash`) triggers at x3, x5, x8 — set in `triggerNearMiss()` after increment
-- `ralph/` is gitignored — use `git add -f ralph/prd.json` to force-add PRD updates
-
 # Ralph Progress Log
-Started: Sat Mar 14 18:40:39 -03 2026
+Started: Sat Mar 14 19:39:09 -03 2026
 ---
 
-## 2026-03-14 18:42 - US-001
-- Implemented `getComboColor(level)` utility function returning tier-based colors
-- Applied combo multiplier to distance score, overtake bonus, and coin pickup score (NOT survivor bonus)
-- Added tracking variables: `nearMissCount`, `bestCombo`, `nearMissBonusTotal` at module scope
-- Updated `triggerNearMiss()` to increment tracking vars
-- Reset all tracking vars in `resetGameState()`
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - The combo multiplier increment happens at line ~2786 (`comboMultiplier += 1`) BEFORE the audio/visual feedback, so bestCombo should be tracked after the increment
-  - `SURVIVOR_BONUS` at line ~4617 is intentionally NOT multiplied per acceptance criteria
-  - The `(comboMultiplier >= 2 ? comboMultiplier : 1)` pattern avoids multiplying by 1 unnecessarily
-  - Build check via `npm run build` is sufficient for typecheck — no separate TS config
+## Codebase Patterns
+- The game is ~5900 lines in a single file: `src/main.js`
+- Module-level `let` variables (e.g. `spawnPauseTimer`, `comboMultiplier`) hold state that `resetGameState()` must reset
+- `resetGameState()` resets ALL game state — always add new state resets there
+- Easing/utility functions go near top of file after constants section
+- Phase transition update goes in `playingState.update()` after the score update block
+- Build: `node_modules/.bin/vite build` (vite not in PATH; use local binary)
+
 ---
 
-## 2026-03-14 21:52 - US-002
-- Already implemented alongside US-001 — verified all acceptance criteria met
-- `spawnFloatText()` accepts `scale` param, `triggerNearMiss()` formats points+multiplier text, uses `getComboColor()`, spawns at player position
-- Files changed: none (already in place)
+## 2026-03-14 - US-002
+- Implemented static sky scenario rendering
+- Added `skyCloudData` pre-generated array (6 clouds, x within road area, random yPhase) near `speedLineData`
+- Added `SKY_CLOUD_PERIOD = CANVAS_HEIGHT + 100` wrap constant
+- Modified `renderRoad()` to delegate to `renderRoadSky()` when `phase === 'sky'`
+- `renderRoadSky()` renders: sky gradient (#4A90D9 → #87CEEB), parallax clouds (0.3× speed), rgba(107,179,224,0.15) corridor overlay, wind border lines (rgba(255,255,255,0.3)), dotted lane markers (rgba(255,255,255,0.15))
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
 - **Learnings for future iterations:**
-  - US-001 implementation was thorough and included US-002 work — always check if prior stories already covered the next one
+  - `renderRoad()` uses early-return pattern per phase — add new phases as `if (phase === 'X') { renderRoadX(ctx, scrollOffset); return; }` before existing code
+  - `gameState` is module-scoped; cannot be accessed from browser console — use score threshold to test phase triggers in-game
+  - Cloud scroll formula: `cy = (cloud.yPhase + (scrollOffset * 0.3) % SKY_CLOUD_PERIOD) % SKY_CLOUD_PERIOD - cloudHeight` gives correct downward parallax scrolling
+  - `roundRect()` available in Canvas2D API — use for cloud/UI shapes
 ---
 
-## 2026-03-14 21:52 - US-003
-- Rewrote `renderComboHUD()` with: 'x{N} COMBO' label (30px bold), timer bar (green/yellow/red), pop/bounce animation, expire shake+fade, milestone white flash
-- Added module-scope vars: `comboExpireShakeTimer`, `comboExpireFadeTimer`, `comboMilestoneFlash`
-- Updated combo reset logic to trigger expire effects when `comboResetTimer` hits 0
-- Added milestone flash trigger in `triggerNearMiss()` for x3, x5, x8
-- Ticked all new timers in the game loop update section
-- Files changed: `src/main.js`
+## 2026-03-14 - US-001
+- Implemented phase system foundation (no visuals, only state/logic)
+- Added `phase: 'road'` to all 4 VEHICLE_TYPES entries (sedan, truck, sports, moto)
+- Added `gameState.phase = 'road'` and `gameState.phaseTransition = { progress, active, from, to }` to gameState object
+- Added module-level `phaseTriggered = { sky: false, space: false }` variable
+- Added `easeInOutCubic(t)` utility function after debugMode declaration
+- Added phase trigger checks in `playingState.update()`: sky at 25000 pts, space at 50000 pts
+- phaseTransition stores `_timer` (linear elapsed) and derives eased `progress` from it
+- `resetGameState()` resets phase to 'road', resets phaseTriggered, resets phaseTransition
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
 - **Learnings for future iterations:**
-  - The combo HUD fade-out needs to display at `comboMultiplier >= 2 || comboExpireFadeTimer > 0` since multiplier resets to 1 before the fade completes
-  - Shake uses `Math.sin(timer * 80) * 3` for rapid oscillation — the multiplier 80 controls frequency
-  - Timer bar ratio is `comboResetTimer / COMBO_RESET_TIME` for consistent fill regardless of combo duration
----
-
-## 2026-03-14 21:55 - US-004
-- Added priority guard to `triggerShake()`: compares new intensity vs remaining intensity (`shake.intensity * (shake.time / shake.maxTime)`)
-- Added `triggerShake(0.12, Math.min(2 + comboMultiplier, 5))` call in `triggerNearMiss()`
-- Collision shake (0.5s, 10px) still always overrides near miss shake (0.12s, 2-5px) due to higher intensity
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - `triggerShake()` now has a priority guard — any caller with lower intensity than remaining shake will be silently ignored
-  - Collision shake is called at line ~2909 with (0.5, 10) — this is the strongest shake and serves as the baseline
----
-
-## 2026-03-14 21:57 - US-005
-- Added near miss spark particles emitted from player's side closest to vehicle
-- Base 8 particles +3/combo level (cap 20), lateral velocity away from vehicle, combo-colored
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - Existing particle shape: `{ x, y, vx, vy, life, maxLife, color, size }` + optional `isNitro`
-  - No new fields needed — sparks use standard particle shape, rendered by existing `renderParticles()`
----
-
-## 2026-03-14 21:58 - US-006
-- Added `renderComboGlow()` — ambient glow on top/bottom canvas edges during active combo
-- Added `comboGlowAlpha` state var, fades in 0.3s / out 0.5s, pulses at ~1Hz
-- Rendered after danger flash, before ctx.restore() (inside world layer)
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - Danger flash uses radial gradient on lateral edges; combo glow uses linear gradients on top/bottom — visually distinct
-  - `gameState.elapsedTime` provides a reliable time source for sin-based animation
----
-
-## 2026-03-14 22:00 - US-007
-- Added `scorePunchScale` and `scorePunchColor` — score display scales up and flashes combo color on near miss
-- Integrated with existing `scoreScale` (beatPulse + coinPulse) by adding scorePunchScale
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - Score rendering already had beat-pulse and coin-pulse scales — new effects can simply add to `scoreScale`
----
-
-## 2026-03-14 22:01 - US-008
-- Added `AudioManager.playComboMilestone(level)` — ascending ding with harmonics at x3/x5/x8
-- Added `AudioManager.playComboLost()` — descending triangle wave deflation tone
-- Called milestone SFX in triggerNearMiss, combo lost SFX in combo reset logic (before resetting multiplier)
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - AudioManager methods follow pattern: check `this.ctx`, create oscillator+gain, connect to masterGain, schedule start/stop, cleanup via onended
-  - playComboLost called BEFORE `comboMultiplier = 1` to access the current combo level if needed
----
-
-## 2026-03-14 22:03 - US-009
-- Added `comboZoom` variable — camera zoom at high combo (1.02 at x4-5, 1.04 at x6+)
-- Lerps toward target at rate `dt * 3`, applied in play state render after camera roll
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - Zoom transform wraps all world rendering inside play state but is inside the outer ctx.save/restore
-  - Only applied when `comboZoom !== 1.0` to skip identity transform overhead
----
-
-## 2026-03-14 22:05 - US-010
-- Captures `nearMissCount`, `bestCombo`, `nearMissBonusTotal` in `gameOverState.onEnter()`
-- Renders stats section below stat cards, gold color + 'NICE!' when bestCombo >= 3
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - gameOverState captures final stats in `onEnter()` — pattern: `this.finalXxx = moduleVar`
-  - Stats section positioned at `cardsY + cardH + 32` to fit below best score line
----
-
-## 2026-03-14 22:06 - US-011
-- Added `nearMissHintShown` flag, triggers 'Passe rente aos carros!' float text when first vehicle enters screen
-- Extended `spawnFloatText` with optional `duration` parameter (default FLOAT_TEXT_DURATION)
-- Updated float text render to use `ft.maxTimer` for alpha calculation
-- Files changed: `src/main.js`
-- **Learnings for future iterations:**
-  - `spawnFloatText` now supports custom duration via 6th parameter — useful for tutorial/hint texts
-  - Float text alpha uses `ft.timer / ft.maxTimer` instead of hardcoded FLOAT_TEXT_DURATION
+  - `_timer` pattern: store raw linear time in `phaseTransition._timer`, compute eased `progress` from it each frame — avoids compounding easing errors
+  - The score trigger logic must fire even when phaseTriggered.sky is already set (space check is independent), so both checks run every frame
+  - Build runs as `node_modules/.bin/vite build` since `vite` is not in PATH
 ---
