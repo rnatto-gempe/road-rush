@@ -153,6 +153,22 @@ const skyCloudData = (() => {
   return data;
 })();
 
+// Space starfield: pre-generated array of 40 stars for space phase background
+const SPACE_STAR_PERIOD = CANVAS_HEIGHT + 100; // vertical wrap period
+const spaceStarData = (() => {
+  const data = [];
+  for (let i = 0; i < 40; i++) {
+    data.push({
+      x: Math.random() * CANVAS_WIDTH,
+      yPhase: Math.random() * SPACE_STAR_PERIOD,
+      size: 1 + Math.random(), // 1-2px
+      brightness: 0.3 + Math.random() * 0.7, // 0.3-1.0
+      layer: Math.random() < 0.5 ? 1 : 2,
+    });
+  }
+  return data;
+})();
+
 // Explosion effects (deprecated — kept for array cleanup in resetGameState)
 const explosions = []; // no longer used; shockwaveRings replaces this
 
@@ -3284,6 +3300,11 @@ function renderRoad (ctx, scrollOffset) {
     return;
   }
 
+  if (phase === 'space') {
+    renderRoadSpace(ctx, scrollOffset);
+    return;
+  }
+
   // Asphalt background with vertical gradient
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
   gradient.addColorStop(0, '#1A1A2E');
@@ -3402,6 +3423,61 @@ function renderRoadSky (ctx, scrollOffset) {
 
   // Dotted lane markers (replace dashed road lines)
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  const dashScrollOffset = scrollOffset % DASH_PERIOD;
+
+  for (let i = 1; i < LANE_COUNT; i++) {
+    const laneX = ROAD_LEFT + i * LANE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(laneX, dashScrollOffset - DASH_PERIOD);
+    ctx.lineTo(laneX, CANVAS_HEIGHT + DASH_PERIOD);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+}
+
+function renderRoadSpace (ctx, scrollOffset) {
+  // Space background gradient
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  gradient.addColorStop(0, '#0A0A1A');
+  gradient.addColorStop(1, '#0D1B2A');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // Starfield: two parallax layers
+  for (const star of spaceStarData) {
+    const speed = star.layer === 1 ? 0.1 : 0.2;
+    const starScrollY = (scrollOffset * speed) % SPACE_STAR_PERIOD;
+    let sy = (star.yPhase + starScrollY) % SPACE_STAR_PERIOD;
+    if (sy < 0) sy += SPACE_STAR_PERIOD;
+    // Only draw if visible
+    if (sy >= -2 && sy <= CANVAS_HEIGHT + 2) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
+      ctx.fillRect(star.x, sy, star.size, star.size);
+    }
+  }
+
+  // Space corridor: dark subtle overlay
+  ctx.fillStyle = 'rgba(13, 27, 42, 0.3)';
+  ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+  // Cyan border lines
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(ROAD_LEFT, 0);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ROAD_RIGHT, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.stroke();
+
+  // Dotted cyan lane markers
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.1)';
   ctx.lineWidth = 2;
   ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
