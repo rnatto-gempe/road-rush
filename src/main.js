@@ -2483,7 +2483,7 @@ function handleVehicleCollision(v) {
     return;
   }
 
-  const relativeVy = getEffectiveScrollSpeed() - v.ownSpeed; // approach speed on screen
+  const relativeVy = getEffectiveScrollSpeed() * (1 - VEHICLE_TYPES[v.type].speedRatio); // approach speed on screen
   const isLateral = Math.abs(player.vx) > Math.abs(relativeVy) * 0.5;
 
   // Spark position: center of the overlap area
@@ -3062,7 +3062,7 @@ function spawnVehicle(candidate) {
     lane: candidate.lane,
     width: candidate.width,
     height: candidate.height,
-    ownSpeed: gameState.scrollSpeed * candidate.type.speedRatio,
+    ownSpeed: 0, // computed dynamically in updateTraffic
     // Timer until next lane change (Infinity for non-changers)
     laneChangeTimer: candidate.type.behavior !== 'none'
       ? candidate.type.laneChangeMin + Math.random() * (candidate.type.laneChangeMax - candidate.type.laneChangeMin)
@@ -3104,7 +3104,10 @@ function updateTraffic(dt) {
   const nearMissPlayer = gameState.player;
   for (const v of gameState.traffic) {
     const type = VEHICLE_TYPES[v.type];
-    const visualSpeed = getEffectiveScrollSpeed() - v.ownSpeed;
+    // Dynamic speed: opponent moves at speedRatio of effective speed
+    // visualSpeed = effSpeed * (1 - speedRatio), always positive (downward)
+    v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio;
+    const visualSpeed = getEffectiveScrollSpeed() * (1 - type.speedRatio);
     v.y += visualSpeed * dt;
 
     // Track minimum horizontal distance during vertical sprite overlap (near miss detection)
