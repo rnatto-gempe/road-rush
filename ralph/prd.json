@@ -226,7 +226,7 @@
         "Verificar no browser usando dev-browser skill — fluxo completo funciona"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "US final de integração. Confirmar que resetGameState() limpa tudo: phase, phaseTriggered, phaseTransition, e que veículos antigos não ficam 'presos'."
     }
   ]

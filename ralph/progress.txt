@@ -196,3 +196,17 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - `isTransition` flag check goes before the default `else` branch in `renderParticles()` — same pattern as `isNitro`
   - Particle count capped at 20 (sky) and 30 (space) per the AC — spawned once at transition start, not per-frame
 ---
+
+## 2026-03-14 - US-013
+- Added `spawnPauseTimer = 1.0` in both phase transition trigger blocks (road→sky and sky→space) to give player a brief breather during transitions
+- Verified existing behavior already handles all other ACs:
+  - `chooseVehicleType()` already filters by `gameState.phase` — no old-phase vehicles spawn after transition
+  - Existing vehicles in `traffic[]` continue scrolling normally via `updateTraffic()` — no abrupt removal
+  - `resetGameState()` already resets phase, phaseTriggered, phaseTransition, and clears traffic array
+- Browser smoke test confirmed: road→sky at 25k (airplane obstacles appear), sky→space at 50k, game over, restart resets to road with no ghost vehicles
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Most integration US stories may already be handled by prior implementations — verify before adding code
+  - Debug mode keys 'D' (toggle), 'P' (score→24500), 'O' (score→49500) are essential for testing phase transitions
+  - `spawnPauseTimer` is the existing mechanism for briefly suppressing vehicle spawns — reuse it for any spawn-pause needs
+---
