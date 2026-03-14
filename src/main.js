@@ -1679,30 +1679,71 @@ hazeCanvas.height = CANVAS_HEIGHT;
 const hazeCtx = hazeCanvas.getContext('2d');
 
 // --- Mobile Touch Controls (US-001 / US-002) ---
+// Only show touch controls on actual mobile/touch devices
+const _isTouchDevice = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+const _isMobileViewport = () => Math.min(window.innerWidth, window.innerHeight) <= 900;
+const isMobileDevice = _isTouchDevice && _isMobileViewport();
+
 const touchBtnStyle = document.createElement('style');
 touchBtnStyle.textContent = `
   .touch-left, .touch-right {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 2.5rem;
-    color: white;
-    opacity: 0.30;
-    background: transparent;
-    transition: background 0.05s, opacity 0.05s;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
-  .touch-left.active, .touch-right.active {
-    background: rgba(255,255,255,0.15);
-    opacity: 0.90;
+  .touch-btn-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: clamp(52px, 14vw, 72px);
+    height: clamp(52px, 14vw, 72px);
+    border-radius: 50%;
+    background: linear-gradient(145deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%);
+    border: 1.5px solid rgba(255,255,255,0.22);
+    box-shadow:
+      0 4px 24px rgba(0,0,0,0.35),
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 0 -1px 0 rgba(0,0,0,0.25);
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.08s ease, border-color 0.08s ease;
+  }
+  .touch-btn-inner svg {
+    width: clamp(22px, 6vw, 32px);
+    height: clamp(22px, 6vw, 32px);
+    fill: none;
+    stroke: rgba(255,255,255,0.80);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 1px 4px rgba(0,0,0,0.6));
+    transition: stroke 0.08s ease;
+  }
+  .touch-left.active .touch-btn-inner,
+  .touch-right.active .touch-btn-inner {
+    transform: scale(0.88);
+    background: linear-gradient(145deg, rgba(255,200,50,0.35) 0%, rgba(255,100,0,0.20) 100%);
+    border-color: rgba(255,210,60,0.60);
+    box-shadow:
+      0 2px 12px rgba(0,0,0,0.35),
+      0 0 22px rgba(255,180,0,0.45),
+      inset 0 1px 0 rgba(255,255,180,0.25);
+  }
+  .touch-left.active .touch-btn-inner svg,
+  .touch-right.active .touch-btn-inner svg {
+    stroke: rgba(255,225,80,1);
+    filter: drop-shadow(0 0 6px rgba(255,200,0,0.8));
   }
 `;
 document.head.appendChild(touchBtnStyle);
 
+const _svgLeft = `<svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>`;
+const _svgRight = `<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+
 const touchLeft = document.createElement('div');
 touchLeft.className = 'touch-left';
-touchLeft.textContent = '◄';
+touchLeft.innerHTML = `<div class="touch-btn-inner">${_svgLeft}</div>`;
 touchLeft.style.cssText = [
   'position:fixed',
   'display:none',
@@ -1713,7 +1754,7 @@ touchLeft.style.cssText = [
 
 const touchRight = document.createElement('div');
 touchRight.className = 'touch-right';
-touchRight.textContent = '►';
+touchRight.innerHTML = `<div class="touch-btn-inner">${_svgRight}</div>`;
 touchRight.style.cssText = [
   'position:fixed',
   'display:none',
@@ -3914,8 +3955,10 @@ const playingState = {
     AudioManager.startPad();
     AudioManager.startArp();
     AudioManager.startBass();
-    touchLeft.style.display = 'block';
-    touchRight.style.display = 'block';
+    if (isMobileDevice) {
+      touchLeft.style.display = 'flex';
+      touchRight.style.display = 'flex';
+    }
   },
 
   onExit() {
