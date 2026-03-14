@@ -3714,6 +3714,8 @@ function renderPlayer (ctx, player) {
   }
 
   const { x, y, width, height } = player;
+  const phase = gameState.phase;
+  const pt = gameState.phaseTransition;
 
   // Active shield: subtle blue border/glow around car
   if (player.hasShield) {
@@ -3731,6 +3733,79 @@ function renderPlayer (ctx, player) {
     ctx.stroke();
   }
 
+  // --- Sky phase: car with wings ---
+  if (phase === 'sky' || (pt.active && (pt.to === 'sky' || pt.from === 'sky'))) {
+    // Determine wing scale: grow during transition to sky, shrink during transition from sky
+    let wingScale = 1;
+    if (pt.active && pt.to === 'sky') wingScale = pt.progress;
+    else if (pt.active && pt.from === 'sky') wingScale = 1 - pt.progress;
+
+    // Wind trail lines (behind car, drawn first)
+    const trailAlpha = 0.15 * wingScale;
+    if (trailAlpha > 0.01) {
+      const scrollAnim = (gameState.scrollOffset * 0.5) % 20;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${trailAlpha})`;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        const trailX = x + 8 + i * 12;
+        const trailY = y + height + 2 + i * 3 + scrollAnim;
+        ctx.beginPath();
+        ctx.moveTo(trailX, trailY);
+        ctx.lineTo(trailX, trailY + 20);
+        ctx.stroke();
+      }
+    }
+
+    // Car body (same red car)
+    ctx.fillStyle = '#E53935';
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, 6);
+    ctx.fill();
+
+    // Wings (triangular, white, alpha 0.8, 12×20px each, centered vertically on body)
+    if (wingScale > 0.01) {
+      const wingW = 12 * wingScale;
+      const wingH = 20 * wingScale;
+      const wingY = y + (height - wingH) / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#FFFFFF';
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(x, wingY);
+      ctx.lineTo(x - wingW, wingY + wingH / 2);
+      ctx.lineTo(x, wingY + wingH);
+      ctx.closePath();
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(x + width, wingY);
+      ctx.lineTo(x + width + wingW, wingY + wingH / 2);
+      ctx.lineTo(x + width, wingY + wingH);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Windshield
+    ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+    ctx.fillRect(x + 6, y + 8, width - 12, 16);
+
+    // Rear window
+    ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+    // Headlights
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  // --- Default road phase car ---
   // Car body
   ctx.fillStyle = '#E53935';
   ctx.beginPath();
