@@ -6,6 +6,9 @@
 - Opponents spawn at `y = -type.height` (above screen) and move down via `v.y += visualSpeed * dt`
 - Speed lines already scroll correctly (positive offset direction via modulo wrap)
 - FEEDBACK_WEBHOOK_URL constant was pre-added to main.js (needed for US-006)
+- Opponent visual speed formula: `visualSpeed = getEffectiveScrollSpeed() * (1 - speedRatio)` — always positive, computed dynamically each frame (not stored at spawn)
+- Game state variables (fsm, gameOverState, etc.) are module-scoped, NOT accessible from Playwright evaluate() — browser testing limited to visual screenshots
+- Avoid long `sleep` between Playwright actions — browser context closes; navigate+act+screenshot must be done in rapid sequence
 
 # Ralph Progress Log
 Started: Sat Mar 14 16:57:25 -03 2026
@@ -21,4 +24,16 @@ Started: Sat Mar 14 16:57:25 -03 2026
   - gameOverState rendering is completely independent of renderRoad — no regression risk
   - Browser testing with Playwright is flaky due to context closures on long waits — use short evaluate calls
   - scrollOffset increases monotonically: `effSpeed * dt` where effSpeed is always positive
+---
+
+## 2026-03-14 - US-002
+- Changed opponent ownSpeed from static (set at spawn) to dynamic (recomputed every frame): `v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio`
+- Changed visualSpeed formula: `getEffectiveScrollSpeed() - v.ownSpeed` → `getEffectiveScrollSpeed() * (1 - type.speedRatio)` — ensures always-positive (downward) displacement
+- Fixed `relativeVy` in collision handler to use same formula: `getEffectiveScrollSpeed() * (1 - speedRatio)`
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Game state variables (fsm, gameOverState, etc.) are module-scoped — cannot be accessed via Playwright evaluate(); browser testing is limited to visual screenshots
+  - Avoid `sleep` between Playwright calls — browser context closes; navigate+act+screenshot must run in rapid sequence without long pauses
+  - gameOverState is independent of traffic/speed physics — speed formula changes carry zero game over regression risk
+  - ownSpeed was previously set once at spawn time and became stale as scrollSpeed ramped up; now recomputed each frame for correct dynamic behavior
 ---
