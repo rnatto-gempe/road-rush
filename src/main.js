@@ -1678,9 +1678,31 @@ hazeCanvas.width = CANVAS_WIDTH;
 hazeCanvas.height = CANVAS_HEIGHT;
 const hazeCtx = hazeCanvas.getContext('2d');
 
-// --- Mobile Touch Controls (US-001) ---
+// --- Mobile Touch Controls (US-001 / US-002) ---
+const touchBtnStyle = document.createElement('style');
+touchBtnStyle.textContent = `
+  .touch-left, .touch-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    color: white;
+    opacity: 0.30;
+    background: transparent;
+    transition: background 0.05s, opacity 0.05s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .touch-left.active, .touch-right.active {
+    background: rgba(255,255,255,0.15);
+    opacity: 0.90;
+  }
+`;
+document.head.appendChild(touchBtnStyle);
+
 const touchLeft = document.createElement('div');
 touchLeft.className = 'touch-left';
+touchLeft.textContent = '◄';
 touchLeft.style.cssText = [
   'position:fixed',
   'display:none',
@@ -1691,6 +1713,7 @@ touchLeft.style.cssText = [
 
 const touchRight = document.createElement('div');
 touchRight.className = 'touch-right';
+touchRight.textContent = '►';
 touchRight.style.cssText = [
   'position:fixed',
   'display:none',
@@ -1703,10 +1726,10 @@ document.body.appendChild(touchLeft);
 document.body.appendChild(touchRight);
 
 function setupTouchBtn(el, key) {
-  el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; }, { passive: false });
-  el.addEventListener('touchmove', (e) => { e.preventDefault(); keys[key] = true; }, { passive: false });
-  el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; }, { passive: false });
-  el.addEventListener('touchcancel', (e) => { e.preventDefault(); keys[key] = false; }, { passive: false });
+  el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; el.classList.add('active'); }, { passive: false });
+  el.addEventListener('touchmove', (e) => { e.preventDefault(); keys[key] = true; el.classList.add('active'); }, { passive: false });
+  el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; el.classList.remove('active'); }, { passive: false });
+  el.addEventListener('touchcancel', (e) => { e.preventDefault(); keys[key] = false; el.classList.remove('active'); }, { passive: false });
 }
 setupTouchBtn(touchLeft, 'ArrowLeft');
 setupTouchBtn(touchRight, 'ArrowRight');

@@ -1,3 +1,17 @@
+## 2026-03-13 - US-002
+- Added CSS `<style>` tag injected into `document.head` for `.touch-left/.touch-right` and `.active` class styles
+- Arrow icons ◄/► set via `el.textContent`; idle opacity 0.30, active 0.90
+- `setupTouchBtn` updated to call `el.classList.add('active')` on touchstart/touchmove and `el.classList.remove('active')` on touchend/touchcancel
+- Background `rgba(255,255,255,0.15)` applied via `.active` class
+- Both buttons can be held simultaneously with no flicker (independent class state per element)
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- Browser verified: ◄/► icons visible at 30% opacity during playingState
+- **Learnings for future iterations:**
+  - Inject a `<style>` tag into `document.head` for class-based transitions — avoids fighting inline cssText
+  - Multi-touch flicker avoided by keeping `.active` state fully per-element (no shared flag)
+  - `transition: background 0.05s, opacity 0.05s` gives snappy but smooth feedback
+---
+
 ## Codebase Patterns
 - FSM states: titleState, playingState, explosionState, gameOverState — all have onEnter/onExit/update/render
 - titleState (not startState) is the initial state — "Press Enter to Start" transitions to playingState
