@@ -122,3 +122,16 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - Bird wing oscillation uses `sin(elapsedTime * 8)` — frequency 8 gives fast flapping look
   - Bird sprite uses save/restore for wing rotation transforms
 ---
+
+## 2026-03-14 - US-008
+- Added `airplane` vehicle type: `{ width: 50, height: 70, speedRatio: 0.35, behavior: 'none', phase: 'sky' }`
+- Added `helicopter` vehicle type: `{ width: 44, height: 50, speedRatio: 0.5, behavior: 'laneChange', laneChangeMin: 2.5, laneChangeMax: 5, phase: 'sky' }`
+- Airplane sprite: roundRect fuselage 16×70, horizontal wings 50×10, triangular tail, 4 blue window dots
+- Helicopter sprite: oval body (ellipse 18×22), spinning rotor line (angle = elapsedTime × 15), hub dot, 2 skid lines at base
+- Both types added to `VEHICLE_TYPES` after bird, and sprite rendering added to `renderTraffic()` after bird block
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Airplane is `behavior: 'none'` (passive/slow), helicopter is `behavior: 'laneChange'` (aggressive) — sky phase now has a good mix of passive and aggressive types, removing the need for the fallback pool logic
+  - Helicopter rotor uses `elapsedTime * 15` for fast spinning — higher multiplier than bird wings (8) since rotor should be fast
+  - Airplane sprite is centered using `acx = v.x + v.width / 2` then drawing fuselage offset from center — pattern for centered sprites
+---

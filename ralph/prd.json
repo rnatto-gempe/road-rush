@@ -141,7 +141,7 @@
         "Verificar no browser usando dev-browser skill — avião e helicóptero aparecem, hélice gira, colisão ok"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
