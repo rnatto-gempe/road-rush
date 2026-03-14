@@ -1831,7 +1831,7 @@ function fetchRanking() {
       return res.json();
     })
     .then((data) => {
-      const entries = Array.isArray(data) ? data : [];
+      const entries = Array.isArray(data) && data[0]?.data ? data[0].data : [];
       gameOverState.rankingData = entries
         .filter((e) => e && typeof e.name === 'string' && typeof e.score === 'number')
         .sort((a, b) => b.score - a.score)
