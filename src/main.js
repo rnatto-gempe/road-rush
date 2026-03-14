@@ -1589,6 +1589,9 @@ let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
 let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
 let comboResetTimer = 0;  // seconds until combo resets to 1
 let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
+let comboExpireShakeTimer = 0; // brief shake when combo expires (0.15s)
+let comboExpireFadeTimer = 0;  // fade-out after combo expires (0.3s)
+let comboMilestoneFlash = 0;   // white flash at milestone levels (0.1s)
 
 // Near miss tracking for game over stats
 let nearMissCount = 0;
@@ -2779,9 +2782,9 @@ function renderSpeedLines (ctx) {
 }
 
 // Spawn a floating pickup text at (x, y) (US-009); max 8 simultaneous, oldest removed if exceeded
-function spawnFloatText (x, y, text, color) {
+function spawnFloatText (x, y, text, color, scale = 1.0) {
   if (floatTexts.length >= 8) floatTexts.splice(0, 1);
-  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color });
+  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color, scale });
 }
 
 // Combo color palette: returns a color based on combo level
@@ -2794,7 +2797,8 @@ function getComboColor (level) {
 
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
 function triggerNearMiss (v) {
-  const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
+  const preCombo = comboMultiplier; // capture level before increment for display
+  const pts = NEAR_MISS_BASE_POINTS * preCombo;
   gameState.score += pts;
   comboMultiplier += 1;
   comboResetTimer = COMBO_RESET_TIME;
@@ -2809,6 +2813,11 @@ function triggerNearMiss (v) {
   AudioManager.playNearMiss();
   if (comboMultiplier >= 2) AudioManager.playComboUp(comboMultiplier);
 
+  // Combo milestone flash (x3, x5, x8)
+  if (comboMultiplier === 3 || comboMultiplier === 5 || comboMultiplier === 8) {
+    comboMilestoneFlash = 0.1;
+  }
+
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
   const vCenterX = v.x + v.width / 2;
@@ -2817,8 +2826,14 @@ function triggerNearMiss (v) {
     timer: NEAR_MISS_FLASH_DURATION,
   };
 
-  // Floating near-miss text (US-009)
-  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT / 2, 'NEAR MISS!', '#FF8800');
+  // Floating near-miss text with points + multiplier (US-002)
+  // Use pre-increment combo for display: '+50' at x1, 'x2 +100!' at x2, etc.
+  const comboColor = getComboColor(preCombo);
+  const floatScale = Math.min(1.5, 1.0 + (preCombo - 1) * 0.12);
+  const floatLabel = preCombo <= 1
+    ? '+' + pts
+    : 'x' + preCombo + ' +' + pts + '!';
+  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT * 0.3, floatLabel, comboColor, floatScale);
 }
 
 function updateParticles (dt) {
@@ -2969,6 +2984,9 @@ function resetGameState () {
   comboMultiplier = 1;
   comboResetTimer = 0;
   comboScaleTimer = 0;
+  comboExpireShakeTimer = 0;
+  comboExpireFadeTimer = 0;
+  comboMilestoneFlash = 0;
   nearMissCount = 0;
   bestCombo = 0;
   nearMissBonusTotal = 0;
@@ -4081,10 +4099,11 @@ function renderShieldItems (ctx) {
 function renderFloatTexts (ctx) {
   if (floatTexts.length === 0) return;
   ctx.save();
-  ctx.font = 'bold 16px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const ft of floatTexts) {
+    const fontSize = Math.round(16 * (ft.scale || 1.0));
+    ctx.font = 'bold ' + fontSize + 'px monospace';
     ctx.globalAlpha = ft.timer / FLOAT_TEXT_DURATION;
     ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);
@@ -4266,27 +4285,78 @@ function renderMuteIcon (ctx) {
 
 // --- Combo HUD ---
 function renderComboHUD (ctx) {
-  if (comboMultiplier < 2) return; // only show at x2+
+  // Show during active combo OR during expire fade-out
+  const isActive = comboMultiplier >= 2;
+  const isFading = comboExpireFadeTimer > 0;
+  if (!isActive && !isFading) return;
 
-  // Fade out in the last second before reset; full alpha for most of the window
-  const fadeAlpha = Math.min(1, comboResetTimer);
-  // Scale-in pop animation when a new near miss triggers
+  // Use last known combo level during fade-out (multiplier already reset to 1)
+  const displayLevel = isActive ? comboMultiplier : 2; // minimum x2 for color
+  const comboColor = getComboColor(displayLevel);
+
+  // Alpha: full during active, fade during expire
+  let alpha = 1;
+  if (!isActive && isFading) {
+    alpha = comboExpireFadeTimer / 0.3;
+  }
+
+  // Pop/bounce animation on each new near miss
   const scaleProgress = comboScaleTimer > 0 ? comboScaleTimer / COMBO_SCALE_DURATION : 0;
-  const scale = 1 + 0.35 * scaleProgress;
+  const popScale = 1 + 0.35 * scaleProgress;
+
+  // Expire shake: horizontal oscillation
+  let shakeX = 0;
+  if (comboExpireShakeTimer > 0) {
+    shakeX = Math.sin(comboExpireShakeTimer * 80) * 3 * (comboExpireShakeTimer / 0.15);
+  }
+
+  const cx = CANVAS_WIDTH / 2;
+  const cy = 45;
 
   ctx.save();
-  ctx.globalAlpha = fadeAlpha;
-  ctx.translate(CANVAS_WIDTH / 2, 32);
-  ctx.scale(scale, scale);
-  ctx.font = 'bold 26px monospace';
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx + shakeX, cy);
+  ctx.scale(popScale, popScale);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  // Milestone white flash overlay
+  const isFlashing = comboMilestoneFlash > 0;
+
+  // Main combo text: 'x{N} COMBO'
+  const label = `x${isActive ? comboMultiplier : 2} COMBO`;
+  ctx.font = 'bold 30px monospace';
+
   // Drop shadow
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillText(`x${comboMultiplier}`, 1, 1);
-  // Gold text
-  ctx.fillStyle = '#FFD700';
-  ctx.fillText(`x${comboMultiplier}`, 0, 0);
+  ctx.fillText(label, 1, 1);
+
+  // Colored text (or white during milestone flash)
+  ctx.fillStyle = isFlashing ? '#FFFFFF' : comboColor;
+  ctx.fillText(label, 0, 0);
+
+  // Timer bar below the text
+  if (isActive) {
+    const barWidth = 120;
+    const barHeight = 6;
+    const ratio = comboResetTimer / COMBO_RESET_TIME;
+    const barX = -barWidth / 2;
+    const barY = 18;
+
+    // Bar background
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // Bar fill — green/yellow/red based on ratio
+    let barColor;
+    if (ratio > 0.66) barColor = '#44FF44';
+    else if (ratio > 0.33) barColor = '#FFDD00';
+    else barColor = '#FF4444';
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
+  }
+
   ctx.restore();
 }
 
@@ -4675,10 +4745,18 @@ const playingState = {
     // Tick combo reset timer; expire combo when it runs out
     if (comboResetTimer > 0) {
       comboResetTimer = Math.max(0, comboResetTimer - dt);
-      if (comboResetTimer === 0) comboMultiplier = 1;
+      if (comboResetTimer === 0 && comboMultiplier > 1) {
+        comboMultiplier = 1;
+        comboExpireShakeTimer = 0.15;
+        comboExpireFadeTimer = 0.3;
+      }
     }
     // Tick combo scale animation
     if (comboScaleTimer > 0) comboScaleTimer = Math.max(0, comboScaleTimer - dt);
+    // Tick combo expire effects
+    if (comboExpireShakeTimer > 0) comboExpireShakeTimer = Math.max(0, comboExpireShakeTimer - dt);
+    if (comboExpireFadeTimer > 0) comboExpireFadeTimer = Math.max(0, comboExpireFadeTimer - dt);
+    if (comboMilestoneFlash > 0) comboMilestoneFlash = Math.max(0, comboMilestoneFlash - dt);
 
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
