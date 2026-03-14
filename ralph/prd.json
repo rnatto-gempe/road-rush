@@ -153,7 +153,7 @@
         "Verify in browser using dev-browser skill: text visibly rises from collected items and fades out"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

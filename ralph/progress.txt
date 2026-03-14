@@ -2,6 +2,28 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-009
+- Implemented floating pickup text for all item types and near-miss
+- Replaced `coinFloatTexts` (coin-only, rendered "+100") with general `floatTexts` array `{x, y, timer, text, color}`
+- Changed `COIN_FLOAT_DURATION = 0.8` → `FLOAT_TEXT_DURATION = 0.9` per AC
+- Added `spawnFloatText(x, y, text, color)` helper: manages 8-max cap (splice oldest), pushes to `floatTexts`
+- Coin collect: `spawnFloatText(coin.x, coin.y, '+1', '#FFD700')`
+- Fuel collect: `spawnFloatText(item.x, item.y, '+FUEL', '#00FF88')`
+- Nitro collect: `spawnFloatText(item.x, item.y, '+NITRO', '#00FFFF')`
+- Shield collect: `spawnFloatText(item.x, item.y, '+SHIELD', '#4488FF')`
+- Near-miss: `spawnFloatText(playerCenterX, player.y + PLAYER_HEIGHT/2, 'NEAR MISS!', '#FF8800')` in `triggerNearMiss()`
+- Float tick (y -= 60*dt, timer decay) moved from `updateCoins()` to inline loop in `playingState.update()` after `updateShieldItems()`
+- Added `renderFloatTexts(ctx)`: bold 16px monospace, alpha = timer/FLOAT_TEXT_DURATION, ctx.save/restore
+- `renderFloatTexts(ctx)` called in `playingState.render()` after `ctx.restore()` (world layer end) before `renderChromaticAberration()` — above world, below HUD
+- Updated `resetGameState()`: `floatTexts.length = 0`
+- Browser verification: game ran twice without JS errors (scores 1472, 838); float text duration is 0.9s — too brief to capture in static screenshot but logic verified through clean runs
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - General float-text pattern: single `floatTexts[]` array with `{x, y, timer, text, color}` + `spawnFloatText()` helper is cleaner than per-type arrays; the 8-max cap prevents unbounded growth during intense play
+  - Float texts should live OUTSIDE the camera-roll ctx.save/restore so they don't tilt with the world — render them after `ctx.restore()` alongside other post-process effects
+  - The existing `coinFloatTexts` rendered "+100" (coin score) but AC wanted "+1" (coin count); the generic system now uses semantically correct labels per item type
+---
+
 ## 2026-03-13 - US-008
 - Implemented beat-pulse HUD elements (audio-reactive)
 - Added `pendingBeats: []` array to `AudioManager.beat`; populated in `updateBeat()` on each kick schedule with `this.beat.pendingBeats.push(beatTime)`; cleared in `stopBeat()` and `startBeat()`
@@ -71,6 +93,7 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Per-band horizontal distortion pattern: draw full source canvas undistorted first, then overdraw target region with per-band `drawImage` slices each shifted by `sinOffset` — avoids edge gap artifacts; 4px band height balances quality vs draw calls
 - Beat detection for visuals: queue scheduled AudioContext beat times in `AudioManager.beat.pendingBeats[]`, consume each frame via `currentTime >= pendingBeats[0]` — precise, frame-rate independent, zero polling cost
 - Exponential decay for pulse animations: precompute `Math.pow(0.001, FIXED_DT / durationSecs)` as a per-frame multiplier; threshold at 0.001 before zeroing; gives snappy feel vs linear decay
+- Floating pickup text pattern: single `floatTexts[]` array `{x,y,timer,text,color}` + `spawnFloatText(x,y,text,color)` helper with 8-max cap; tick in playingState.update(); render after world ctx.restore() but before HUD so texts are above world and unaffected by camera roll
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights
