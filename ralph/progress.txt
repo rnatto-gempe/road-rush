@@ -1,3 +1,37 @@
+## 2026-03-14 - US-006
+- Created `#feedback-btn` (💡 Sugerir Melhoria, amber pill style) created once; visible in titleState and gameOverState, hidden in playingState, explosionState, titleRankingState
+- Created `positionFeedbackBtn()` at canvas logical y≈640; called in `resizeCanvas()`
+- Created `#feedback-modal` overlay with dark backdrop (closes on backdrop click), card with title/subtitle/textarea/name input/error/submit/close-X
+- All text inputs font-size 16px; card max-height 90vh; overflow-y auto
+- `#feedback-name` pre-filled from localStorage 'roadRushPlayerName' on open
+- keydown on textarea/name calls e.stopPropagation(); ESC key closes modal
+- Submit validates non-empty fields; POST JSON {name, suggestion} to FEEDBACK_WEBHOOK_URL; shows 'Enviando...' → 'Obrigado! ✓' → close after 1500ms; error → re-enable button
+- Subtitle uses realistic language (no AI promises): 'Sua sugestão será analisada pela equipe...'
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Modal built entirely in JS (no HTML changes needed); all elements created with document.createElement pattern
+  - feedbackBtnEl declared null early like other UI elements; follows same show/hide in onEnter/onExit pattern
+  - Modal z-index:100 (above ad at z-index:50, above game buttons at z-index:20)
+  - Backdrop click detection: `if (e.target === feedbackModalEl)` — only fires when clicking the overlay itself, not the card
+---
+
+## 2026-03-14 - US-005
+- Added AdSense script placeholder to index.html `<head>` with publisher ID comment
+- Added `<div id='ad-gameover'>` to index.html body after canvas (hidden by default, z-index 50)
+- Created `gameOverAdLabelEl` ('PUBLICIDADE' label) programmatically in main.js after resizeCanvas()
+- Created `positionGameOverAd()` using getBoundingClientRect() + scale; positions ad at logical y≈90, max-width 300px (or 90vw on mobile); label 14px above ad
+- Created `showGameOverAd()`: reads/increments sessionStorage 'roadrush_game_count'; shows ad on even counts (0,2,4...)
+- Created `hideGameOverAd()`: sets both ad+label to display:none
+- `gameOverState.onEnter()` calls `showGameOverAd()`; `gameOverState.onExit()` calls `hideGameOverAd()`
+- Added `positionGameOverAd()` call to `resizeCanvas()`; declared `gameOverAdEl = null` early before first resizeCanvas() call
+- Files changed: index.html, src/main.js
+- **Learnings for future iterations:**
+  - `#ad-gameover` div lives in index.html (not created in JS); fetched via `document.getElementById()` after resizeCanvas() call, following same null-guard pattern as other elements
+  - `PUBLICIDADE` label is created programmatically (not in HTML) so it can be shown/hidden alongside the ad element
+  - Ad slot has no pointer-events:none — required by AdSense policy for clickability
+  - showGameOverAd() uses count BEFORE increment to determine show/hide; increments regardless of whether ad shows
+---
+
 ## Codebase Patterns
 - Road rendering is in `renderRoad(ctx, scrollOffset)` — rumble strips and lane dashes both use scrollOffset modulo their period to compute starting y position
 - To scroll visuals top-to-bottom (toward player), use `y = offset - PERIOD` (not `y = -offset`)
