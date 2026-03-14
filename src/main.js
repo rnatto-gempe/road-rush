@@ -1920,7 +1920,17 @@ function fetchRanking() {
     });
 }
 
-// --- Tap to Start / Tap to Retry / Tap Mute Icon ---
+// --- Tap to Start / Tap to Retry / Tap Mute Icon / Swipe Ranking ---
+let touchStartY = 0; // canvas coords at touchstart
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  touchStartY = (touch.clientY - rect.top) * scaleY;
+}, { passive: false });
+
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
   const touch = e.changedTouches[0];
@@ -1946,9 +1956,20 @@ canvas.addEventListener('touchend', (e) => {
     resetGameState();
     fsm.transition(playingState);
   } else if (fsm.currentState === gameOverState) {
-    AudioManager.playDrumRoll();
-    resetGameState();
-    fsm.transition(playingState);
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      // Swipe gesture: scroll ranking
+      if (gameOverState.rankingStatus === 'loaded' && gameOverState.rankingData.length > 10) {
+        const maxScroll = gameOverState.rankingData.length - 10;
+        const scrollDelta = Math.round(delta / 30);
+        gameOverState.rankingScroll = Math.max(0, Math.min(gameOverState.rankingScroll + scrollDelta, maxScroll));
+      }
+    } else {
+      // Tap gesture: retry
+      AudioManager.playDrumRoll();
+      resetGameState();
+      fsm.transition(playingState);
+    }
   }
   // No tap action during playingState
 }, { passive: false });
