@@ -1920,9 +1920,24 @@ function fetchRanking() {
     });
 }
 
-// --- Tap to Start / Tap to Retry ---
+// --- Tap to Start / Tap to Retry / Tap Mute Icon ---
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
+  const touch = e.changedTouches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const cx = (touch.clientX - rect.left) * scaleX;
+  const cy = (touch.clientY - rect.top) * scaleY;
+
+  // Check mute icon tap first (44×44 area centered on CANVAS_WIDTH-28, 54)
+  const muteX = CANVAS_WIDTH - 28;
+  const muteY = 54;
+  if (cx >= muteX - 22 && cx <= muteX + 22 && cy >= muteY - 22 && cy <= muteY + 22) {
+    AudioManager.toggleMute();
+    return;
+  }
+
   if (fsm.currentState === titleState) {
     AudioManager.init();
     AudioManager.resume();
