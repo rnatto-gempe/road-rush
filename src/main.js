@@ -1551,6 +1551,7 @@ let speedPenaltyTimer = 0;        // remaining seconds for speed penalty
 let invulnTimer = 0;              // remaining invulnerability seconds after collision
 let redFlash = { alpha: 0 };      // frontal hit red flash overlay state
 let dangerFlashAlpha = 0;         // screen-edge red flash when traffic is nearby (US-010)
+let hitStopFrames = 0;            // frames remaining in hit-stop freeze (US-011); update() skipped while > 0
 const particles = [];             // spark particles
 let playerVisible = true;         // set to false during explosion sequence
 
@@ -2234,6 +2235,8 @@ function resetGameState() {
   nitroEaseTimer = 0;
   // Reset chromatic aberration
   chromaTimer = 0;
+  // Reset hit stop (US-011)
+  hitStopFrames = 0;
   // Reset motion blur ghost (US-003)
   ghostValid = false;
   // Reset camera roll (US-006)
@@ -3870,6 +3873,8 @@ const explosionState = {
     playerVisible = false;
     AudioManager.playExplosion();
     AudioManager.startExplosionRumble();
+    // Hit stop on major collision (US-011): freeze update for 3 frames (~50ms)
+    hitStopFrames = 3;
     // Chromatic aberration on explosion entry (US-002)
     chromaTimer = 0.4;
     chromaDuration = 0.4;
@@ -4167,7 +4172,11 @@ function gameLoop(timestamp) {
 
   while (accumulator >= FIXED_DT) {
     if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
-    fsm.update(FIXED_DT);
+    if (hitStopFrames > 0) {
+      hitStopFrames--;
+    } else {
+      fsm.update(FIXED_DT);
+    }
     accumulator -= FIXED_DT;
   }
 
