@@ -133,7 +133,7 @@
         "Verify in browser using dev-browser skill: HUD elements visibly pulse with the music beat"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

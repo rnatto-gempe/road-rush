@@ -2,6 +2,25 @@
 Started: Fri Mar 13 19:37:51 -03 2026
 ---
 
+## 2026-03-13 - US-008
+- Implemented beat-pulse HUD elements (audio-reactive)
+- Added `pendingBeats: []` array to `AudioManager.beat`; populated in `updateBeat()` on each kick schedule with `this.beat.pendingBeats.push(beatTime)`; cleared in `stopBeat()` and `startBeat()`
+- Added module-level state: `beatPulse`, `nitroPulse`, `coinPulse` (exponential decay values [0→1]); decay constants `BEAT_PULSE_DECAY` (~0 by 80ms) and `COIN_PULSE_DECAY` (~0 by 60ms)
+- In `playingState.update()`: consume `pendingBeats` by checking `AudioManager.ctx.currentTime >= pendingBeats[0]`; each consumed beat sets `beatPulse = 1.0` and `nitroPulse = 1.0` (if nitro active); all three pulses decay exponentially each frame
+- In coin collection: set `coinPulse = 1.0` on each coin collected
+- Modified `renderScoreHUD()`: score scales to max(1 + 0.08*beatPulse, 1 + 0.15*coinPulse); small speed indicator ("XXX km/h") added below score, scales by (1 + 0.08*beatPulse); both wrapped in ctx.save/restore around anchor-point translate
+- Added `renderNitroHUD()`: cyan bar + "NITRO" label at bottom-center; visible during nitroTimer>0 or nitroEaseTimer>0; `globalAlpha = 0.7 + 0.3*nitroPulse` gives the beat-reactive glow; easing phase shows at half width
+- Called `renderNitroHUD(ctx)` in `playingState.render()` after `renderComboHUD()`
+- Reset beat pulse vars in `initGame()`
+- Browser verification: game loaded, score and speed indicator visible at top-right, game running without errors
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - Beat detection pattern: queue scheduled AudioContext beat times in `pendingBeats[]`, consume them each frame by comparing `AudioManager.ctx.currentTime` — accurate and frame-rate independent, does not require polling BPM
+  - Exponential decay via precomputed `Math.pow(0.001, FIXED_DT / durationSecs)` factor gives natural snappy feel; compare against 0.001 threshold before zeroing to avoid infinite tail
+  - Score HUD scale transform: `ctx.translate(anchorX, anchorY); ctx.scale(s,s); ctx.translate(-anchorX,-anchorY)` scales around a fixed anchor point — use the visual center of the element as anchor
+  - `pendingBeats` queue cap at 24 entries prevents unbounded growth if game falls behind AudioContext scheduling
+---
+
 ## 2026-03-13 - US-007
 - Implemented heat haze / road shimmer at high speed
 - Added `hazeCanvas`/`hazeCtx` offscreen canvas at module level (zero per-frame allocation)
@@ -50,6 +69,8 @@ Started: Fri Mar 13 19:37:51 -03 2026
 - Perspective trapezoid road: only draw geometry changes (fovTopLeft/fovTopRight at y=0, ROAD_LEFT/ROAD_RIGHT at y=CANVAS_HEIGHT); all game logic keeps using original constants. Converging lane lines use `xAtY(y) = laneXTop + (laneXBottom-laneXTop)*(y/CANVAS_HEIGHT)` extended beyond canvas for scrollable dashes
 - Camera roll pattern: `ctx.save()` → `ctx.translate(CW/2, CH/2)` → `ctx.rotate(roll*PI/180)` → `ctx.translate(-CW/2,-CH/2)` → draw world → `ctx.restore()` → draw HUD; post-process effects (chroma snapshot) go after restore
 - Per-band horizontal distortion pattern: draw full source canvas undistorted first, then overdraw target region with per-band `drawImage` slices each shifted by `sinOffset` — avoids edge gap artifacts; 4px band height balances quality vs draw calls
+- Beat detection for visuals: queue scheduled AudioContext beat times in `AudioManager.beat.pendingBeats[]`, consume each frame via `currentTime >= pendingBeats[0]` — precise, frame-rate independent, zero polling cost
+- Exponential decay for pulse animations: precompute `Math.pow(0.001, FIXED_DT / durationSecs)` as a per-frame multiplier; threshold at 0.001 before zeroing; gives snappy feel vs linear decay
 
 ## 2026-03-13 - US-004
 - Implemented bloom / glow on collectibles (coin, fuel, nitro, shield) and player headlights
