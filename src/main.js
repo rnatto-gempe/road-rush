@@ -1678,6 +1678,39 @@ hazeCanvas.width = CANVAS_WIDTH;
 hazeCanvas.height = CANVAS_HEIGHT;
 const hazeCtx = hazeCanvas.getContext('2d');
 
+// --- Mobile Touch Controls (US-001) ---
+const touchLeft = document.createElement('div');
+touchLeft.className = 'touch-left';
+touchLeft.style.cssText = [
+  'position:fixed',
+  'display:none',
+  'touch-action:none',
+  'z-index:100',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+const touchRight = document.createElement('div');
+touchRight.className = 'touch-right';
+touchRight.style.cssText = [
+  'position:fixed',
+  'display:none',
+  'touch-action:none',
+  'z-index:100',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+document.body.appendChild(touchLeft);
+document.body.appendChild(touchRight);
+
+function setupTouchBtn(el, key) {
+  el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; }, { passive: false });
+  el.addEventListener('touchmove', (e) => { e.preventDefault(); keys[key] = true; }, { passive: false });
+  el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; }, { passive: false });
+  el.addEventListener('touchcancel', (e) => { e.preventDefault(); keys[key] = false; }, { passive: false });
+}
+setupTouchBtn(touchLeft, 'ArrowLeft');
+setupTouchBtn(touchRight, 'ArrowRight');
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
   const windowWidth = window.innerWidth;
@@ -1698,6 +1731,26 @@ function resizeCanvas() {
   canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
   positionNameForm();
+  positionTouchButtons(displayWidth, displayHeight);
+}
+
+function positionTouchButtons(displayWidth, displayHeight) {
+  // Center the canvas display area
+  const left = (window.innerWidth - displayWidth) / 2;
+  const top = (window.innerHeight - displayHeight) / 2;
+  const btnHeight = displayHeight * 0.20;
+  const btnWidth = displayWidth / 2;
+  const btnTop = top + displayHeight - btnHeight;
+
+  touchLeft.style.left = `${left}px`;
+  touchLeft.style.top = `${btnTop}px`;
+  touchLeft.style.width = `${btnWidth}px`;
+  touchLeft.style.height = `${btnHeight}px`;
+
+  touchRight.style.left = `${left + btnWidth}px`;
+  touchRight.style.top = `${btnTop}px`;
+  touchRight.style.width = `${btnWidth}px`;
+  touchRight.style.height = `${btnHeight}px`;
 }
 
 // Declared early so positionNameForm() guard works when resizeCanvas() is called below
@@ -3776,6 +3829,8 @@ const playingState = {
     AudioManager.startPad();
     AudioManager.startArp();
     AudioManager.startBass();
+    touchLeft.style.display = 'block';
+    touchRight.style.display = 'block';
   },
 
   onExit() {
@@ -3786,6 +3841,10 @@ const playingState = {
     AudioManager.stopEngine();
     AudioManager.stopRoad();
     AudioManager.stopPad();
+    touchLeft.style.display = 'none';
+    touchRight.style.display = 'none';
+    keys['ArrowLeft'] = false;
+    keys['ArrowRight'] = false;
   },
 
   update(dt) {

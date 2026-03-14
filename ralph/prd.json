@@ -1,20 +1,22 @@
 {
   "project": "Road Rush",
-  "branchName": "ralph/immersive-ui-effects",
-  "description": "Immersive UI Effects — screen-space effects, environmental reactions, audio-reactive HUD, and cinematic visual polish inspired by Burnout, F-Zero, NFS Underground, and Geometry Dash.",
+  "branchName": "ralph/mobile-touch-controls",
+  "description": "Mobile Touch Controls — full touch control layer overlaid on the canvas so the game is playable on smartphones and tablets without a keyboard.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Dynamic speed vignette (tunnel vision)",
-      "description": "As a player, I want the edges of the screen to darken progressively as I go faster so that I feel tunnel vision pulling me into the road.",
+      "title": "Left/Right movement buttons",
+      "description": "As a mobile player, I want two large touch areas at the bottom of the screen so that I can steer the car with my thumbs.",
       "acceptanceCriteria": [
-        "A full-canvas radial gradient overlay is drawn each frame (separate from the existing fuel-warning vignette)",
-        "At scrollSpeed < 300 px/s: vignette alpha = 0 (invisible)",
-        "At scrollSpeed 300→600 px/s: alpha interpolates from 0 → 0.25 (soft dark edges)",
-        "At scrollSpeed 600→800 px/s: alpha interpolates from 0.25 → 0.55 (strong tunnel vision)",
-        "Color is dark grey/black (rgba(0,0,0,alpha)) — distinct from the red fuel vignette",
-        "Drawn after road and traffic layers, before HUD, so it doesn't darken the UI",
-        "Verify in browser using dev-browser skill: vignette visibly intensifies as speed increases"
+        "Two HTML div elements (.touch-left, .touch-right) are appended to document.body, positioned absolutely over the bottom 20% of the canvas display area (split 50/50 left-right)",
+        "touchstart and touchmove on .touch-left set keys['ArrowLeft'] = true; touchend/touchcancel set it to false",
+        "touchstart and touchmove on .touch-right set keys['ArrowRight'] = true; touchend/touchcancel set it to false",
+        "Multi-touch supported: both buttons can be held simultaneously",
+        "Buttons are visible and interactive only during playingState (hidden via display:none in other states); they are shown in playingState.onEnter and hidden in playingState.onExit",
+        "resizeCanvas() also repositions and resizes both button divs to stay aligned with the canvas",
+        "Keyboard input (ArrowLeft / ArrowRight) continues to work normally",
+        "touch-action: none and e.preventDefault() on touchstart/touchmove suppress browser scroll/zoom",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
       "passes": true,
@@ -22,186 +24,77 @@
     },
     {
       "id": "US-002",
-      "title": "Chromatic aberration on impact and nitro",
-      "description": "As a player, I want the screen to split into colored ghost images on impact and nitro activation so that intense moments feel physically jarring.",
+      "title": "Visual feedback on button press",
+      "description": "As a mobile player, I want movement buttons to highlight when pressed so that I know my input was registered.",
       "acceptanceCriteria": [
-        "On collision entry (explosionState transition): chromatic aberration activates for 0.4s",
-        "On nitro activation: activates for 0.25s at reduced intensity",
-        "Effect: draw the current frame tinted red with offset (+3px, 0) and blue with offset (-3px, 0) at globalAlpha 0.4 using globalCompositeOperation = 'screen', on top of the normal frame",
-        "Intensity decays linearly over the duration (from full to 0)",
-        "Uses an offscreen canvas to capture the frame before applying the split",
-        "Does NOT run during normal gameplay (zero cost when inactive)",
-        "Verify in browser using dev-browser skill: RGB split visible on explosion start and nitro boost"
+        "Each button shows a white semi-transparent background (rgba(255,255,255,0.15)) while a finger is held — achieved by adding/removing CSS class .active",
+        "Arrow icons (◄ / ►) rendered via button textContent or ::before CSS pseudo-element; 30% opacity idle, 90% opacity when .active",
+        "Highlight disappears immediately on touchend/touchcancel",
+        "No visual flicker when both buttons are pressed simultaneously",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Motion blur / frame ghosting at high speed",
-      "description": "As a player, I want fast-moving traffic and the road to leave subtle ghost trails when I'm at top speed so that the game feels like it's on the edge of control.",
+      "title": "Tap to Start and Tap to Retry",
+      "description": "As a mobile player, I want to tap the screen to start the game and retry after Game Over so that I don't need a keyboard.",
       "acceptanceCriteria": [
-        "An offscreen canvas retains the previous frame",
-        "At scrollSpeed > 600 px/s: composite previous frame at globalAlpha 0.18 before drawing current frame",
-        "At scrollSpeed > 700 px/s: increase ghost alpha to 0.28",
-        "Effect only active above 600 px/s — zero performance cost below that threshold",
-        "Ghost is drawn only on the road/traffic layer, not on HUD elements (HUD drawn on top after ghost)",
-        "Verify in browser using dev-browser skill: ghosting trails visible on vehicles at high speed"
+        "A touchend listener on the canvas checks fsm.currentState: if startState, trigger the same transition as pressing Enter (fsm.transition(playingState))",
+        "If gameOverState, trigger the same action as pressing Enter (fsm.transition(playingState) + initGame())",
+        "Tap does NOT fire during playingState",
+        "On touch-capable devices ('ontouchstart' in window), the canvas text 'Press Enter to Start' is updated to also include 'or Tap' and 'Press Enter to Retry' likewise",
+        "No 300ms delay: use touchend with preventDefault",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Bloom / glow on collectibles and nitro exhaust",
-      "description": "As a player, I want collectible items and nitro flames to emit light so that they look like they glow and are visually distinct from traffic.",
+      "title": "Tappable mute icon",
+      "description": "As a mobile player, I want to tap the mute icon to toggle sound so that I don't need the M key.",
       "acceptanceCriteria": [
-        "Collectibles (coin, fuel, nitro, shield) have a colored halo: draw item a second time at 2x scale with filter: blur(8px) and globalCompositeOperation = 'lighter' at globalAlpha 0.5",
-        "Nitro exhaust particles already rendered with 'lighter' compositing — boost particle radius by 30% and increase alpha by 0.15 when scrollSpeed > 600",
-        "Player car headlights (front two white circles) rendered with blur glow when active",
-        "Bloom uses an offscreen canvas: render bloom targets there, then composite onto main canvas",
-        "No bloom on traffic vehicles (performance constraint)",
-        "Verify in browser using dev-browser skill: collectibles visibly glow; nitro trail is brighter at high speed"
+        "A touchend listener on the canvas checks if the touch point (mapped to canvas coords via getBoundingClientRect + scale ratio) falls within a 44×44px area centered on (CANVAS_WIDTH - 28, 54)",
+        "If it does, call AudioManager.toggleMute()",
+        "Works in all FSM states (startState, playingState, gameOverState)",
+        "Icon visual updates on the next render frame (muted X mark vs sound waves)",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Dynamic FOV — road perspective convergence with speed",
-      "description": "As a player, I want the road to appear to narrow and accelerate toward a vanishing point as I go faster so that I feel the perspective crushing in on me.",
+      "title": "Ranking scroll via swipe",
+      "description": "As a mobile player, I want to swipe the ranking list up/down on the Game Over screen so that I can see all entries.",
       "acceptanceCriteria": [
-        "The road drawing function uses a fixed trapezoid (left/right edge coordinates) — make the top edge width (near vanishing point) dynamically narrower at high speed",
-        "At base speed: road top width = current value (no change)",
-        "At scrollSpeed 600 px/s: top width reduces by 15%",
-        "At scrollSpeed 800 px/s: top width reduces by 30% (maximum convergence)",
-        "Road lane markings and edges interpolate smoothly (no jumps)",
-        "Change applies only to the drawn road geometry — player car position and traffic lanes are unaffected",
-        "Verify in browser using dev-browser skill: road visibly narrows at high speed; traffic/player position unchanged"
+        "On gameOverState, a touchstart listener on the canvas stores the initial Y position",
+        "On touchend, compute delta = startY - endY (canvas coords); each 30px of delta scrolls gameOverState.rankingScroll by 1 unit (swipe up = scroll down = rankingScroll++)",
+        "Scroll is clamped to valid range (0 to maxScroll)",
+        "If |delta| < 10px the gesture is treated as a tap (no scroll), preventing conflict with tap-to-retry",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Camera roll on lateral movement",
-      "description": "As a player, I want the canvas to tilt slightly when I swerve left or right so that the car feels like it has physical weight and momentum.",
+      "title": "Viewport meta and global touch prevention",
+      "description": "As a mobile player, I want the game to feel native with no page scroll, pinch-zoom, or 300ms tap delay.",
       "acceptanceCriteria": [
-        "Track lateral input: left key → target roll = +2.5°, right key → target roll = -2.5°, no key → target roll = 0°",
-        "Actual roll eases toward target using spring interpolation: roll += (target - roll) * 0.12 per frame",
-        "Apply ctx.rotate(roll * Math.PI / 180) around canvas center before all world rendering",
-        "Roll does NOT apply to HUD elements (save/restore ctx around world render, draw HUD after)",
-        "Maximum roll capped at ±3° to prevent disorientation",
-        "Verify in browser using dev-browser skill: visible screen tilt when pressing left/right; HUD stays level"
+        "index.html viewport meta tag updated to include user-scalable=no, maximum-scale=1.0",
+        "CSS touch-action: none applied to the canvas element and the touch button divs",
+        "touchmove listener on document.body calls e.preventDefault() when the target is the canvas or a touch button (prevents scroll while playing)",
+        "Typecheck passes (npm run build succeeds)"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-007",
-      "title": "Heat haze / road shimmer at high speed",
-      "description": "As a player, I want the road surface to shimmer and distort at high speed so that the game feels like the asphalt is burning up beneath you.",
-      "acceptanceCriteria": [
-        "At scrollSpeed > 500 px/s: animated horizontal wavy distortion applied to the lower 40% of the canvas (road surface area)",
-        "Implemented by rendering road to offscreen canvas then drawing back with per-band y-offset: sinOffset = Math.sin(time * 3 + y * 0.08) * intensity",
-        "Intensity: 0 below 500 px/s, ramps to max 3px offset at 800 px/s",
-        "The distortion applies only to the road layer — traffic and player are drawn normally on top",
-        "No shimmer during explosionState or gameOverState",
-        "Verify in browser using dev-browser skill: road surface wavy distortion visible at max speed"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-008",
-      "title": "Beat-pulse HUD elements (audio-reactive)",
-      "description": "As a player, I want HUD elements to visually pulse in sync with the music beat so that the game feels unified between audio and visual.",
-      "acceptanceCriteria": [
-        "Beat scheduler (already in codebase) fires a beatPulse event or sets a flag lastBeatTime on each kick drum beat",
-        "Score counter and speed indicator scale to 1.08x for 80ms then ease back to 1.0x on each beat",
-        "Nitro meter glows brighter (alpha +0.3 for 80ms) on each beat when nitro is active",
-        "Coin counter bounces scale 1.15x for 60ms when a coin is collected (regardless of beat)",
-        "All pulse animations use exponential decay (not linear) for snappy feel",
-        "Pulse only active during playingState — no pulse on title/game over screens",
-        "Beat sync relies on the AudioContext.currentTime beat scheduler from the musical audio branch — this story adds the visual response hook, not the audio scheduler itself",
-        "Verify in browser using dev-browser skill: HUD elements visibly pulse with the music beat"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "Floating pickup text",
-      "description": "As a player, I want to see floating text rise from the point where I collect items so that every pickup feels acknowledged and satisfying.",
-      "acceptanceCriteria": [
-        "On coin collect: spawn '+1' (or '+5' for coin clusters) in yellow at the coin's canvas position",
-        "On fuel collect: spawn '+FUEL' in green",
-        "On nitro collect: spawn '+NITRO' in cyan",
-        "On shield collect: spawn '+SHIELD' in blue",
-        "On near-miss (existing system): spawn 'NEAR MISS!' in orange",
-        "Text floats upward 60px over 0.9s, fading from alpha 1.0 to 0 over that duration",
-        "Font: bold 16px, same font family as HUD",
-        "Text is drawn on top of all world elements but below the main HUD panel",
-        "Max 8 simultaneous floating texts (oldest removed if exceeded)",
-        "Verify in browser using dev-browser skill: text visibly rises from collected items and fades out"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-010",
-      "title": "Screen-edge danger flash",
-      "description": "As a player, I want the screen edges to flash red when a dangerous vehicle is approaching so that I get a visceral off-screen threat warning.",
-      "acceptanceCriteria": [
-        "When any traffic vehicle is within 120px of the player's y-position (near-miss proximity): trigger a red edge flash",
-        "Flash: draw a red radial gradient from screen edges inward (rgba(255,0,0,0) center to rgba(255,0,0,0.35) edges) that decays over 0.3s",
-        "Multiple simultaneous vehicles can stack flashes (alpha adds, max 0.5 total)",
-        "Flash does NOT trigger during explosionState (already in explosion, no need)",
-        "Distinct from the existing fuel-warning vignette (this is red with rapid onset, the fuel vignette is slow pulse)",
-        "Verify in browser using dev-browser skill: screen edges flash red when traffic passes close to the player"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-011",
-      "title": "Hit stop on major collision",
-      "description": "As a player, I want the game to freeze for a few frames when I crash so that the collision feels heavy and impactful, not instant.",
-      "acceptanceCriteria": [
-        "On transition to explosionState: freeze the game loop update for exactly 3 frames (approx 50ms at 60fps)",
-        "During freeze: update(dt) is not called, but render() continues (screen does not blank)",
-        "After freeze: normal explosionState animation proceeds",
-        "Hit stop is implemented as a hitStopFrames counter: set to 3 on explosion entry, decremented each frame in gameLoop, updates skipped while > 0",
-        "Does NOT affect audio playback (AudioContext continues normally)",
-        "Verify in browser using dev-browser skill: brief freeze visible at moment of explosion before explosion animation plays"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": ""
-    },
-    {
-      "id": "US-012",
-      "title": "Adaptive HUD opacity",
-      "description": "As a player, I want the HUD to be subtle during normal play and visible only when values are changing so that the road stays my focus.",
-      "acceptanceCriteria": [
-        "All HUD elements (score, speed, fuel, coins) render at 65% opacity during steady state",
-        "When a value changes: that element's opacity ramps to 100% over 100ms, stays for 1.5s, then fades back to 65% over 500ms",
-        "Fuel bar always at 100% opacity when below 30% fuel (critical state override)",
-        "Implemented per-element with hudOpacity trackers that store {value, lastChanged, currentAlpha}",
-        "ctx.globalAlpha is saved/restored around each HUD element draw",
-        "Verify in browser using dev-browser skill: HUD elements are subdued at steady state, brighten when score/fuel changes"
-      ],
-      "priority": 12,
-      "passes": true,
+      "passes": false,
       "notes": ""
     }
   ]
