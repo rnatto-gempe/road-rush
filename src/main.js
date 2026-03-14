@@ -1594,6 +1594,17 @@ let coinPulse = 0;    // fires on coin collect (not beat-driven) → animates sc
 const BEAT_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.08); // ~0 by 80 ms
 const COIN_PULSE_DECAY  = Math.pow(0.001, (1 / 60) / 0.06); // ~0 by 60 ms
 
+// Adaptive HUD opacity constants (US-012)
+const HUD_OPACITY_STEADY   = 0.65; // base opacity during steady state
+const HUD_OPACITY_RAMP_IN  = 0.1;  // seconds to ramp to 1.0 on change
+const HUD_OPACITY_HOLD     = 1.5;  // seconds to hold at 1.0 after last change
+const HUD_OPACITY_RAMP_OUT = 0.5;  // seconds to fade back to STEADY
+// Per-element trackers: {trackedValue, lastChanged, currentAlpha}
+const hudOpacity = {
+  score: { trackedValue: -1, lastChanged: -9999, currentAlpha: HUD_OPACITY_STEADY },
+  fuel:  { trackedValue: -1, lastChanged: -9999, currentAlpha: HUD_OPACITY_STEADY },
+};
+
 // Dash pattern constants
 const DASH_LENGTH = 30;
 const DASH_GAP = 20;
@@ -2237,6 +2248,13 @@ function resetGameState() {
   chromaTimer = 0;
   // Reset hit stop (US-011)
   hitStopFrames = 0;
+  // Reset adaptive HUD opacity (US-012)
+  hudOpacity.score.trackedValue = -1;
+  hudOpacity.score.lastChanged = -9999;
+  hudOpacity.score.currentAlpha = HUD_OPACITY_STEADY;
+  hudOpacity.fuel.trackedValue = -1;
+  hudOpacity.fuel.lastChanged = -9999;
+  hudOpacity.fuel.currentAlpha = HUD_OPACITY_STEADY;
   // Reset motion blur ghost (US-003)
   ghostValid = false;
   // Reset camera roll (US-006)
@@ -3330,6 +3348,23 @@ function renderFloatTexts(ctx) {
 }
 
 // --- Fuel HUD ---
+// US-012: update a single HUD opacity tracker; call each frame during playingState.update()
+function tickHudOpacity(tracker, newValue, elapsedTime) {
+  if (newValue !== tracker.trackedValue) {
+    tracker.trackedValue = newValue;
+    tracker.lastChanged = elapsedTime;
+  }
+  const t = elapsedTime - tracker.lastChanged;
+  if (t < HUD_OPACITY_RAMP_IN) {
+    tracker.currentAlpha = HUD_OPACITY_STEADY + (1 - HUD_OPACITY_STEADY) * (t / HUD_OPACITY_RAMP_IN);
+  } else if (t < HUD_OPACITY_RAMP_IN + HUD_OPACITY_HOLD) {
+    tracker.currentAlpha = 1.0;
+  } else {
+    const fade = (t - HUD_OPACITY_RAMP_IN - HUD_OPACITY_HOLD) / HUD_OPACITY_RAMP_OUT;
+    tracker.currentAlpha = 1.0 - (1 - HUD_OPACITY_STEADY) * Math.min(1, fade);
+  }
+}
+
 function renderFuelHUD(ctx) {
   const fuelPct = gameState.fuel / FUEL_INITIAL;
   const lowFuel = fuelPct < 0.2;
@@ -3731,6 +3766,10 @@ const playingState = {
       }
     }
 
+    // Adaptive HUD opacity (US-012): update trackers each frame
+    tickHudOpacity(hudOpacity.score, Math.floor(gameState.displayedScore), gameState.elapsedTime);
+    tickHudOpacity(hudOpacity.fuel, Math.floor(gameState.fuel), gameState.elapsedTime);
+
     // AABB collision detection — only when not invulnerable
     if (invulnTimer <= 0) {
       const ph = getPlayerHitbox(gameState.player);
@@ -3796,11 +3835,22 @@ const playingState = {
     // Applied after restore so it post-processes the full rolled frame
     renderChromaticAberration();
 
-    // Fuel bar HUD (full-width bar at top + low-fuel vignette)
-    renderFuelHUD(ctx);
+    // Fuel bar HUD (full-width bar at top + low-fuel vignette) — US-012: adaptive opacity
+    {
+      const fuelCritical = gameState.fuel < FUEL_INITIAL * 0.3;
+      ctx.save();
+      ctx.globalAlpha = fuelCritical ? 1.0 : hudOpacity.fuel.currentAlpha;
+      renderFuelHUD(ctx);
+      ctx.restore();
+    }
 
-    // Score HUD (top-right)
-    renderScoreHUD(ctx);
+    // Score HUD (top-right) — US-012: adaptive opacity
+    {
+      ctx.save();
+      ctx.globalAlpha = hudOpacity.score.currentAlpha;
+      renderScoreHUD(ctx);
+      ctx.restore();
+    }
 
     // Combo counter (center-top, shown when combo >= 2)
     renderComboHUD(ctx);
