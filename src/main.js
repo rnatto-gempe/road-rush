@@ -397,11 +397,30 @@ const AudioManager = {
   updateEngine (scrollSpeed) {
     if (!this.engine.osc) return;
     const now = this.ctx.currentTime;
+    const phase = gameState.phase;
+
+    if (phase === 'space') {
+      // Space: electronic hum — sine wave 80Hz, low gain
+      if (this.engine.osc.type !== 'sine') {
+        this.engine.osc.type = 'sine';
+      }
+      this.engine.osc.frequency.setTargetAtTime(80, now, 0.1);
+      this.engine.filter.frequency.setTargetAtTime(200, now, 0.1);
+      this.engine.gain.gain.setTargetAtTime(0.05, now, 0.1);
+      return;
+    }
+
     // Map scrollSpeed 200→800 to frequency 60→180Hz
     const t = Math.max(0, Math.min(1, (scrollSpeed - 200) / 600));
     let freq = 60 + t * 120;
+    // Sky phase: raise pitch by 50%
+    if (phase === 'sky') freq *= 1.5;
     // Nitro boost: raise pitch by ~30%
     if (this.nitro.active) freq *= 1.3;
+    // Restore sawtooth if coming back from space (e.g. after reset)
+    if (this.engine.osc.type !== 'sawtooth') {
+      this.engine.osc.type = 'sawtooth';
+    }
     this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
     // Filter cutoff maps 400→800Hz
     this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
@@ -1355,6 +1374,63 @@ const AudioManager = {
     const interval = 0.075; // 4 kicks → 0.3s total
     for (let i = 0; i < 4; i++) {
       this._scheduleKick(now + i * interval);
+    }
+  },
+
+  // ─── Phase transition sound effects ───
+  playPhaseTransition (fromPhase, toPhase) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    if (fromPhase === 'road' && toPhase === 'sky') {
+      // Ascending sweep — sawtooth 200Hz→600Hz over 2s
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 2);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+      gain.gain.setValueAtTime(0.15, now + 1.5);
+      gain.gain.linearRampToValueAtTime(0, now + 2);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+
+    if (fromPhase === 'sky' && toPhase === 'space') {
+      // Bass drop — sine 120Hz→40Hz over 1.5s
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 1.5);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+      gain.gain.setValueAtTime(0.2, now + 1.0);
+      gain.gain.linearRampToValueAtTime(0, now + 1.5);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 1.5);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+
+      // Ethereal tone — sine 800Hz, gain 0.05, 1.5s (starts after bass drop)
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(800, now + 0.5);
+      const gain2 = this.ctx.createGain();
+      gain2.gain.setValueAtTime(0, now + 0.5);
+      gain2.gain.linearRampToValueAtTime(0.05, now + 0.8);
+      gain2.gain.setValueAtTime(0.05, now + 1.5);
+      gain2.gain.linearRampToValueAtTime(0, now + 2.0);
+      osc2.connect(gain2);
+      gain2.connect(this.masterGain);
+      osc2.start(now + 0.5);
+      osc2.stop(now + 2.0);
+      osc2.onended = () => { osc2.disconnect(); gain2.disconnect(); };
     }
   },
 
@@ -5674,11 +5750,13 @@ const playingState = {
       phaseTriggered.sky = true;
       gameState.phase = 'sky';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'road', to: 'sky' };
+      AudioManager.playPhaseTransition('road', 'sky');
     }
     if (!phaseTriggered.space && gameState.score >= 50000) {
       phaseTriggered.space = true;
       gameState.phase = 'space';
       gameState.phaseTransition = { progress: 0, _timer: 0, active: true, from: 'sky', to: 'space' };
+      AudioManager.playPhaseTransition('sky', 'space');
     }
 
     // Advance active phase transition (3 second duration with easing)
