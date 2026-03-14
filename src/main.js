@@ -1592,6 +1592,7 @@ let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 let comboExpireShakeTimer = 0; // brief shake when combo expires (0.15s)
 let comboExpireFadeTimer = 0;  // fade-out after combo expires (0.3s)
 let comboMilestoneFlash = 0;   // white flash at milestone levels (0.1s)
+let comboGlowAlpha = 0;        // combo edge glow intensity (fades in/out)
 
 // Near miss tracking for game over stats
 let nearMissCount = 0;
@@ -2573,6 +2574,32 @@ function renderDangerFlash (ctx) {
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 }
 
+// Combo edge glow — ambient glow on top/bottom borders during active combo (US-006)
+function renderComboGlow (ctx) {
+  if (comboGlowAlpha <= 0.001) return;
+  const color = getComboColor(comboMultiplier >= 2 ? comboMultiplier : 2);
+  // Breathing pulse: alpha oscillates at ~1Hz
+  const pulse = 0.15 + 0.1 * Math.sin(gameState.elapsedTime * Math.PI * 2);
+  const alpha = comboGlowAlpha * pulse;
+
+  ctx.save();
+  // Top edge glow
+  const topGrad = ctx.createLinearGradient(0, 0, 0, 100);
+  topGrad.addColorStop(0, color);
+  topGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, 100);
+
+  // Bottom edge glow
+  const botGrad = ctx.createLinearGradient(0, CANVAS_HEIGHT, 0, CANVAS_HEIGHT - 100);
+  botGrad.addColorStop(0, color);
+  botGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0, CANVAS_HEIGHT - 100, CANVAS_WIDTH, 100);
+  ctx.restore();
+}
+
 // Chromatic aberration — RGB split overlay on impact and nitro (US-002)
 // Snapshots the current canvas frame, extracts red/blue channels via multiply,
 // and re-draws them offset by ±3px with 'screen' compositing.
@@ -3015,6 +3042,7 @@ function resetGameState () {
   comboExpireShakeTimer = 0;
   comboExpireFadeTimer = 0;
   comboMilestoneFlash = 0;
+  comboGlowAlpha = 0;
   nearMissCount = 0;
   bestCombo = 0;
   nearMissBonusTotal = 0;
@@ -4785,6 +4813,13 @@ const playingState = {
     if (comboExpireShakeTimer > 0) comboExpireShakeTimer = Math.max(0, comboExpireShakeTimer - dt);
     if (comboExpireFadeTimer > 0) comboExpireFadeTimer = Math.max(0, comboExpireFadeTimer - dt);
     if (comboMilestoneFlash > 0) comboMilestoneFlash = Math.max(0, comboMilestoneFlash - dt);
+    // Combo glow: fade in over 0.3s when combo active, fade out over 0.5s when lost
+    const glowTarget = comboMultiplier >= 2 ? 1 : 0;
+    if (glowTarget > comboGlowAlpha) {
+      comboGlowAlpha = Math.min(1, comboGlowAlpha + dt / 0.3);
+    } else if (glowTarget < comboGlowAlpha) {
+      comboGlowAlpha = Math.max(0, comboGlowAlpha - dt / 0.5);
+    }
 
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
@@ -4865,6 +4900,9 @@ const playingState = {
 
     // Screen-edge danger flash — red glow from edges when traffic is nearby (US-010)
     renderDangerFlash(ctx);
+
+    // Combo edge glow — ambient glow on top/bottom borders (US-006)
+    renderComboGlow(ctx);
 
     ctx.restore();
     // --- End world layer ---
