@@ -202,7 +202,15 @@ const AudioManager = {
     if (this.ctx) return;
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.connect(this.ctx.destination);
+    // Limiter/compressor on the master bus to prevent clipping
+    const compressor = this.ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-6, this.ctx.currentTime);
+    compressor.ratio.setValueAtTime(10, this.ctx.currentTime);
+    compressor.knee.setValueAtTime(3, this.ctx.currentTime);
+    compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
+    compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
+    this.masterGain.connect(compressor);
+    compressor.connect(this.ctx.destination);
   },
 
   resume() {
@@ -291,8 +299,9 @@ const AudioManager = {
     this.engine.osc.frequency.setTargetAtTime(freq, now, 0.05);
     // Filter cutoff maps 400→800Hz
     this.engine.filter.frequency.setTargetAtTime(400 + t * 400, now, 0.05);
-    // Volume ramps 0.08→0.20 with speed
-    const vol = 0.08 + t * 0.12;
+    // Volume: reduced to ~0.1 when musical elements are active (pad/bass/arpeggio)
+    const musicActive = this.pad.active || this.bass.running;
+    const vol = musicActive ? 0.10 : (0.08 + t * 0.12);
     this.engine.gain.gain.setTargetAtTime(vol, now, 0.05);
   },
 
@@ -432,11 +441,28 @@ const AudioManager = {
     source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
   },
 
+  // Duck all long-lived musical elements (pad, bass) to 0.3x for 0.5s on impact
+  duckMusicElements() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const endTime = now + 0.5;
+    if (this.pad.active && this.pad.gain) {
+      const v = this.pad.gain.gain.value;
+      this.pad.gain.gain.setValueAtTime(v * 0.3, now);
+      this.pad.gain.gain.setTargetAtTime(v, endTime, 0.05);
+    }
+    if (this.bass.running && this.bass.gain) {
+      this.bass.gain.gain.setValueAtTime(0.3, now);
+      this.bass.gain.gain.setTargetAtTime(1.0, endTime, 0.05);
+    }
+  },
+
   // ─── Collision & Explosion SFX ───
 
   // Metallic crash: short noise burst (high-pass ~2kHz) + low-freq impact thump (sine ~60Hz)
   playCrash() {
     if (!this.ctx) return;
+    this.duckMusicElements();
     const now = this.ctx.currentTime;
 
     // High-pass noise burst (metallic clang)
@@ -479,6 +505,7 @@ const AudioManager = {
   // Layered explosion boom: low sine sweep + noise burst + crackle
   playExplosion() {
     if (!this.ctx) return;
+    this.duckMusicElements();
     const now = this.ctx.currentTime;
 
     // Low sine sweep 80→30Hz over 0.5s
@@ -1670,10 +1697,151 @@ function resizeCanvas() {
 
   canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
+  positionNameForm();
 }
+
+// Declared early so positionNameForm() guard works when resizeCanvas() is called below
+let nameFormEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// --- Name Input Overlay (US-006) ---
+nameFormEl = document.createElement('div');
+nameFormEl.style.cssText = 'display:none;position:fixed;flex-direction:column;align-items:center;gap:6px;';
+
+const nameInputEl = document.createElement('input');
+nameInputEl.type = 'text';
+nameInputEl.placeholder = 'Enter your name';
+nameInputEl.maxLength = 15;
+nameInputEl.style.cssText = [
+  'font:16px monospace',
+  'padding:6px 10px',
+  'background:#1a1a2e',
+  'color:#fff',
+  'border:2px solid #555',
+  'border-radius:4px',
+  'width:200px',
+  'text-align:center',
+  'outline:none',
+].join(';') + ';';
+
+const nameErrorEl = document.createElement('span');
+nameErrorEl.style.cssText = 'color:#E53935;font:12px monospace;visibility:hidden;';
+nameErrorEl.textContent = 'Name too short';
+
+const nameSubmitEl = document.createElement('button');
+nameSubmitEl.textContent = 'Submit Score';
+nameSubmitEl.style.cssText = [
+  'font:14px monospace',
+  'padding:7px 18px',
+  'background:#E53935',
+  'color:#fff',
+  'border:none',
+  'border-radius:4px',
+  'cursor:pointer',
+].join(';') + ';';
+
+nameFormEl.append(nameInputEl, nameErrorEl, nameSubmitEl);
+document.body.appendChild(nameFormEl);
+
+// Restore saved name
+nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+
+function positionNameForm() {
+  if (!nameFormEl || nameFormEl.style.display === 'none') return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const centerX = rect.left + rect.width / 2;
+  // Position below stats block — canvas logical y ≈ 460
+  nameFormEl.style.left = `${centerX - 120}px`;
+  nameFormEl.style.top = `${rect.top + 460 * scale}px`;
+}
+
+function showNameForm() {
+  nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
+  nameErrorEl.style.visibility = 'hidden';
+  nameSubmitEl.textContent = 'Submit Score';
+  nameSubmitEl.disabled = false;
+  nameFormEl.style.display = 'flex';
+  positionNameForm();
+  nameInputEl.focus();
+}
+
+function hideNameForm() {
+  nameFormEl.style.display = 'none';
+}
+
+// Prevent game controls when typing in name input
+nameInputEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleNameSubmit();
+  }
+});
+
+const SCORE_WEBHOOK_URL = 'https://n8n.ai-solutions.startse.com/webhook/e6c46e71-f564-4e8b-b6bd-041ca8f012e0';
+
+function handleNameSubmit() {
+  const name = nameInputEl.value.trim();
+  if (name.length < 2) {
+    nameErrorEl.style.visibility = 'visible';
+    return;
+  }
+  nameErrorEl.style.visibility = 'hidden';
+  localStorage.setItem('roadRushPlayerName', name);
+
+  nameSubmitEl.textContent = 'Sending...';
+  nameSubmitEl.disabled = true;
+
+  const payload = {
+    name,
+    score: gameOverState.finalScore,
+    distance: Math.floor(gameOverState.finalDistance / 100), // meters
+    time: parseFloat(gameOverState.finalTime.toFixed(1)),
+    causeOfDeath: gameOverState.causeOfDeath || 'collision',
+    coinsCollected: gameOverState.coinsCollected,
+  };
+
+  fetch(SCORE_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      nameSubmitEl.textContent = 'Score submitted! ✓';
+      nameSubmitEl.disabled = true;
+    })
+    .catch(() => {
+      nameSubmitEl.textContent = 'Failed to submit. Try again';
+      nameSubmitEl.disabled = false;
+    });
+}
+
+nameSubmitEl.addEventListener('click', handleNameSubmit);
+
+function fetchRanking() {
+  gameOverState.rankingStatus = 'loading';
+  gameOverState.rankingData = [];
+  fetch(SCORE_WEBHOOK_URL)
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      const entries = Array.isArray(data) ? data : [];
+      gameOverState.rankingData = entries
+        .filter((e) => e && typeof e.name === 'string' && typeof e.score === 'number')
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 50);
+      gameOverState.rankingStatus = 'loaded';
+    })
+    .catch(() => {
+      gameOverState.rankingStatus = 'error';
+    });
+}
 
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
@@ -2191,6 +2359,7 @@ const gameState = {
   // Coin collectibles
   coins: [],
   nextCoinSpawnDistance: COIN_SPAWN_MIN,
+  coinsCollected: 0,
   // Nitro items
   nitroItems: [],
   nextNitroSpawnDistance: NITRO_SPAWN_MIN,
@@ -2239,6 +2408,7 @@ function resetGameState() {
   gameState.coins = [];
   gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
   floatTexts.length = 0; // US-009
+  gameState.coinsCollected = 0;
   // Reset nitro state
   gameState.nitroItems = [];
   gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
@@ -3077,6 +3247,7 @@ function updateCoins(dt) {
     };
     if (aabbOverlap(ph, coinHb)) {
       gameState.score += COIN_POINTS;
+      gameState.coinsCollected++;
       spawnFloatText(coin.x, coin.y, '+1', '#FFD700'); // US-009
       AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
@@ -3726,7 +3897,7 @@ const playingState = {
     const fuelDrain = (FUEL_DRAIN_BASE + (getEffectiveScrollSpeed() / SPEED_MAX) * FUEL_DRAIN_SPEED) * dt;
     gameState.fuel = Math.max(0, gameState.fuel - fuelDrain);
     if (gameState.fuel <= 0) {
-      gameOverState.causeOfDeath = 'Fuel Empty';
+      gameOverState.causeOfDeath = 'fuel_empty';
       fsm.transition(gameOverState);
       return;
     }
@@ -3907,6 +4078,7 @@ const explosionState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   isNewBest: false,
   bestScore: 0,
   screenFlashAlpha: 0,
@@ -3932,6 +4104,7 @@ const explosionState = {
     this.finalTime = gameState.elapsedTime;
     this.finalDistance = gameState.distanceTraveled;
     this.finalScore = Math.floor(gameState.score);
+    this.coinsCollected = gameState.coinsCollected;
     const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
     this.isNewBest = this.finalScore > stored;
     this.bestScore = this.isNewBest ? this.finalScore : stored;
@@ -4022,10 +4195,11 @@ const explosionState = {
       gameOverState.finalTime = this.finalTime;
       gameOverState.finalDistance = this.finalDistance;
       gameOverState.finalScore = this.finalScore;
+      gameOverState.coinsCollected = this.coinsCollected;
       gameOverState.isNewBest = this.isNewBest;
       gameOverState.bestScore = this.bestScore;
       gameOverState.statsPreset = true;
-      gameOverState.causeOfDeath = '';
+      gameOverState.causeOfDeath = 'collision';
       fsm.transition(gameOverState);
     }
     // Fade in dark overlay and text after 1.0s elapsed (timer < 1.0)
@@ -4113,10 +4287,15 @@ const gameOverState = {
   finalTime: 0,
   finalDistance: 0,
   finalScore: 0,
+  coinsCollected: 0,
   bestScore: 0,
   isNewBest: false,
-  causeOfDeath: '', // set by caller before transition; '' = collision
+  causeOfDeath: '', // 'collision' or 'fuel_empty'
   statsPreset: false, // true when explosionState pre-sets final stats
+  rankingData: [], // array of {name, score, distance} sorted by score desc
+  rankingStatus: 'idle', // 'idle' | 'loading' | 'loaded' | 'error'
+  rankingScroll: 0, // index of first visible row
+  rankingDotTime: 0, // for animated loading dots
 
   onEnter() {
     this.pulseTime = 0;
@@ -4125,25 +4304,37 @@ const gameOverState = {
       this.finalTime = gameState.elapsedTime;
       this.finalDistance = gameState.distanceTraveled;
       this.finalScore = Math.floor(gameState.score);
+      this.coinsCollected = gameState.coinsCollected;
       const stored = parseInt(localStorage.getItem('roadrush_best_score') || '0', 10);
       this.isNewBest = this.finalScore > stored;
       this.bestScore = this.isNewBest ? this.finalScore : stored;
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    this.rankingScroll = 0;
+    this.rankingDotTime = 0;
     AudioManager.startGameOverDrone();
+    showNameForm();
+    fetchRanking();
   },
 
   onExit() {
     AudioManager.stopGameOverDrone();
+    hideNameForm();
   },
 
   update(dt) {
     this.pulseTime += dt;
+    this.rankingDotTime += dt;
     if (consumeKey('Enter')) {
       AudioManager.playDrumRoll();
       resetGameState();
       fsm.transition(playingState);
+    }
+    if (this.rankingStatus === 'loaded' && this.rankingData.length > 10) {
+      const maxScroll = this.rankingData.length - 10;
+      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
+      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
     }
   },
 
@@ -4163,7 +4354,8 @@ const gameOverState = {
     if (this.causeOfDeath) {
       ctx.fillStyle = '#FFC107';
       ctx.font = 'bold 16px monospace';
-      ctx.fillText(this.causeOfDeath, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
+      const codLabel = this.causeOfDeath === 'fuel_empty' ? 'Fuel Empty' : 'Collision';
+      ctx.fillText(codLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 46);
     }
 
     // Stats
@@ -4189,11 +4381,79 @@ const gameOverState = {
       ctx.fillText(`Best: ${this.bestScore}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 72);
     }
 
+    // --- Ranking section (below HTML name form overlay, canvas y≈535+) ---
+    const RANK_Y = 537;
+    const RANK_ROW_H = 11;
+    const RANK_VISIBLE = 10;
+    ctx.textBaseline = 'top';
+    ctx.font = '10px monospace';
+
+    if (this.rankingStatus === 'loading') {
+      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Loading ranking${dots}`, CANVAS_WIDTH / 2, RANK_Y + 8);
+    } else if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.textAlign = 'center';
+      ctx.fillText('Could not load ranking', CANVAS_WIDTH / 2, RANK_Y + 8);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillText('Retry on next game over', CANVAS_WIDTH / 2, RANK_Y + 20);
+    } else if (this.rankingStatus === 'loaded') {
+      if (this.rankingData.length === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText('No scores yet', CANVAS_WIDTH / 2, RANK_Y + 8);
+      } else {
+        const hasMore = this.rankingData.length > RANK_VISIBLE;
+        // Header row
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'left';
+        ctx.fillText('TOP SCORES' + (hasMore ? '  ▲▼ scroll' : ''), 16, RANK_Y);
+        // Divider
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(16, RANK_Y + 12, CANVAS_WIDTH - 32, 1);
+        // Entries
+        const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+        const visibleEntries = this.rankingData.slice(
+          this.rankingScroll,
+          this.rankingScroll + RANK_VISIBLE
+        );
+        visibleEntries.forEach((entry, i) => {
+          const rank = this.rankingScroll + i + 1;
+          const isPlayer = playerName.length >= 2 && entry.name === playerName;
+          const rowY = RANK_Y + 15 + i * RANK_ROW_H;
+          ctx.fillStyle = isPlayer ? '#FFD700' : (i % 2 === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.65)');
+          ctx.textAlign = 'left';
+          const nameStr = String(entry.name || '').substring(0, 12);
+          ctx.fillText(`${String(rank).padStart(2, '\u00a0')} ${nameStr}`, 16, rowY);
+          ctx.textAlign = 'right';
+          const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+          ctx.fillText(`${entry.score}  ${dist}m`, CANVAS_WIDTH - 16, rowY);
+        });
+        // Scroll indicators
+        if (this.rankingScroll > 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▲', CANVAS_WIDTH - 12, RANK_Y + 14);
+        }
+        if (this.rankingScroll + RANK_VISIBLE < this.rankingData.length) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.textAlign = 'center';
+          ctx.fillText('▼', CANVAS_WIDTH - 12, RANK_Y + 15 + RANK_VISIBLE * RANK_ROW_H);
+        }
+      }
+    }
+
+    ctx.textBaseline = 'middle';
+
     // Pulsing retry text
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
-    ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 100);
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
   },
 };

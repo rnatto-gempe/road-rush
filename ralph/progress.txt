@@ -126,6 +126,24 @@ Started: Fri Mar 13 19:37:51 -03 2026
   - Camera roll update naturally fits at the end of `updatePlayer()` since left/right key variables are already in scope
 ---
 
+## 2026-03-13 - US-007
+- Implemented score submission via webhook POST on Submit Score
+- Added `coinsCollected` field to `gameState` (incremented on each coin pickup, reset in resetGameState)
+- Captured `coinsCollected` in `explosionState.onEnter()` and passed through to `gameOverState` alongside other stats
+- Changed `causeOfDeath` values to spec format: `'collision'` (was `''`) and `'fuel_empty'` (was `'Fuel Empty'`)
+- `gameOverState.onEnter()` captures `coinsCollected` from `gameState` for non-statsPreset (fuel_empty) path
+- `handleNameSubmit()` now POSTs `{ name, score, distance, time, causeOfDeath, coinsCollected }` to webhook
+- Visual feedback: button → 'Sending...' (disabled) → 'Score submitted! ✓' (disabled) or 'Failed to submit. Try again' (re-enabled)
+- Retry via Enter key still works during/after submission (key handler is independent of form state)
+- Updated causeOfDeath display label in render: maps 'fuel_empty' → 'Fuel Empty', 'collision' → 'Collision'
+- Files changed: src/main.js
+- **Learnings for future iterations:**
+  - `gameOverState` stats come from two paths: explosionState (statsPreset=true) and direct capture (statsPreset=false, fuel_empty) — add new stats to BOTH paths
+  - `gameOverState.causeOfDeath` is set BEFORE `fsm.transition(gameOverState)` is called — check for it in handleNameSubmit via `gameOverState.causeOfDeath`
+  - `fetch()` .then(res => { if (!res.ok) throw }) pattern ensures HTTP errors (4xx/5xx) are caught by .catch()
+  - Distance in gameState is in pixels (100px = 1m), so divide by 100 for meters in payload
+---
+
 ## Codebase Patterns
 - Offscreen canvas for effects: initialize at module level (not lazily) with `document.createElement('canvas')` — avoids per-frame allocation overhead
 - For chromatic aberration with canvas 2D: snapshot via `drawImage(canvas, 0, 0)`, then extract color channel using `globalCompositeOperation = 'multiply'` + solid color fill, then composite back with `'screen'` at globalAlpha
@@ -224,4 +242,57 @@ Started: Fri Mar 13 19:37:51 -03 2026
   - "Extend beyond canvas" dash scrolling technique works for diagonal/converging lines too: compute `xAtY(y) = laneXTop + dx*(y/CANVAS_HEIGHT)` then draw from `(xAtY(-dashScrollOffset), -dashScrollOffset)` to `(xAtY(H+DASH_PERIOD), H+DASH_PERIOD)` — no lineDashOffset needed
   - roadCenter = 200 is the axis of symmetry for all perspective calculations; fovFactor shrinks each side equally
   - At 200 px/s (initial speed), fovFactor ≈ 5% — very subtle convergence; visually "no change" matches the AC requirement
+---
+
+## 2026-03-13 - US-006
+- Implemented player name input overlay on Game Over screen
+- HTML div overlay (position:fixed) with text input, error span, and Submit Score button appended to document.body
+- positionNameForm() uses canvas.getBoundingClientRect() + scale factor to place form at canvas logical y≈460
+- showNameForm()/hideNameForm() called in gameOverState.onEnter/onExit
+- Input keydown stopPropagation prevents arrow keys/Enter from reaching game key handlers
+- Enter in input calls handleNameSubmit(); Submit Score button click also calls handleNameSubmit()
+- Validation: name.trim().length < 2 shows "Name too short" inline error
+- localStorage key 'roadRushPlayerName' saves name on valid submit and pre-fills on next visit
+- Moved "Press Enter to Retry" text to canvas y=670 (CANVAS_HEIGHT-30) to avoid overlap with HTML form
+- Files changed: src/main.js
+- Browser verified: name input and Submit Score button visible on game over screen, correctly positioned
+- **Learnings for future iterations:**
+  - `let nameFormEl = null;` must be declared BEFORE resizeCanvas() is called, because resizeCanvas() calls positionNameForm() which references nameFormEl. Use `let x = null` + null guard, NOT `const` (TDZ would throw)
+  - positionNameForm() guard: `if (!nameFormEl || nameFormEl.style.display === 'none') return;`
+  - Use canvas.getBoundingClientRect() + scale (rect.width / CANVAS_WIDTH) to convert canvas logical coords to screen pixel position for HTML overlays
+  - input.addEventListener('keydown', e => e.stopPropagation()) is the correct way to prevent game controls while typing — window keydown listeners won't fire for that event
+  - page.evaluate() in Playwright MCP can navigate to about:blank on error; use browser_press_key + browser_take_screenshot for reliable browser testing of canvas games
+---
+
+## 2026-03-13 - US-008
+- Ranking display via webhook GET was already fully implemented in main.js (co-implemented during US-007 iteration)
+- fetchRanking() calls GET SCORE_WEBHOOK_URL in gameOverState.onEnter(), stores results in rankingData (top 50, sorted by score desc)
+- Ranking rendered on canvas at RANK_Y=537 (below HTML name form overlay) with 10 visible rows, RANK_ROW_H=11px per row
+- Arrow key scrolling (ArrowUp/ArrowDown) implemented in gameOverState.update() with rankingScroll index
+- Current player highlighted in yellow (#FFD700) by matching entry.name === nameInputEl.value.trim()
+- Animated loading dots use rankingDotTime: `'.'.repeat(Math.floor(rankingDotTime * 2) % 4)`
+- Error state shows 'Could not load ranking' + 'Retry on next game over'
+- Empty/malformed response shows 'No scores yet'
+- Files changed: ralph/prd.json (updated passes: true for US-008)
+- Browser verified: game over screen shows ranking section with graceful empty state ("No scores yet")
+- **Learnings for future iterations:**
+  - Arrow key scroll in gameOverState conflicts with name input focus — ArrowUp/ArrowDown events stopPropagation when name input is focused, so scrolling only works after input loses focus or is hidden
+  - consumeKey() is consumed in gameOverState.update(); ranking scroll and retry (Enter) share the same update loop so ordering matters
+  - rankingData is populated async; render() must guard on rankingStatus (idle/loading/loaded/error) before accessing rankingData
+---
+
+## 2026-03-13 - US-009
+- Implemented audio mix and master bus balancing
+- DynamicsCompressorNode added in AudioManager.init(): masterGain → compressor → destination (threshold -6dB, ratio 10:1, knee 3dB, attack 3ms, release 250ms)
+- Added duckMusicElements(): sets pad.gain to 0.3× and bass.gain to 0.3 for 0.5s using setValueAtTime + setTargetAtTime; called at start of playCrash() and playExplosion()
+- Engine volume capped at 0.10 when pad.active || bass.running (music active); otherwise ramps 0.08→0.20 with speed
+- Volume hierarchy verified: kick 0.35, hat 0.12, bass 0.15-0.30 (per-note vel×0.3, master=1.0), pad 0.12→0.20, arp 0.15, engine/road ~0.10 when music playing
+- All audio elements already connect through AudioManager.masterGain (mute works)
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- Browser test: build passes (npm run build). Playwright browser went to about:blank after sleep(10) — known MCP issue; code verified via build + review
+- **Learnings for future iterations:**
+  - DynamicsCompressorNode must be stored if it needs to be disconnected/reconfigured (not needed here — it's permanent on the bus)
+  - masterGain.connect(compressor) + compressor.connect(destination) replaces the direct masterGain.connect(destination) — toggleMute still works because it targets masterGain.gain, not destination
+  - duckMusicElements() uses current gain value `v = pad.gain.gain.value` as the duck base, then restores to v after 0.5s; this works because pad volume is updated by updatePad() continuously
+  - Playwright MCP: long sleep (>5s) can cause the browser session to navigate to about:blank; use shorter sleep intervals or just rely on build validation
 ---
