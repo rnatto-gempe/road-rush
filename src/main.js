@@ -4473,6 +4473,77 @@ const explosionState = {
   },
 };
 
+// --- Shared Ranking Panel Renderer ---
+/**
+ * Renders the ranking leaderboard section onto a Canvas 2D context.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<{name:string,score:number,distance:number}>} rankingData
+ * @param {'idle'|'loading'|'loaded'|'error'} rankingStatus
+ * @param {number} rankingScroll - index of first visible row
+ * @param {number} rankingDotTime - elapsed time for animated dots
+ * @param {string} highlightName - player name to highlight in gold
+ */
+function renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName) {
+  const RANK_Y = 537;
+  const RANK_ROW_H = 11;
+  const RANK_VISIBLE = 10;
+  ctx.textBaseline = 'top';
+  ctx.font = '10px monospace';
+
+  if (rankingStatus === 'loading') {
+    const dots = '.'.repeat(Math.floor(rankingDotTime * 2) % 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Loading ranking${dots}`, CANVAS_WIDTH / 2, RANK_Y + 8);
+  } else if (rankingStatus === 'error') {
+    ctx.fillStyle = '#E53935';
+    ctx.textAlign = 'center';
+    ctx.fillText('Could not load ranking', CANVAS_WIDTH / 2, RANK_Y + 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText('Retry on next game over', CANVAS_WIDTH / 2, RANK_Y + 20);
+  } else if (rankingStatus === 'loaded') {
+    if (rankingData.length === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.textAlign = 'center';
+      ctx.fillText('No scores yet', CANVAS_WIDTH / 2, RANK_Y + 8);
+    } else {
+      const hasMore = rankingData.length > RANK_VISIBLE;
+      // Header row
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.textAlign = 'left';
+      ctx.fillText('TOP SCORES' + (hasMore ? '  ▲▼ scroll' : ''), 16, RANK_Y);
+      // Divider
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillRect(16, RANK_Y + 12, CANVAS_WIDTH - 32, 1);
+      // Entries
+      const visibleEntries = rankingData.slice(rankingScroll, rankingScroll + RANK_VISIBLE);
+      visibleEntries.forEach((entry, i) => {
+        const rank = rankingScroll + i + 1;
+        const isPlayer = highlightName.length >= 2 && entry.name === highlightName;
+        const rowY = RANK_Y + 15 + i * RANK_ROW_H;
+        ctx.fillStyle = isPlayer ? '#FFD700' : (i % 2 === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.65)');
+        ctx.textAlign = 'left';
+        const nameStr = String(entry.name || '').substring(0, 12);
+        ctx.fillText(`${String(rank).padStart(2, '\u00a0')} ${nameStr}`, 16, rowY);
+        ctx.textAlign = 'right';
+        const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+        ctx.fillText(`${entry.score}  ${dist}m`, CANVAS_WIDTH - 16, rowY);
+      });
+      // Scroll indicators
+      if (rankingScroll > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText('▲', CANVAS_WIDTH - 12, RANK_Y + 14);
+      }
+      if (rankingScroll + RANK_VISIBLE < rankingData.length) {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText('▼', CANVAS_WIDTH - 12, RANK_Y + 15 + RANK_VISIBLE * RANK_ROW_H);
+      }
+    }
+  }
+}
+
 // --- GameOver State ---
 const gameOverState = {
   pulseTime: 0,
@@ -4574,68 +4645,8 @@ const gameOverState = {
     }
 
     // --- Ranking section (below HTML name form overlay, canvas y≈535+) ---
-    const RANK_Y = 537;
-    const RANK_ROW_H = 11;
-    const RANK_VISIBLE = 10;
-    ctx.textBaseline = 'top';
-    ctx.font = '10px monospace';
-
-    if (this.rankingStatus === 'loading') {
-      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.textAlign = 'center';
-      ctx.fillText(`Loading ranking${dots}`, CANVAS_WIDTH / 2, RANK_Y + 8);
-    } else if (this.rankingStatus === 'error') {
-      ctx.fillStyle = '#E53935';
-      ctx.textAlign = 'center';
-      ctx.fillText('Could not load ranking', CANVAS_WIDTH / 2, RANK_Y + 8);
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillText('Retry on next game over', CANVAS_WIDTH / 2, RANK_Y + 20);
-    } else if (this.rankingStatus === 'loaded') {
-      if (this.rankingData.length === 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.textAlign = 'center';
-        ctx.fillText('No scores yet', CANVAS_WIDTH / 2, RANK_Y + 8);
-      } else {
-        const hasMore = this.rankingData.length > RANK_VISIBLE;
-        // Header row
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.textAlign = 'left';
-        ctx.fillText('TOP SCORES' + (hasMore ? '  ▲▼ scroll' : ''), 16, RANK_Y);
-        // Divider
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillRect(16, RANK_Y + 12, CANVAS_WIDTH - 32, 1);
-        // Entries
-        const playerName = nameInputEl ? nameInputEl.value.trim() : '';
-        const visibleEntries = this.rankingData.slice(
-          this.rankingScroll,
-          this.rankingScroll + RANK_VISIBLE
-        );
-        visibleEntries.forEach((entry, i) => {
-          const rank = this.rankingScroll + i + 1;
-          const isPlayer = playerName.length >= 2 && entry.name === playerName;
-          const rowY = RANK_Y + 15 + i * RANK_ROW_H;
-          ctx.fillStyle = isPlayer ? '#FFD700' : (i % 2 === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.65)');
-          ctx.textAlign = 'left';
-          const nameStr = String(entry.name || '').substring(0, 12);
-          ctx.fillText(`${String(rank).padStart(2, '\u00a0')} ${nameStr}`, 16, rowY);
-          ctx.textAlign = 'right';
-          const dist = typeof entry.distance === 'number' ? entry.distance : 0;
-          ctx.fillText(`${entry.score}  ${dist}m`, CANVAS_WIDTH - 16, rowY);
-        });
-        // Scroll indicators
-        if (this.rankingScroll > 0) {
-          ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.textAlign = 'center';
-          ctx.fillText('▲', CANVAS_WIDTH - 12, RANK_Y + 14);
-        }
-        if (this.rankingScroll + RANK_VISIBLE < this.rankingData.length) {
-          ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.textAlign = 'center';
-          ctx.fillText('▼', CANVAS_WIDTH - 12, RANK_Y + 15 + RANK_VISIBLE * RANK_ROW_H);
-        }
-      }
-    }
+    const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+    renderRankingPanel(ctx, this.rankingData, this.rankingStatus, this.rankingScroll, this.rankingDotTime, playerName);
 
     ctx.textBaseline = 'middle';
 
