@@ -3733,6 +3733,125 @@ function renderPlayer (ctx, player) {
     ctx.stroke();
   }
 
+  // --- Space phase: spaceship ---
+  if (phase === 'space' || (pt.active && (pt.to === 'space' || pt.from === 'space'))) {
+    // During sky→space transition, crossfade: draw sky sprite with alpha (1-progress), space sprite with alpha progress
+    const isTransitioningToSpace = pt.active && pt.to === 'space';
+    const isTransitioningFromSpace = pt.active && pt.from === 'space';
+    const spaceAlpha = isTransitioningToSpace ? pt.progress : isTransitioningFromSpace ? 1 - pt.progress : 1;
+
+    // Draw sky sprite (fading out) during sky→space transition
+    if (isTransitioningToSpace && pt.progress < 1) {
+      const skyAlpha = 1 - pt.progress;
+      const skyWingScale = 1 - pt.progress; // wings shrink as we leave sky
+      ctx.save();
+      ctx.globalAlpha = skyAlpha;
+
+      // Car body
+      ctx.fillStyle = '#E53935';
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, 6);
+      ctx.fill();
+
+      // Wings shrinking
+      if (skyWingScale > 0.01) {
+        const wingW = 12 * skyWingScale;
+        const wingH = 20 * skyWingScale;
+        const wingY = y + (height - wingH) / 2;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.globalAlpha = skyAlpha * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x, wingY);
+        ctx.lineTo(x - wingW, wingY + wingH / 2);
+        ctx.lineTo(x, wingY + wingH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + width, wingY);
+        ctx.lineTo(x + width + wingW, wingY + wingH / 2);
+        ctx.lineTo(x + width, wingY + wingH);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Windshield
+      ctx.globalAlpha = skyAlpha;
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+      ctx.fillRect(x + 6, y + 8, width - 12, 16);
+      ctx.fillRect(x + 6, y + height - 22, width - 12, 12);
+
+      // Headlights
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + width - 8, y + 5, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw space ship sprite
+    if (spaceAlpha > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = spaceAlpha;
+
+      const cx = x + width / 2; // center x
+
+      // Thruster flames (behind ship, draw first)
+      const flameTime = gameState.elapsedTime * 10;
+      const flameH1 = 8 + 6 * Math.abs(Math.sin(flameTime));
+      const flameH2 = 8 + 6 * Math.abs(Math.sin(flameTime + 2));
+      const flameLerp = 0.5 + 0.5 * Math.sin(flameTime * 1.3);
+      // Interpolate between #FF6600 and #FFCC00
+      const flameR = 255;
+      const flameG = Math.round(102 + (204 - 102) * flameLerp);
+      const flameB = Math.round(0 + (0 - 0) * flameLerp);
+      const flameColor = `rgb(${flameR}, ${flameG}, ${flameB})`;
+
+      ctx.fillStyle = flameColor;
+      // Left thruster flame
+      ctx.fillRect(cx - 10, y + height, 6, flameH1);
+      // Right thruster flame
+      ctx.fillRect(cx + 4, y + height, 6, flameH2);
+
+      // Main body: triangular aerodynamic shape (cyan)
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.moveTo(cx, y); // nose (top center)
+      ctx.lineTo(x + width - 4, y + height - 6); // right bottom
+      ctx.lineTo(x + 4, y + height - 6); // left bottom
+      ctx.closePath();
+      ctx.fill();
+
+      // Cockpit (dark, at the top portion)
+      ctx.fillStyle = '#0A1628';
+      ctx.beginPath();
+      ctx.moveTo(cx, y + 6); // tip
+      ctx.lineTo(cx + 7, y + 22); // right
+      ctx.lineTo(cx - 7, y + 22); // left
+      ctx.closePath();
+      ctx.fill();
+
+      // Cockpit glass highlight
+      ctx.fillStyle = 'rgba(100, 200, 255, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(cx, y + 8);
+      ctx.lineTo(cx + 5, y + 20);
+      ctx.lineTo(cx - 5, y + 20);
+      ctx.closePath();
+      ctx.fill();
+
+      // Thruster housings (2 orange rectangles 6×10 at rear)
+      ctx.fillStyle = '#FF6600';
+      ctx.fillRect(cx - 10, y + height - 10, 6, 10);
+      ctx.fillRect(cx + 4, y + height - 10, 6, 10);
+
+      ctx.restore();
+    }
+    return;
+  }
+
   // --- Sky phase: car with wings ---
   if (phase === 'sky' || (pt.active && (pt.to === 'sky' || pt.from === 'sky'))) {
     // Determine wing scale: grow during transition to sky, shrink during transition from sky
