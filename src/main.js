@@ -1616,6 +1616,12 @@ bloomCanvas.width = CANVAS_WIDTH;
 bloomCanvas.height = CANVAS_HEIGHT;
 const bloomCtx = bloomCanvas.getContext('2d');
 
+// Offscreen canvas for heat haze / road shimmer (US-007) — initialized once
+const hazeCanvas = document.createElement('canvas');
+hazeCanvas.width = CANVAS_WIDTH;
+hazeCanvas.height = CANVAS_HEIGHT;
+const hazeCtx = hazeCanvas.getContext('2d');
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
   const windowWidth = window.innerWidth;
@@ -1951,6 +1957,35 @@ function renderBloom() {
   ctx.globalAlpha = 0.5;
   ctx.drawImage(bloomCanvas, 0, 0);
   ctx.restore();
+}
+
+// Heat haze / road shimmer at high speed (US-007)
+// Renders road to hazeCanvas then draws it back with per-band horizontal offset for the lower 40%.
+// Returns true if haze was rendered (caller should skip normal renderRoad call).
+function renderHeatHaze(scrollOffset) {
+  const speed = gameState.scrollSpeed;
+  if (speed <= 500) return false;
+
+  // Intensity: 0 at 500 px/s → 3px at 800 px/s
+  const intensity = Math.min((speed - 500) / 300, 1) * 3;
+  const time = gameState.elapsedTime;
+  const hazeStartY = Math.floor(CANVAS_HEIGHT * 0.6); // lower 40% of canvas
+  const bandH = 4; // horizontal band height in pixels
+
+  // Render the road layer onto hazeCanvas (renderRoad accepts any ctx)
+  renderRoad(hazeCtx, scrollOffset);
+
+  // Draw hazeCanvas undistorted onto main canvas (fills entire road area)
+  ctx.drawImage(hazeCanvas, 0, 0);
+
+  // Overdraw the lower 40% with per-band x-offset shimmer
+  for (let y = hazeStartY; y < CANVAS_HEIGHT; y += bandH) {
+    const sinOffset = Math.sin(time * 3 + y * 0.08) * intensity;
+    const sliceH = Math.min(bandH, CANVAS_HEIGHT - y);
+    ctx.drawImage(hazeCanvas, 0, y, CANVAS_WIDTH, sliceH, sinOffset, y, CANVAS_WIDTH, sliceH);
+  }
+
+  return true;
 }
 
 // White speed lines in the 40px rumble-strip margins when scrollSpeed > 500
@@ -3571,7 +3606,11 @@ const playingState = {
       ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
     }
 
-    renderRoad(ctx, gameState.scrollOffset);
+    // Heat haze / road shimmer (US-007) — renders road with distortion when speed > 500;
+    // falls back to normal renderRoad when below threshold or returns false
+    if (!renderHeatHaze(gameState.scrollOffset)) {
+      renderRoad(ctx, gameState.scrollOffset);
+    }
     // Motion blur: ghost of previous frame composited behind current world (US-003)
     renderMotionGhost();
     renderSpeedLines(ctx);
