@@ -773,6 +773,48 @@ const AudioManager = {
     }
   },
 
+  // Combo milestone SFX: bright ascending ding at x3/x5/x8 (US-008)
+  playComboMilestone (level) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Higher pitch and more harmonics at higher milestones
+    const baseFreq = level >= 8 ? 1200 : level >= 5 ? 900 : 700;
+    const harmonics = level >= 8 ? [1, 1.5, 2, 2.5] : level >= 5 ? [1, 1.5, 2] : [1, 1.5];
+    for (const h of harmonics) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq * h, now);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * h * 1.2, now + 0.1);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2 / harmonics.length, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    }
+  },
+
+  // Combo lost SFX: short descending deflation tone (US-008)
+  playComboLost () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(500, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
   // Survivor bonus: triumphant short major chord (400/500/600Hz sines, 0.3s)
   playSurvivorBonus () {
     if (!this.ctx) return;
@@ -1589,6 +1631,19 @@ let spawnPauseTimer = 0; // seconds remaining in spawn suppression window
 let comboMultiplier = 1;  // 1 = base (no active combo), 2+ = active combo
 let comboResetTimer = 0;  // seconds until combo resets to 1
 let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
+let comboExpireShakeTimer = 0; // brief shake when combo expires (0.15s)
+let comboExpireFadeTimer = 0;  // fade-out after combo expires (0.3s)
+let comboMilestoneFlash = 0;   // white flash at milestone levels (0.1s)
+let comboGlowAlpha = 0;        // combo edge glow intensity (fades in/out)
+let scorePunchScale = 0;       // score punch animation (0 = none, decays to 0)
+let scorePunchColor = null;    // score punch color from combo tier
+let comboZoom = 1.0;           // camera zoom level (lerps toward target)
+
+// Near miss tracking for game over stats
+let nearMissCount = 0;
+let bestCombo = 0;
+let nearMissBonusTotal = 0;
+let nearMissHintShown = false; // first-time discoverability hint (US-011)
 
 // DDA (Dynamic Difficulty Adjustment) state
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
@@ -1798,8 +1853,8 @@ function resizeCanvas () {
   positionTouchButtons(displayWidth, displayHeight);
   positionRankingBtn();
   positionRankingBackBtn();
-  positionGameOverAd();
   positionFeedbackBtn();
+  positionGameOverRanking();
 }
 
 function positionTouchButtons (displayWidth, displayHeight) {
@@ -1826,11 +1881,10 @@ let nameFormEl = null;
 // Declared early so positionRankingBtn/positionRankingBackBtn guard works when resizeCanvas() is called below
 let rankingBtnEl = null;
 let rankingBackBtnEl = null;
-// Declared early so positionGameOverAd() guard works when resizeCanvas() is called below
-let gameOverAdEl = null;
-let gameOverAdLabelEl = null;
 // Declared early so positionFeedbackBtn() guard works when resizeCanvas() is called below
 let feedbackBtnEl = null;
+// DOM ranking container for game over screen
+let gameOverRankingEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -1899,7 +1953,7 @@ function positionNameForm () {
 function showNameForm () {
   nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
   nameErrorEl.style.visibility = 'hidden';
-  nameSubmitEl.textContent = 'Submit Score';
+  nameSubmitEl.textContent = 'Enviar Score';
   nameSubmitEl.disabled = false;
   nameFormEl.style.display = 'flex';
   positionNameForm();
@@ -1931,7 +1985,7 @@ function handleNameSubmit () {
   nameErrorEl.style.visibility = 'hidden';
   localStorage.setItem('roadRushPlayerName', name);
 
-  nameSubmitEl.textContent = 'Sending...';
+  nameSubmitEl.textContent = 'Enviando...';
   nameSubmitEl.disabled = true;
 
   const payload = {
@@ -1950,12 +2004,12 @@ function handleNameSubmit () {
   })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      nameSubmitEl.textContent = 'Score submitted! ✓';
+      nameSubmitEl.textContent = 'Score enviado! ✓';
       nameSubmitEl.disabled = true;
       setTimeout(fetchRanking, 2000);
     })
     .catch(() => {
-      nameSubmitEl.textContent = 'Failed to submit. Try again';
+      nameSubmitEl.textContent = 'Falha ao enviar. Tente novamente';
       nameSubmitEl.disabled = false;
     });
 }
@@ -1965,6 +2019,7 @@ nameSubmitEl.addEventListener('click', handleNameSubmit);
 function fetchRanking () {
   gameOverState.rankingStatus = 'loading';
   gameOverState.rankingData = [];
+  gameOverState._rankingBuilt = false;
   fetch(SCORE_WEBHOOK_URL)
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2054,52 +2109,121 @@ function positionRankingBackBtn () {
   rankingBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
 }
 
-// --- Game Over Ad Slot (US-005) ---
-gameOverAdEl = document.getElementById('ad-gameover');
-gameOverAdLabelEl = document.createElement('div');
-gameOverAdLabelEl.id = 'ad-gameover-label';
-gameOverAdLabelEl.textContent = 'PUBLICIDADE';
-gameOverAdLabelEl.style.cssText = [
+// --- DOM Ranking Container for Game Over ---
+gameOverRankingEl = document.createElement('div');
+gameOverRankingEl.id = 'gameover-ranking';
+gameOverRankingEl.style.cssText = [
   'display:none',
   'position:fixed',
-  'z-index:50',
-  'color:rgba(255,255,255,0.45)',
-  'font:10px monospace',
-  'text-align:center',
+  'z-index:20',
+  'overflow-y:auto',
+  'overflow-x:hidden',
+  '-webkit-overflow-scrolling:touch',
+  'scrollbar-width:thin',
+  'scrollbar-color:rgba(255,255,255,0.2) transparent',
 ].join(';') + ';';
-document.body.appendChild(gameOverAdLabelEl);
+document.body.appendChild(gameOverRankingEl);
 
-function positionGameOverAd () {
-  if (!gameOverAdEl) return;
+// Prevent touch events on ranking from reaching canvas
+gameOverRankingEl.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+gameOverRankingEl.addEventListener('touchmove', (e) => e.stopPropagation(), { passive: true });
+gameOverRankingEl.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
+
+function positionGameOverRanking () {
+  if (!gameOverRankingEl || gameOverRankingEl.style.display === 'none') return;
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / CANVAS_WIDTH;
-  const maxW = window.innerWidth <= 480 ? Math.min(300, window.innerWidth * 0.9) : 300;
-  const centerX = rect.left + rect.width / 2;
-  const adTop = rect.top + 90 * scale;
-  gameOverAdEl.style.left = `${centerX - maxW / 2}px`;
-  gameOverAdEl.style.top = `${adTop}px`;
-  gameOverAdEl.style.width = `${maxW}px`;
-  gameOverAdEl.style.maxWidth = `${maxW}px`;
-  if (gameOverAdLabelEl) {
-    gameOverAdLabelEl.style.left = `${centerX - maxW / 2}px`;
-    gameOverAdLabelEl.style.top = `${adTop - 14}px`;
-    gameOverAdLabelEl.style.width = `${maxW}px`;
-  }
+  const topY = 268 * scale + rect.top;
+  const bottomY = 640 * scale + rect.top;
+  const pad = 12 * scale;
+  gameOverRankingEl.style.left = `${rect.left + pad}px`;
+  gameOverRankingEl.style.top = `${topY}px`;
+  gameOverRankingEl.style.width = `${rect.width - pad * 2}px`;
+  gameOverRankingEl.style.height = `${bottomY - topY}px`;
 }
 
-function showGameOverAd () {
-  const count = parseInt(sessionStorage.getItem('roadrush_game_count') || '0', 10);
-  sessionStorage.setItem('roadrush_game_count', String(count + 1));
-  if (count % 2 === 0) {
-    positionGameOverAd();
-    if (gameOverAdEl) gameOverAdEl.style.display = 'block';
-    if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'block';
+function buildRankingDOM (rankingData, highlightName) {
+  gameOverRankingEl.innerHTML = '';
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const baseFontSize = Math.max(10, Math.round(11 * scale));
+  const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = `display:flex;justify-content:space-between;align-items:center;padding:4px 4px 6px;border-bottom:1px solid rgba(255,255,255,0.15);margin-bottom:4px;`;
+  const headerLeft = document.createElement('span');
+  headerLeft.textContent = '\u{1F3C6}  TOP RANKING';
+  headerLeft.style.cssText = `color:rgba(255,255,255,0.70);font:bold ${baseFontSize}px monospace;`;
+  const headerRight = document.createElement('span');
+  headerRight.textContent = `${rankingData.length} jogadores`;
+  headerRight.style.cssText = `color:rgba(255,255,255,0.30);font:${baseFontSize - 2}px monospace;`;
+  header.append(headerLeft, headerRight);
+  gameOverRankingEl.appendChild(header);
+
+  if (rankingData.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = 'Nenhum score ainda';
+    empty.style.cssText = `color:rgba(255,255,255,0.5);font:${baseFontSize}px monospace;text-align:center;padding:16px 0;`;
+    gameOverRankingEl.appendChild(empty);
+    return;
   }
+
+  rankingData.forEach((entry, i) => {
+    const rank = i + 1;
+    const isPlayer = highlightName && highlightName.length >= 2 && entry.name === highlightName;
+    const row = document.createElement('div');
+    const rowH = Math.max(28, Math.round(32 * scale));
+    let bgColor;
+    if (isPlayer) bgColor = 'rgba(255,215,0,0.18)';
+    else if (rank <= 3) bgColor = 'rgba(255,255,255,0.07)';
+    else bgColor = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.12)';
+
+    const borderLeft = (isPlayer || rank <= 3)
+      ? `3px solid ${isPlayer ? '#FFD700' : rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : '#CD7F32'}`
+      : '3px solid transparent';
+
+    row.style.cssText = `display:flex;align-items:center;height:${rowH}px;background:${bgColor};border-left:${borderLeft};border-radius:4px;margin-bottom:2px;padding:0 6px;`;
+
+    // Rank
+    const rankEl = document.createElement('span');
+    rankEl.style.cssText = `width:24px;text-align:center;flex-shrink:0;font:${rank <= 3 ? baseFontSize + 1 : baseFontSize - 1}px monospace;`;
+    if (rank <= 3) {
+      rankEl.textContent = MEDALS[rank - 1];
+    } else {
+      rankEl.textContent = String(rank);
+      rankEl.style.color = 'rgba(255,255,255,0.35)';
+    }
+
+    // Name
+    const nameEl = document.createElement('span');
+    nameEl.textContent = String(entry.name || '').substring(0, 14);
+    nameEl.style.cssText = `flex:1;font:bold ${baseFontSize}px monospace;color:${isPlayer ? '#FFD700' : 'rgba(255,255,255,0.92)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:4px;`;
+
+    // Score
+    const scoreEl = document.createElement('span');
+    scoreEl.textContent = entry.score.toLocaleString();
+    scoreEl.style.cssText = `font:bold ${baseFontSize}px monospace;color:${isPlayer ? '#FFE066' : '#7EC8E3'};margin-left:8px;flex-shrink:0;`;
+
+    // Distance
+    const distEl = document.createElement('span');
+    const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+    distEl.textContent = `${dist}m`;
+    distEl.style.cssText = `font:${baseFontSize - 2}px monospace;color:rgba(255,255,255,0.45);margin-left:6px;width:38px;text-align:right;flex-shrink:0;`;
+
+    row.append(rankEl, nameEl, scoreEl, distEl);
+    gameOverRankingEl.appendChild(row);
+  });
 }
 
-function hideGameOverAd () {
-  if (gameOverAdEl) gameOverAdEl.style.display = 'none';
-  if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'none';
+function showGameOverRanking () {
+  gameOverRankingEl.style.display = 'block';
+  positionGameOverRanking();
+}
+
+function hideGameOverRanking () {
+  gameOverRankingEl.style.display = 'none';
+  gameOverRankingEl.innerHTML = '';
 }
 
 // --- Feedback Button & Modal (US-006) ---
@@ -2130,7 +2254,7 @@ function positionFeedbackBtn () {
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / CANVAS_WIDTH;
   feedbackBtnEl.style.left = `${rect.left + rect.width / 2}px`;
-  feedbackBtnEl.style.top = `${rect.top + 640 * scale}px`;
+  feedbackBtnEl.style.top = `${rect.top + 655 * scale}px`;
 }
 
 // --- Feedback Modal ---
@@ -2358,19 +2482,15 @@ canvas.addEventListener('touchend', (e) => {
     resetGameState();
     fsm.transition(playingState);
   } else if (fsm.currentState === gameOverState) {
-    const delta = touchStartY - cy; // positive = swipe up = scroll down
-    if (Math.abs(delta) >= 10) {
-      // Swipe gesture: scroll ranking
-      if (gameOverState.rankingStatus === 'loaded' && gameOverState.rankingData.length > 8) {
-        const maxScroll = gameOverState.rankingData.length - 8;
-        const scrollDelta = Math.round(delta / 30);
-        gameOverState.rankingScroll = Math.max(0, Math.min(gameOverState.rankingScroll + scrollDelta, maxScroll));
+    const delta = touchStartY - cy;
+    if (Math.abs(delta) < 10) {
+      // Tap gesture: retry (only if tapping outside ranking area)
+      // Ranking area is roughly canvas y 268-640; check if tap is above it or below
+      if (cy < 268 || cy > 640) {
+        AudioManager.playDrumRoll();
+        resetGameState();
+        fsm.transition(playingState);
       }
-    } else {
-      // Tap gesture: retry
-      AudioManager.playDrumRoll();
-      resetGameState();
-      fsm.transition(playingState);
     }
   } else if (fsm.currentState === titleRankingState) {
     const delta = touchStartY - cy; // positive = swipe up = scroll down
@@ -2458,6 +2578,9 @@ const shake = { time: 0, maxTime: SHAKE_DURATION, intensity: SHAKE_INTENSITY };
 function triggerShake (duration, intensity) {
   const dur = duration !== undefined ? duration : SHAKE_DURATION;
   const inten = intensity !== undefined ? intensity : SHAKE_INTENSITY;
+  // Priority system: only apply if new intensity >= remaining intensity of current shake
+  const remainingIntensity = shake.time > 0 ? shake.intensity * (shake.time / shake.maxTime) : 0;
+  if (inten < remainingIntensity) return; // don't override stronger shake in progress
   shake.time = dur;
   shake.maxTime = dur;
   shake.intensity = inten;
@@ -2560,6 +2683,32 @@ function renderDangerFlash (ctx) {
   grad.addColorStop(1, `rgba(255,0,0,${dangerFlashAlpha})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+}
+
+// Combo edge glow — ambient glow on top/bottom borders during active combo (US-006)
+function renderComboGlow (ctx) {
+  if (comboGlowAlpha <= 0.001) return;
+  const color = getComboColor(comboMultiplier >= 2 ? comboMultiplier : 2);
+  // Breathing pulse: alpha oscillates at ~1Hz
+  const pulse = 0.15 + 0.1 * Math.sin(gameState.elapsedTime * Math.PI * 2);
+  const alpha = comboGlowAlpha * pulse;
+
+  ctx.save();
+  // Top edge glow
+  const topGrad = ctx.createLinearGradient(0, 0, 0, 100);
+  topGrad.addColorStop(0, color);
+  topGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, 100);
+
+  // Bottom edge glow
+  const botGrad = ctx.createLinearGradient(0, CANVAS_HEIGHT, 0, CANVAS_HEIGHT - 100);
+  botGrad.addColorStop(0, color);
+  botGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0, CANVAS_HEIGHT - 100, CANVAS_WIDTH, 100);
+  ctx.restore();
 }
 
 // Chromatic aberration — RGB split overlay on impact and nitro (US-002)
@@ -2774,22 +2923,49 @@ function renderSpeedLines (ctx) {
 }
 
 // Spawn a floating pickup text at (x, y) (US-009); max 8 simultaneous, oldest removed if exceeded
-function spawnFloatText (x, y, text, color) {
+function spawnFloatText (x, y, text, color, scale = 1.0, duration = FLOAT_TEXT_DURATION) {
   if (floatTexts.length >= 8) floatTexts.splice(0, 1);
-  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color });
+  floatTexts.push({ x, y, timer: duration, maxTimer: duration, text, color, scale });
+}
+
+// Combo color palette: returns a color based on combo level
+function getComboColor (level) {
+  if (level <= 1) return '#FF8800'; // orange (base)
+  if (level === 2) return '#FFD700'; // gold
+  if (level === 3) return '#00FFDD'; // cyan
+  return '#FF44FF'; // magenta (x4+)
 }
 
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
 function triggerNearMiss (v) {
-  const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
+  const preCombo = comboMultiplier; // capture level before increment for display
+  const pts = NEAR_MISS_BASE_POINTS * preCombo;
   gameState.score += pts;
   comboMultiplier += 1;
   comboResetTimer = COMBO_RESET_TIME;
   comboScaleTimer = COMBO_SCALE_DURATION;
 
+  // Track near miss stats
+  nearMissCount++;
+  nearMissBonusTotal += pts;
+  bestCombo = Math.max(bestCombo, comboMultiplier);
+
   // Near miss whoosh + combo stinger
   AudioManager.playNearMiss();
   if (comboMultiplier >= 2) AudioManager.playComboUp(comboMultiplier);
+
+  // Combo milestone flash + SFX (x3, x5, x8)
+  if (comboMultiplier === 3 || comboMultiplier === 5 || comboMultiplier === 8) {
+    comboMilestoneFlash = 0.1;
+    AudioManager.playComboMilestone(comboMultiplier);
+  }
+
+  // Near miss screen shake — intensity scales with combo, won't override stronger collision shake
+  triggerShake(0.12, Math.min(2 + comboMultiplier, 5));
+
+  // Score punch animation (US-007)
+  scorePunchScale = Math.min(0.4, 0.15 + comboMultiplier * 0.05);
+  scorePunchColor = getComboColor(comboMultiplier);
 
   // White flash on the vehicle's side closest to the player
   const playerCenterX = gameState.player.x + PLAYER_WIDTH / 2;
@@ -2799,8 +2975,36 @@ function triggerNearMiss (v) {
     timer: NEAR_MISS_FLASH_DURATION,
   };
 
-  // Floating near-miss text (US-009)
-  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT / 2, 'NEAR MISS!', '#FF8800');
+  // Floating near-miss text with points + multiplier (US-002)
+  // Use pre-increment combo for display: '+50' at x1, 'x2 +100!' at x2, etc.
+  const comboColor = getComboColor(preCombo);
+  const floatScale = Math.min(1.5, 1.0 + (preCombo - 1) * 0.12);
+  const floatLabel = preCombo <= 1
+    ? '+' + pts
+    : 'x' + preCombo + ' +' + pts + '!';
+  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT * 0.3, floatLabel, comboColor, floatScale);
+
+  // Near miss spark particles from player's side closest to vehicle (US-005)
+  const vehicleIsRight = vCenterX > playerCenterX;
+  const sparkX = vehicleIsRight
+    ? gameState.player.x + PLAYER_WIDTH
+    : gameState.player.x;
+  const sparkY = gameState.player.y + PLAYER_HEIGHT * 0.4;
+  const sparkCount = Math.min(20, 8 + (comboMultiplier - 1) * 3);
+  const sparkColor = comboColor;
+  const lateralDir = vehicleIsRight ? 1 : -1;
+  for (let i = 0; i < sparkCount; i++) {
+    particles.push({
+      x: sparkX,
+      y: sparkY + (Math.random() - 0.5) * PLAYER_HEIGHT * 0.5,
+      vx: lateralDir * (80 + Math.random() * 70),
+      vy: (Math.random() - 0.5) * 100,
+      life: 0.3 + Math.random() * 0.2,
+      maxLife: 0.5,
+      color: sparkColor,
+      size: 1.5 + Math.random() * 2,
+    });
+  }
 }
 
 function updateParticles (dt) {
@@ -2951,6 +3155,17 @@ function resetGameState () {
   comboMultiplier = 1;
   comboResetTimer = 0;
   comboScaleTimer = 0;
+  comboExpireShakeTimer = 0;
+  comboExpireFadeTimer = 0;
+  comboMilestoneFlash = 0;
+  comboGlowAlpha = 0;
+  scorePunchScale = 0;
+  scorePunchColor = null;
+  comboZoom = 1.0;
+  nearMissCount = 0;
+  bestCombo = 0;
+  nearMissBonusTotal = 0;
+  nearMissHintShown = false;
   // Reset DDA fully on game over / retry
   ddaCleanTimer = 0;
   ddaSpawnRate = 1.0;
@@ -3480,6 +3695,12 @@ function updateTraffic (dt) {
     const visualSpeed = getEffectiveScrollSpeed() * (1 - type.speedRatio);
     v.y += visualSpeed * dt;
 
+    // First-time near miss discoverability hint (US-011)
+    if (!nearMissHintShown && v.y > 0) {
+      nearMissHintShown = true;
+      spawnFloatText(CANVAS_WIDTH / 2, 80, 'Passe rente aos carros!', '#FFFFFF', 1.0, 3.0);
+    }
+
     // Track minimum horizontal distance during vertical sprite overlap (near miss detection)
     if (v.y + v.height > nearMissPlayer.y && v.y < nearMissPlayer.y + PLAYER_HEIGHT) {
       // Sprites are vertically overlapping — measure edge-to-edge horizontal gap
@@ -3549,7 +3770,7 @@ function updateTraffic (dt) {
   gameState.traffic = gameState.traffic.filter((v) => {
     if (v.y > 760) {
       if (!v.collided) {
-        gameState.score += OVERTAKE_BONUS;
+        gameState.score += OVERTAKE_BONUS * (comboMultiplier >= 2 ? comboMultiplier : 1);
         AudioManager.playOvertake();
       }
       return false;
@@ -3799,7 +4020,7 @@ function updateCoins (dt) {
       h: COIN_RADIUS * 2,
     };
     if (aabbOverlap(ph, coinHb)) {
-      gameState.score += COIN_POINTS;
+      gameState.score += COIN_POINTS * (comboMultiplier >= 2 ? comboMultiplier : 1);
       gameState.coinsCollected++;
       spawnFloatText(coin.x, coin.y, '+1', '#FFD700'); // US-009
       AudioManager.playCoinPickup();
@@ -4060,11 +4281,12 @@ function renderShieldItems (ctx) {
 function renderFloatTexts (ctx) {
   if (floatTexts.length === 0) return;
   ctx.save();
-  ctx.font = 'bold 16px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const ft of floatTexts) {
-    ctx.globalAlpha = ft.timer / FLOAT_TEXT_DURATION;
+    const fontSize = Math.round(16 * (ft.scale || 1.0));
+    ctx.font = 'bold ' + fontSize + 'px monospace';
+    ctx.globalAlpha = ft.timer / (ft.maxTimer || FLOAT_TEXT_DURATION);
     ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);
   }
@@ -4120,7 +4342,8 @@ function renderScoreHUD (ctx) {
   const scoreStr = Math.floor(gameState.displayedScore).toString();
 
   // Beat-pulse scale (US-008): beat → 1.08×, coin collect → 1.15×, take larger
-  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse);
+  // Score punch (US-007): adds combo-scaled punch on near miss
+  const scoreScale = Math.max(1 + 0.08 * beatPulse, 1 + 0.15 * coinPulse) + scorePunchScale;
   // Scale around score anchor (top-right)
   const anchorX = CANVAS_WIDTH - 8;
   const anchorY = 20;
@@ -4136,8 +4359,8 @@ function renderScoreHUD (ctx) {
   // Drop shadow
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 6, 10);
-  // Main score
-  ctx.fillStyle = '#FFFFFF';
+  // Main score — flash combo color during punch, blend back to white as it decays
+  ctx.fillStyle = (scorePunchScale > 0 && scorePunchColor) ? scorePunchColor : '#FFFFFF';
   ctx.fillText(scoreStr, CANVAS_WIDTH - 8, 8);
 
   ctx.restore();
@@ -4245,27 +4468,78 @@ function renderMuteIcon (ctx) {
 
 // --- Combo HUD ---
 function renderComboHUD (ctx) {
-  if (comboMultiplier < 2) return; // only show at x2+
+  // Show during active combo OR during expire fade-out
+  const isActive = comboMultiplier >= 2;
+  const isFading = comboExpireFadeTimer > 0;
+  if (!isActive && !isFading) return;
 
-  // Fade out in the last second before reset; full alpha for most of the window
-  const fadeAlpha = Math.min(1, comboResetTimer);
-  // Scale-in pop animation when a new near miss triggers
+  // Use last known combo level during fade-out (multiplier already reset to 1)
+  const displayLevel = isActive ? comboMultiplier : 2; // minimum x2 for color
+  const comboColor = getComboColor(displayLevel);
+
+  // Alpha: full during active, fade during expire
+  let alpha = 1;
+  if (!isActive && isFading) {
+    alpha = comboExpireFadeTimer / 0.3;
+  }
+
+  // Pop/bounce animation on each new near miss
   const scaleProgress = comboScaleTimer > 0 ? comboScaleTimer / COMBO_SCALE_DURATION : 0;
-  const scale = 1 + 0.35 * scaleProgress;
+  const popScale = 1 + 0.35 * scaleProgress;
+
+  // Expire shake: horizontal oscillation
+  let shakeX = 0;
+  if (comboExpireShakeTimer > 0) {
+    shakeX = Math.sin(comboExpireShakeTimer * 80) * 3 * (comboExpireShakeTimer / 0.15);
+  }
+
+  const cx = CANVAS_WIDTH / 2;
+  const cy = 45;
 
   ctx.save();
-  ctx.globalAlpha = fadeAlpha;
-  ctx.translate(CANVAS_WIDTH / 2, 32);
-  ctx.scale(scale, scale);
-  ctx.font = 'bold 26px monospace';
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx + shakeX, cy);
+  ctx.scale(popScale, popScale);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  // Milestone white flash overlay
+  const isFlashing = comboMilestoneFlash > 0;
+
+  // Main combo text: 'x{N} COMBO'
+  const label = `x${isActive ? comboMultiplier : 2} COMBO`;
+  ctx.font = 'bold 30px monospace';
+
   // Drop shadow
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillText(`x${comboMultiplier}`, 1, 1);
-  // Gold text
-  ctx.fillStyle = '#FFD700';
-  ctx.fillText(`x${comboMultiplier}`, 0, 0);
+  ctx.fillText(label, 1, 1);
+
+  // Colored text (or white during milestone flash)
+  ctx.fillStyle = isFlashing ? '#FFFFFF' : comboColor;
+  ctx.fillText(label, 0, 0);
+
+  // Timer bar below the text
+  if (isActive) {
+    const barWidth = 120;
+    const barHeight = 6;
+    const ratio = comboResetTimer / COMBO_RESET_TIME;
+    const barX = -barWidth / 2;
+    const barY = 18;
+
+    // Bar background
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // Bar fill — green/yellow/red based on ratio
+    let barColor;
+    if (ratio > 0.66) barColor = '#44FF44';
+    else if (ratio > 0.33) barColor = '#FFDD00';
+    else barColor = '#FF4444';
+
+    ctx.fillStyle = barColor;
+    ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
+  }
+
   ctx.restore();
 }
 
@@ -4608,8 +4882,8 @@ const playingState = {
     // Tick shield break flash
     if (shieldBreakFlash > 0) shieldBreakFlash = Math.max(0, shieldBreakFlash - dt);
 
-    // Distance score: 1 pt per 10 px traveled
-    gameState.score += effSpeed * dt * SCORE_PER_PX;
+    // Distance score: 1 pt per 10 px traveled (multiplied by combo when active)
+    gameState.score += effSpeed * dt * SCORE_PER_PX * (comboMultiplier >= 2 ? comboMultiplier : 1);
 
     // Survivor bonus: +300 every 30s without collision
     gameState.survivorTimer += dt;
@@ -4654,10 +4928,33 @@ const playingState = {
     // Tick combo reset timer; expire combo when it runs out
     if (comboResetTimer > 0) {
       comboResetTimer = Math.max(0, comboResetTimer - dt);
-      if (comboResetTimer === 0) comboMultiplier = 1;
+      if (comboResetTimer === 0 && comboMultiplier > 1) {
+        AudioManager.playComboLost();
+        comboMultiplier = 1;
+        comboExpireShakeTimer = 0.15;
+        comboExpireFadeTimer = 0.3;
+      }
     }
     // Tick combo scale animation
     if (comboScaleTimer > 0) comboScaleTimer = Math.max(0, comboScaleTimer - dt);
+    // Tick combo expire effects
+    if (comboExpireShakeTimer > 0) comboExpireShakeTimer = Math.max(0, comboExpireShakeTimer - dt);
+    if (comboExpireFadeTimer > 0) comboExpireFadeTimer = Math.max(0, comboExpireFadeTimer - dt);
+    if (comboMilestoneFlash > 0) comboMilestoneFlash = Math.max(0, comboMilestoneFlash - dt);
+    // Combo glow: fade in over 0.3s when combo active, fade out over 0.5s when lost
+    const glowTarget = comboMultiplier >= 2 ? 1 : 0;
+    if (glowTarget > comboGlowAlpha) {
+      comboGlowAlpha = Math.min(1, comboGlowAlpha + dt / 0.3);
+    } else if (glowTarget < comboGlowAlpha) {
+      comboGlowAlpha = Math.max(0, comboGlowAlpha - dt / 0.5);
+    }
+
+    // Decay score punch scale (US-007)
+    if (scorePunchScale > 0) scorePunchScale = Math.max(0, scorePunchScale - dt * 3);
+
+    // Camera zoom on high combo (US-009): lerp toward target
+    const zoomTarget = comboMultiplier >= 6 ? 1.04 : comboMultiplier >= 4 ? 1.02 : 1.0;
+    comboZoom += (Math.min(1.05, zoomTarget) - comboZoom) * dt * 3;
 
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
@@ -4706,6 +5003,13 @@ const playingState = {
       ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
     }
 
+    // Camera zoom on high combo (US-009) — purely visual, does not affect game logic
+    if (comboZoom !== 1.0) {
+      ctx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      ctx.scale(comboZoom, comboZoom);
+      ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
+    }
+
     // Heat haze / road shimmer (US-007) — renders road with distortion when speed > 500;
     // falls back to normal renderRoad when below threshold or returns false
     if (!renderHeatHaze(gameState.scrollOffset)) {
@@ -4738,6 +5042,9 @@ const playingState = {
 
     // Screen-edge danger flash — red glow from edges when traffic is nearby (US-010)
     renderDangerFlash(ctx);
+
+    // Combo edge glow — ambient glow on top/bottom borders (US-006)
+    renderComboGlow(ctx);
 
     ctx.restore();
     // --- End world layer ---
@@ -5235,21 +5542,26 @@ const gameOverState = {
       if (this.isNewBest) localStorage.setItem('roadrush_best_score', this.finalScore);
     }
     this.statsPreset = false;
+    // Capture near miss stats (US-010)
+    this.finalNearMissCount = nearMissCount;
+    this.finalBestCombo = bestCombo;
+    this.finalNearMissBonusTotal = nearMissBonusTotal;
     this.rankingScroll = 0;
     this.rankingDotTime = 0;
+    this._rankingBuilt = false;
     feedbackBtnEl.style.display = 'block';
     positionFeedbackBtn();
     AudioManager.startGameOverDrone();
     showNameForm();
     fetchRanking();
-    showGameOverAd();
+    showGameOverRanking();
   },
 
   onExit () {
     feedbackBtnEl.style.display = 'none';
     AudioManager.stopGameOverDrone();
     hideNameForm();
-    hideGameOverAd();
+    hideGameOverRanking();
   },
 
   update (dt) {
@@ -5260,10 +5572,11 @@ const gameOverState = {
       resetGameState();
       fsm.transition(playingState);
     }
-    if (this.rankingStatus === 'loaded' && this.rankingData.length > 8) {
-      const maxScroll = this.rankingData.length - 8;
-      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
-      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
+    // Update DOM ranking when data changes
+    if (this.rankingStatus === 'loaded' && !this._rankingBuilt) {
+      const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+      buildRankingDOM(this.rankingData, playerName);
+      this._rankingBuilt = true;
     }
   },
 
@@ -5371,32 +5684,37 @@ const gameOverState = {
       ctx.fillText(`Recorde: ${this.bestScore.toLocaleString()}`, CX, cardsY + cardH + 14);
     }
 
-    // --- Ranking section ---
-    // Name form (HTML) is at canvas y=195, ~76px tall → ends at y≈271
-    const rankLabelY = 280;
-    ctx.fillStyle = 'rgba(255,255,255,0.70)';
-    ctx.font = 'bold 11px monospace';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'left';
-    ctx.fillText('🏆  TOP RANKING', 14, rankLabelY);
-    if (this.rankingData.length > 8) {
-      ctx.fillStyle = 'rgba(255,255,255,0.28)';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('▲▼ deslize', CANVAS_WIDTH - 14, rankLabelY);
+    // --- Near miss stats section (US-010) ---
+    if (this.finalNearMissCount > 0) {
+      const nmY = cardsY + cardH + 32;
+      const isGold = this.finalBestCombo >= 3;
+      ctx.fillStyle = isGold ? '#FFD700' : 'rgba(255,255,255,0.55)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      const niceLabel = isGold ? '  NICE!' : '';
+      ctx.fillText(
+        `Near Misses: ${this.finalNearMissCount}  |  Best Combo: x${this.finalBestCombo}  |  Bonus: +${this.finalNearMissBonusTotal}${niceLabel}`,
+        CX, nmY
+      );
     }
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(14, rankLabelY + 16); ctx.lineTo(CANVAS_WIDTH - 14, rankLabelY + 16); ctx.stroke();
 
-    const playerName = nameInputEl ? nameInputEl.value.trim() : '';
-    renderRankingPanel(ctx, this.rankingData, this.rankingStatus, this.rankingScroll, this.rankingDotTime, playerName, {
-      startY: rankLabelY + 22,
-      rowH: 38,
-      visible: 8,
-      fontSize: '12px',
-      cards: true,
-    });
+    // --- Ranking section (DOM-based, rendered above canvas) ---
+    // Show loading/error state on canvas while DOM container handles loaded data
+    if (this.rankingStatus === 'loading') {
+      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`Carregando ranking${dots}`, CX, 290);
+    } else if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Erro ao carregar ranking', CX, 290);
+    }
 
     // --- Pulsing retry hint ---
     const pulse = 0.45 + 0.45 * Math.sin(this.pulseTime * 2.6);
