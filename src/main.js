@@ -1637,6 +1637,7 @@ let comboMilestoneFlash = 0;   // white flash at milestone levels (0.1s)
 let comboGlowAlpha = 0;        // combo edge glow intensity (fades in/out)
 let scorePunchScale = 0;       // score punch animation (0 = none, decays to 0)
 let scorePunchColor = null;    // score punch color from combo tier
+let comboZoom = 1.0;           // camera zoom level (lerps toward target)
 
 // Near miss tracking for game over stats
 let nearMissCount = 0;
@@ -3094,6 +3095,7 @@ function resetGameState () {
   comboGlowAlpha = 0;
   scorePunchScale = 0;
   scorePunchColor = null;
+  comboZoom = 1.0;
   nearMissCount = 0;
   bestCombo = 0;
   nearMissBonusTotal = 0;
@@ -4877,6 +4879,10 @@ const playingState = {
     // Decay score punch scale (US-007)
     if (scorePunchScale > 0) scorePunchScale = Math.max(0, scorePunchScale - dt * 3);
 
+    // Camera zoom on high combo (US-009): lerp toward target
+    const zoomTarget = comboMultiplier >= 6 ? 1.04 : comboMultiplier >= 4 ? 1.02 : 1.0;
+    comboZoom += (Math.min(1.05, zoomTarget) - comboZoom) * dt * 3;
+
     // Fade red flash
     if (redFlash.alpha > 0) redFlash.alpha = Math.max(0, redFlash.alpha - dt / 0.15);
 
@@ -4921,6 +4927,13 @@ const playingState = {
     if (cameraRoll !== 0) {
       ctx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       ctx.rotate(cameraRoll * Math.PI / 180);
+      ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
+    }
+
+    // Camera zoom on high combo (US-009) — purely visual, does not affect game logic
+    if (comboZoom !== 1.0) {
+      ctx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      ctx.scale(comboZoom, comboZoom);
       ctx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
     }
 
