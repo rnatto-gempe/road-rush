@@ -1678,6 +1678,103 @@ hazeCanvas.width = CANVAS_WIDTH;
 hazeCanvas.height = CANVAS_HEIGHT;
 const hazeCtx = hazeCanvas.getContext('2d');
 
+// --- Mobile Touch Controls (US-001 / US-002) ---
+// Only show touch controls on actual mobile/touch devices
+const _isTouchDevice = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+const _isMobileViewport = () => Math.min(window.innerWidth, window.innerHeight) <= 900;
+const isMobileDevice = _isTouchDevice && _isMobileViewport();
+
+const touchBtnStyle = document.createElement('style');
+touchBtnStyle.textContent = `
+  .touch-left, .touch-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .touch-btn-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: clamp(52px, 14vw, 72px);
+    height: clamp(52px, 14vw, 72px);
+    border-radius: 50%;
+    background: linear-gradient(145deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%);
+    border: 1.5px solid rgba(255,255,255,0.22);
+    box-shadow:
+      0 4px 24px rgba(0,0,0,0.35),
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 0 -1px 0 rgba(0,0,0,0.25);
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.08s ease, border-color 0.08s ease;
+  }
+  .touch-btn-inner svg {
+    width: clamp(22px, 6vw, 32px);
+    height: clamp(22px, 6vw, 32px);
+    fill: none;
+    stroke: rgba(255,255,255,0.80);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 1px 4px rgba(0,0,0,0.6));
+    transition: stroke 0.08s ease;
+  }
+  .touch-left.active .touch-btn-inner,
+  .touch-right.active .touch-btn-inner {
+    transform: scale(0.88);
+    background: linear-gradient(145deg, rgba(255,200,50,0.35) 0%, rgba(255,100,0,0.20) 100%);
+    border-color: rgba(255,210,60,0.60);
+    box-shadow:
+      0 2px 12px rgba(0,0,0,0.35),
+      0 0 22px rgba(255,180,0,0.45),
+      inset 0 1px 0 rgba(255,255,180,0.25);
+  }
+  .touch-left.active .touch-btn-inner svg,
+  .touch-right.active .touch-btn-inner svg {
+    stroke: rgba(255,225,80,1);
+    filter: drop-shadow(0 0 6px rgba(255,200,0,0.8));
+  }
+`;
+document.head.appendChild(touchBtnStyle);
+
+const _svgLeft = `<svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>`;
+const _svgRight = `<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`;
+
+const touchLeft = document.createElement('div');
+touchLeft.className = 'touch-left';
+touchLeft.innerHTML = `<div class="touch-btn-inner">${_svgLeft}</div>`;
+touchLeft.style.cssText = [
+  'position:fixed',
+  'display:none',
+  'touch-action:none',
+  'z-index:100',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+const touchRight = document.createElement('div');
+touchRight.className = 'touch-right';
+touchRight.innerHTML = `<div class="touch-btn-inner">${_svgRight}</div>`;
+touchRight.style.cssText = [
+  'position:fixed',
+  'display:none',
+  'touch-action:none',
+  'z-index:100',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+document.body.appendChild(touchLeft);
+document.body.appendChild(touchRight);
+
+function setupTouchBtn(el, key) {
+  el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; el.classList.add('active'); }, { passive: false });
+  el.addEventListener('touchmove', (e) => { e.preventDefault(); keys[key] = true; el.classList.add('active'); }, { passive: false });
+  el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; el.classList.remove('active'); }, { passive: false });
+  el.addEventListener('touchcancel', (e) => { e.preventDefault(); keys[key] = false; el.classList.remove('active'); }, { passive: false });
+}
+setupTouchBtn(touchLeft, 'ArrowLeft');
+setupTouchBtn(touchRight, 'ArrowRight');
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas() {
   const windowWidth = window.innerWidth;
@@ -1698,6 +1795,26 @@ function resizeCanvas() {
   canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
   positionNameForm();
+  positionTouchButtons(displayWidth, displayHeight);
+}
+
+function positionTouchButtons(displayWidth, displayHeight) {
+  // Center the canvas display area
+  const left = (window.innerWidth - displayWidth) / 2;
+  const top = (window.innerHeight - displayHeight) / 2;
+  const btnHeight = displayHeight * 0.20;
+  const btnWidth = displayWidth / 2;
+  const btnTop = top + displayHeight - btnHeight;
+
+  touchLeft.style.left = `${left}px`;
+  touchLeft.style.top = `${btnTop}px`;
+  touchLeft.style.width = `${btnWidth}px`;
+  touchLeft.style.height = `${btnHeight}px`;
+
+  touchRight.style.left = `${left + btnWidth}px`;
+  touchRight.style.top = `${btnTop}px`;
+  touchRight.style.width = `${btnWidth}px`;
+  touchRight.style.height = `${btnHeight}px`;
 }
 
 // Declared early so positionNameForm() guard works when resizeCanvas() is called below
@@ -1813,7 +1930,7 @@ function handleNameSubmit() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       nameSubmitEl.textContent = 'Score submitted! ✓';
       nameSubmitEl.disabled = true;
-      fetchRanking();
+      setTimeout(fetchRanking, 2000);
     })
     .catch(() => {
       nameSubmitEl.textContent = 'Failed to submit. Try again';
@@ -1843,6 +1960,67 @@ function fetchRanking() {
       gameOverState.rankingStatus = 'error';
     });
 }
+
+// --- Tap to Start / Tap to Retry / Tap Mute Icon / Swipe Ranking ---
+let touchStartY = 0; // canvas coords at touchstart
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  touchStartY = (touch.clientY - rect.top) * scaleY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const touch = e.changedTouches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const cx = (touch.clientX - rect.left) * scaleX;
+  const cy = (touch.clientY - rect.top) * scaleY;
+
+  // Check mute icon tap first (44×44 area centered on CANVAS_WIDTH-28, 54)
+  const muteX = CANVAS_WIDTH - 28;
+  const muteY = 54;
+  if (cx >= muteX - 22 && cx <= muteX + 22 && cy >= muteY - 22 && cy <= muteY + 22) {
+    AudioManager.toggleMute();
+    return;
+  }
+
+  if (fsm.currentState === titleState) {
+    AudioManager.init();
+    AudioManager.resume();
+    AudioManager.startTitleDrone();
+    AudioManager.playRiser();
+    resetGameState();
+    fsm.transition(playingState);
+  } else if (fsm.currentState === gameOverState) {
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      // Swipe gesture: scroll ranking
+      if (gameOverState.rankingStatus === 'loaded' && gameOverState.rankingData.length > 10) {
+        const maxScroll = gameOverState.rankingData.length - 10;
+        const scrollDelta = Math.round(delta / 30);
+        gameOverState.rankingScroll = Math.max(0, Math.min(gameOverState.rankingScroll + scrollDelta, maxScroll));
+      }
+    } else {
+      // Tap gesture: retry
+      AudioManager.playDrumRoll();
+      resetGameState();
+      fsm.transition(playingState);
+    }
+  }
+  // No tap action during playingState
+}, { passive: false });
+
+// --- Prevent scroll/zoom when touching canvas or touch buttons ---
+document.body.addEventListener('touchmove', (e) => {
+  if (e.target === canvas || e.target === touchLeft || e.target === touchRight) {
+    e.preventDefault();
+  }
+}, { passive: false });
 
 // --- Mute icon click detection ---
 canvas.addEventListener('click', (e) => {
@@ -3762,7 +3940,8 @@ const titleState = {
     const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.pulseTime * 3));
     ctx.globalAlpha = alpha;
     ctx.font = '20px monospace';
-    ctx.fillText('Press Enter to Start', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+    const startLabel = ('ontouchstart' in window) ? 'Press Enter or Tap to Start' : 'Press Enter to Start';
+    ctx.fillText(startLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
     ctx.globalAlpha = 1;
   },
 };
@@ -3776,6 +3955,10 @@ const playingState = {
     AudioManager.startPad();
     AudioManager.startArp();
     AudioManager.startBass();
+    if (isMobileDevice) {
+      touchLeft.style.display = 'flex';
+      touchRight.style.display = 'flex';
+    }
   },
 
   onExit() {
@@ -3786,6 +3969,10 @@ const playingState = {
     AudioManager.stopEngine();
     AudioManager.stopRoad();
     AudioManager.stopPad();
+    touchLeft.style.display = 'none';
+    touchRight.style.display = 'none';
+    keys['ArrowLeft'] = false;
+    keys['ArrowRight'] = false;
   },
 
   update(dt) {
@@ -4454,7 +4641,8 @@ const gameOverState = {
     ctx.font = '14px monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText('Press Enter to Retry', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
+    const retryLabel = ('ontouchstart' in window) ? 'Press Enter or Tap to Retry' : 'Press Enter to Retry';
+    ctx.fillText(retryLabel, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 12);
     ctx.globalAlpha = 1;
   },
 };
