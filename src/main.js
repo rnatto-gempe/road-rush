@@ -1799,6 +1799,7 @@ function resizeCanvas() {
   positionRankingBtn();
   positionRankingBackBtn();
   positionGameOverAd();
+  positionFeedbackBtn();
 }
 
 function positionTouchButtons(displayWidth, displayHeight) {
@@ -1828,6 +1829,8 @@ let rankingBackBtnEl = null;
 // Declared early so positionGameOverAd() guard works when resizeCanvas() is called below
 let gameOverAdEl = null;
 let gameOverAdLabelEl = null;
+// Declared early so positionFeedbackBtn() guard works when resizeCanvas() is called below
+let feedbackBtnEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -2088,6 +2091,196 @@ function hideGameOverAd() {
   if (gameOverAdEl) gameOverAdEl.style.display = 'none';
   if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'none';
 }
+
+// --- Feedback Button & Modal (US-006) ---
+feedbackBtnEl = document.createElement('button');
+feedbackBtnEl.id = 'feedback-btn';
+feedbackBtnEl.textContent = '💡 Sugerir Melhoria';
+feedbackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(255,193,7,0.15)',
+  'color:#FFC107',
+  'border:1.5px solid rgba(255,193,7,0.45)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:160px',
+  'font:16px monospace',
+  'padding:0 18px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(feedbackBtnEl);
+
+function positionFeedbackBtn() {
+  if (!feedbackBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  feedbackBtnEl.style.left = `${rect.left + rect.width / 2 - 80}px`;
+  feedbackBtnEl.style.top = `${rect.top + 640 * scale}px`;
+}
+
+// --- Feedback Modal ---
+const feedbackModalEl = document.createElement('div');
+feedbackModalEl.id = 'feedback-modal';
+feedbackModalEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'inset:0',
+  'z-index:100',
+  'background:rgba(0,0,0,0.75)',
+  'align-items:center',
+  'justify-content:center',
+].join(';') + ';';
+
+const feedbackCardEl = document.createElement('div');
+feedbackCardEl.style.cssText = [
+  'background:#1A1A2E',
+  'border:1.5px solid rgba(255,193,7,0.45)',
+  'border-radius:16px',
+  'padding:24px 20px',
+  'width:min(360px,90vw)',
+  'max-height:90vh',
+  'overflow-y:auto',
+  'display:flex',
+  'flex-direction:column',
+  'gap:12px',
+  'position:relative',
+].join(';') + ';';
+
+const feedbackTitleEl = document.createElement('h2');
+feedbackTitleEl.textContent = '💡 Sugira uma Melhoria';
+feedbackTitleEl.style.cssText = 'color:#FFC107;font:bold 20px monospace;margin:0;';
+
+const feedbackSubtitleEl = document.createElement('p');
+feedbackSubtitleEl.textContent = 'Sua sugestão será analisada pela equipe. Deixe seu nome para ser avisado quando for implementado!';
+feedbackSubtitleEl.style.cssText = 'color:rgba(255,255,255,0.7);font:14px monospace;margin:0;';
+
+const feedbackTextEl = document.createElement('textarea');
+feedbackTextEl.id = 'feedback-text';
+feedbackTextEl.placeholder = 'O que você gostaria de ver no jogo?';
+feedbackTextEl.maxLength = 500;
+feedbackTextEl.rows = 4;
+feedbackTextEl.style.cssText = [
+  'font:16px monospace',
+  'background:rgba(255,255,255,0.08)',
+  'color:#fff',
+  'border:1px solid rgba(255,255,255,0.25)',
+  'border-radius:8px',
+  'padding:10px',
+  'resize:vertical',
+  'width:100%',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+const feedbackNameEl = document.createElement('input');
+feedbackNameEl.id = 'feedback-name';
+feedbackNameEl.type = 'text';
+feedbackNameEl.placeholder = 'Seu nome (para te avisar quando for implementado)';
+feedbackNameEl.maxLength = 40;
+feedbackNameEl.style.cssText = [
+  'font:16px monospace',
+  'background:rgba(255,255,255,0.08)',
+  'color:#fff',
+  'border:1px solid rgba(255,255,255,0.25)',
+  'border-radius:8px',
+  'padding:10px',
+  'width:100%',
+  'box-sizing:border-box',
+].join(';') + ';';
+
+const feedbackErrorEl = document.createElement('span');
+feedbackErrorEl.id = 'feedback-error';
+feedbackErrorEl.style.cssText = 'color:#E53935;font:13px monospace;min-height:16px;';
+
+const feedbackSubmitEl = document.createElement('button');
+feedbackSubmitEl.id = 'feedback-submit';
+feedbackSubmitEl.textContent = 'Enviar Sugestão';
+feedbackSubmitEl.style.cssText = [
+  'font:16px monospace',
+  'background:rgba(255,193,7,0.2)',
+  'color:#FFC107',
+  'border:1.5px solid rgba(255,193,7,0.45)',
+  'border-radius:20px',
+  'min-height:44px',
+  'padding:0 20px',
+  'cursor:pointer',
+  'align-self:flex-end',
+].join(';') + ';';
+
+const feedbackCloseEl = document.createElement('button');
+feedbackCloseEl.textContent = '✕';
+feedbackCloseEl.style.cssText = [
+  'position:absolute',
+  'top:12px',
+  'right:14px',
+  'background:none',
+  'border:none',
+  'color:rgba(255,255,255,0.6)',
+  'font:20px monospace',
+  'cursor:pointer',
+  'line-height:1',
+].join(';') + ';';
+
+feedbackCardEl.append(feedbackTitleEl, feedbackSubtitleEl, feedbackTextEl, feedbackNameEl, feedbackErrorEl, feedbackSubmitEl, feedbackCloseEl);
+feedbackModalEl.appendChild(feedbackCardEl);
+document.body.appendChild(feedbackModalEl);
+
+function openFeedbackModal() {
+  feedbackTextEl.value = '';
+  feedbackNameEl.value = localStorage.getItem('roadRushPlayerName') || '';
+  feedbackErrorEl.textContent = '';
+  feedbackSubmitEl.textContent = 'Enviar Sugestão';
+  feedbackSubmitEl.disabled = false;
+  feedbackModalEl.style.display = 'flex';
+}
+
+function closeFeedbackModal() {
+  feedbackModalEl.style.display = 'none';
+}
+
+feedbackBtnEl.addEventListener('click', openFeedbackModal);
+feedbackCloseEl.addEventListener('click', closeFeedbackModal);
+
+// Close on backdrop click (not on card click)
+feedbackModalEl.addEventListener('click', (e) => {
+  if (e.target === feedbackModalEl) closeFeedbackModal();
+});
+
+// Prevent game key handling when typing
+feedbackTextEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Escape') closeFeedbackModal();
+});
+feedbackNameEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Escape') closeFeedbackModal();
+});
+
+feedbackSubmitEl.addEventListener('click', async () => {
+  const suggestion = feedbackTextEl.value.trim();
+  const name = feedbackNameEl.value.trim();
+  if (!suggestion || !name) {
+    feedbackErrorEl.textContent = 'Preencha todos os campos antes de enviar.';
+    return;
+  }
+  feedbackErrorEl.textContent = '';
+  feedbackSubmitEl.textContent = 'Enviando...';
+  feedbackSubmitEl.disabled = true;
+  try {
+    const res = await fetch(FEEDBACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, suggestion }),
+    });
+    if (!res.ok) throw new Error('server error');
+    feedbackSubmitEl.textContent = 'Obrigado! ✓';
+    setTimeout(() => closeFeedbackModal(), 1500);
+  } catch {
+    feedbackSubmitEl.textContent = 'Erro. Tentar novamente';
+    feedbackSubmitEl.disabled = false;
+  }
+});
 
 // Abort controller for title ranking fetch
 let titleRankingAbortController = null;
@@ -4051,11 +4244,14 @@ const titleState = {
     }
     rankingBtnEl.style.display = 'block';
     positionRankingBtn();
+    feedbackBtnEl.style.display = 'block';
+    positionFeedbackBtn();
   },
 
   onExit() {
     AudioManager.stopTitleDrone();
     rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
   },
 
   update(dt) {
@@ -4101,6 +4297,7 @@ const titleState = {
 const playingState = {
   onEnter() {
     rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
     AudioManager.startEngine();
     AudioManager.startRoad();
     AudioManager.startBeat();
@@ -4427,6 +4624,7 @@ const explosionState = {
 
   onEnter() {
     rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
     this.originX = gameState.player.x + PLAYER_WIDTH / 2;
     this.originY = gameState.player.y + PLAYER_HEIGHT / 2;
     this.timer = 2.0;
@@ -4726,6 +4924,8 @@ const gameOverState = {
     this.statsPreset = false;
     this.rankingScroll = 0;
     this.rankingDotTime = 0;
+    feedbackBtnEl.style.display = 'block';
+    positionFeedbackBtn();
     AudioManager.startGameOverDrone();
     showNameForm();
     fetchRanking();
@@ -4733,6 +4933,7 @@ const gameOverState = {
   },
 
   onExit() {
+    feedbackBtnEl.style.display = 'none';
     AudioManager.stopGameOverDrone();
     hideNameForm();
     hideGameOverAd();
@@ -4823,8 +5024,9 @@ const titleRankingState = {
   errorMessage: '',
 
   onEnter() {
-    // Hide ranking button, show back button
+    // Hide ranking button and feedback button, show back button
     rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
     rankingBackBtnEl.style.display = 'block';
     positionRankingBackBtn();
     // Always reset to fresh loading state — never show stale data
