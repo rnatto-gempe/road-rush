@@ -1853,8 +1853,8 @@ function resizeCanvas () {
   positionTouchButtons(displayWidth, displayHeight);
   positionRankingBtn();
   positionRankingBackBtn();
-  positionGameOverAd();
   positionFeedbackBtn();
+  positionGameOverRanking();
 }
 
 function positionTouchButtons (displayWidth, displayHeight) {
@@ -1881,11 +1881,10 @@ let nameFormEl = null;
 // Declared early so positionRankingBtn/positionRankingBackBtn guard works when resizeCanvas() is called below
 let rankingBtnEl = null;
 let rankingBackBtnEl = null;
-// Declared early so positionGameOverAd() guard works when resizeCanvas() is called below
-let gameOverAdEl = null;
-let gameOverAdLabelEl = null;
 // Declared early so positionFeedbackBtn() guard works when resizeCanvas() is called below
 let feedbackBtnEl = null;
+// DOM ranking container for game over screen
+let gameOverRankingEl = null;
 
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -1954,7 +1953,7 @@ function positionNameForm () {
 function showNameForm () {
   nameInputEl.value = localStorage.getItem('roadRushPlayerName') || '';
   nameErrorEl.style.visibility = 'hidden';
-  nameSubmitEl.textContent = 'Submit Score';
+  nameSubmitEl.textContent = 'Enviar Score';
   nameSubmitEl.disabled = false;
   nameFormEl.style.display = 'flex';
   positionNameForm();
@@ -1986,7 +1985,7 @@ function handleNameSubmit () {
   nameErrorEl.style.visibility = 'hidden';
   localStorage.setItem('roadRushPlayerName', name);
 
-  nameSubmitEl.textContent = 'Sending...';
+  nameSubmitEl.textContent = 'Enviando...';
   nameSubmitEl.disabled = true;
 
   const payload = {
@@ -2005,12 +2004,12 @@ function handleNameSubmit () {
   })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      nameSubmitEl.textContent = 'Score submitted! ✓';
+      nameSubmitEl.textContent = 'Score enviado! ✓';
       nameSubmitEl.disabled = true;
       setTimeout(fetchRanking, 2000);
     })
     .catch(() => {
-      nameSubmitEl.textContent = 'Failed to submit. Try again';
+      nameSubmitEl.textContent = 'Falha ao enviar. Tente novamente';
       nameSubmitEl.disabled = false;
     });
 }
@@ -2020,6 +2019,7 @@ nameSubmitEl.addEventListener('click', handleNameSubmit);
 function fetchRanking () {
   gameOverState.rankingStatus = 'loading';
   gameOverState.rankingData = [];
+  gameOverState._rankingBuilt = false;
   fetch(SCORE_WEBHOOK_URL)
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2109,52 +2109,121 @@ function positionRankingBackBtn () {
   rankingBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
 }
 
-// --- Game Over Ad Slot (US-005) ---
-gameOverAdEl = document.getElementById('ad-gameover');
-gameOverAdLabelEl = document.createElement('div');
-gameOverAdLabelEl.id = 'ad-gameover-label';
-gameOverAdLabelEl.textContent = 'PUBLICIDADE';
-gameOverAdLabelEl.style.cssText = [
+// --- DOM Ranking Container for Game Over ---
+gameOverRankingEl = document.createElement('div');
+gameOverRankingEl.id = 'gameover-ranking';
+gameOverRankingEl.style.cssText = [
   'display:none',
   'position:fixed',
-  'z-index:50',
-  'color:rgba(255,255,255,0.45)',
-  'font:10px monospace',
-  'text-align:center',
+  'z-index:20',
+  'overflow-y:auto',
+  'overflow-x:hidden',
+  '-webkit-overflow-scrolling:touch',
+  'scrollbar-width:thin',
+  'scrollbar-color:rgba(255,255,255,0.2) transparent',
 ].join(';') + ';';
-document.body.appendChild(gameOverAdLabelEl);
+document.body.appendChild(gameOverRankingEl);
 
-function positionGameOverAd () {
-  if (!gameOverAdEl) return;
+// Prevent touch events on ranking from reaching canvas
+gameOverRankingEl.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+gameOverRankingEl.addEventListener('touchmove', (e) => e.stopPropagation(), { passive: true });
+gameOverRankingEl.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
+
+function positionGameOverRanking () {
+  if (!gameOverRankingEl || gameOverRankingEl.style.display === 'none') return;
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / CANVAS_WIDTH;
-  const maxW = window.innerWidth <= 480 ? Math.min(300, window.innerWidth * 0.9) : 300;
-  const centerX = rect.left + rect.width / 2;
-  const adTop = rect.top + 90 * scale;
-  gameOverAdEl.style.left = `${centerX - maxW / 2}px`;
-  gameOverAdEl.style.top = `${adTop}px`;
-  gameOverAdEl.style.width = `${maxW}px`;
-  gameOverAdEl.style.maxWidth = `${maxW}px`;
-  if (gameOverAdLabelEl) {
-    gameOverAdLabelEl.style.left = `${centerX - maxW / 2}px`;
-    gameOverAdLabelEl.style.top = `${adTop - 14}px`;
-    gameOverAdLabelEl.style.width = `${maxW}px`;
-  }
+  const topY = 268 * scale + rect.top;
+  const bottomY = 640 * scale + rect.top;
+  const pad = 12 * scale;
+  gameOverRankingEl.style.left = `${rect.left + pad}px`;
+  gameOverRankingEl.style.top = `${topY}px`;
+  gameOverRankingEl.style.width = `${rect.width - pad * 2}px`;
+  gameOverRankingEl.style.height = `${bottomY - topY}px`;
 }
 
-function showGameOverAd () {
-  const count = parseInt(sessionStorage.getItem('roadrush_game_count') || '0', 10);
-  sessionStorage.setItem('roadrush_game_count', String(count + 1));
-  if (count % 2 === 0) {
-    positionGameOverAd();
-    if (gameOverAdEl) gameOverAdEl.style.display = 'block';
-    if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'block';
+function buildRankingDOM (rankingData, highlightName) {
+  gameOverRankingEl.innerHTML = '';
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  const baseFontSize = Math.max(10, Math.round(11 * scale));
+  const MEDALS = ['\u{1F947}', '\u{1F948}', '\u{1F949}'];
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = `display:flex;justify-content:space-between;align-items:center;padding:4px 4px 6px;border-bottom:1px solid rgba(255,255,255,0.15);margin-bottom:4px;`;
+  const headerLeft = document.createElement('span');
+  headerLeft.textContent = '\u{1F3C6}  TOP RANKING';
+  headerLeft.style.cssText = `color:rgba(255,255,255,0.70);font:bold ${baseFontSize}px monospace;`;
+  const headerRight = document.createElement('span');
+  headerRight.textContent = `${rankingData.length} jogadores`;
+  headerRight.style.cssText = `color:rgba(255,255,255,0.30);font:${baseFontSize - 2}px monospace;`;
+  header.append(headerLeft, headerRight);
+  gameOverRankingEl.appendChild(header);
+
+  if (rankingData.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = 'Nenhum score ainda';
+    empty.style.cssText = `color:rgba(255,255,255,0.5);font:${baseFontSize}px monospace;text-align:center;padding:16px 0;`;
+    gameOverRankingEl.appendChild(empty);
+    return;
   }
+
+  rankingData.forEach((entry, i) => {
+    const rank = i + 1;
+    const isPlayer = highlightName && highlightName.length >= 2 && entry.name === highlightName;
+    const row = document.createElement('div');
+    const rowH = Math.max(28, Math.round(32 * scale));
+    let bgColor;
+    if (isPlayer) bgColor = 'rgba(255,215,0,0.18)';
+    else if (rank <= 3) bgColor = 'rgba(255,255,255,0.07)';
+    else bgColor = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.12)';
+
+    const borderLeft = (isPlayer || rank <= 3)
+      ? `3px solid ${isPlayer ? '#FFD700' : rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : '#CD7F32'}`
+      : '3px solid transparent';
+
+    row.style.cssText = `display:flex;align-items:center;height:${rowH}px;background:${bgColor};border-left:${borderLeft};border-radius:4px;margin-bottom:2px;padding:0 6px;`;
+
+    // Rank
+    const rankEl = document.createElement('span');
+    rankEl.style.cssText = `width:24px;text-align:center;flex-shrink:0;font:${rank <= 3 ? baseFontSize + 1 : baseFontSize - 1}px monospace;`;
+    if (rank <= 3) {
+      rankEl.textContent = MEDALS[rank - 1];
+    } else {
+      rankEl.textContent = String(rank);
+      rankEl.style.color = 'rgba(255,255,255,0.35)';
+    }
+
+    // Name
+    const nameEl = document.createElement('span');
+    nameEl.textContent = String(entry.name || '').substring(0, 14);
+    nameEl.style.cssText = `flex:1;font:bold ${baseFontSize}px monospace;color:${isPlayer ? '#FFD700' : 'rgba(255,255,255,0.92)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:4px;`;
+
+    // Score
+    const scoreEl = document.createElement('span');
+    scoreEl.textContent = entry.score.toLocaleString();
+    scoreEl.style.cssText = `font:bold ${baseFontSize}px monospace;color:${isPlayer ? '#FFE066' : '#7EC8E3'};margin-left:8px;flex-shrink:0;`;
+
+    // Distance
+    const distEl = document.createElement('span');
+    const dist = typeof entry.distance === 'number' ? entry.distance : 0;
+    distEl.textContent = `${dist}m`;
+    distEl.style.cssText = `font:${baseFontSize - 2}px monospace;color:rgba(255,255,255,0.45);margin-left:6px;width:38px;text-align:right;flex-shrink:0;`;
+
+    row.append(rankEl, nameEl, scoreEl, distEl);
+    gameOverRankingEl.appendChild(row);
+  });
 }
 
-function hideGameOverAd () {
-  if (gameOverAdEl) gameOverAdEl.style.display = 'none';
-  if (gameOverAdLabelEl) gameOverAdLabelEl.style.display = 'none';
+function showGameOverRanking () {
+  gameOverRankingEl.style.display = 'block';
+  positionGameOverRanking();
+}
+
+function hideGameOverRanking () {
+  gameOverRankingEl.style.display = 'none';
+  gameOverRankingEl.innerHTML = '';
 }
 
 // --- Feedback Button & Modal (US-006) ---
@@ -2185,7 +2254,7 @@ function positionFeedbackBtn () {
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / CANVAS_WIDTH;
   feedbackBtnEl.style.left = `${rect.left + rect.width / 2}px`;
-  feedbackBtnEl.style.top = `${rect.top + 640 * scale}px`;
+  feedbackBtnEl.style.top = `${rect.top + 655 * scale}px`;
 }
 
 // --- Feedback Modal ---
@@ -2413,19 +2482,15 @@ canvas.addEventListener('touchend', (e) => {
     resetGameState();
     fsm.transition(playingState);
   } else if (fsm.currentState === gameOverState) {
-    const delta = touchStartY - cy; // positive = swipe up = scroll down
-    if (Math.abs(delta) >= 10) {
-      // Swipe gesture: scroll ranking
-      if (gameOverState.rankingStatus === 'loaded' && gameOverState.rankingData.length > 8) {
-        const maxScroll = gameOverState.rankingData.length - 8;
-        const scrollDelta = Math.round(delta / 30);
-        gameOverState.rankingScroll = Math.max(0, Math.min(gameOverState.rankingScroll + scrollDelta, maxScroll));
+    const delta = touchStartY - cy;
+    if (Math.abs(delta) < 10) {
+      // Tap gesture: retry (only if tapping outside ranking area)
+      // Ranking area is roughly canvas y 268-640; check if tap is above it or below
+      if (cy < 268 || cy > 640) {
+        AudioManager.playDrumRoll();
+        resetGameState();
+        fsm.transition(playingState);
       }
-    } else {
-      // Tap gesture: retry
-      AudioManager.playDrumRoll();
-      resetGameState();
-      fsm.transition(playingState);
     }
   } else if (fsm.currentState === titleRankingState) {
     const delta = touchStartY - cy; // positive = swipe up = scroll down
@@ -5483,19 +5548,20 @@ const gameOverState = {
     this.finalNearMissBonusTotal = nearMissBonusTotal;
     this.rankingScroll = 0;
     this.rankingDotTime = 0;
+    this._rankingBuilt = false;
     feedbackBtnEl.style.display = 'block';
     positionFeedbackBtn();
     AudioManager.startGameOverDrone();
     showNameForm();
     fetchRanking();
-    showGameOverAd();
+    showGameOverRanking();
   },
 
   onExit () {
     feedbackBtnEl.style.display = 'none';
     AudioManager.stopGameOverDrone();
     hideNameForm();
-    hideGameOverAd();
+    hideGameOverRanking();
   },
 
   update (dt) {
@@ -5506,10 +5572,11 @@ const gameOverState = {
       resetGameState();
       fsm.transition(playingState);
     }
-    if (this.rankingStatus === 'loaded' && this.rankingData.length > 8) {
-      const maxScroll = this.rankingData.length - 8;
-      if (consumeKey('ArrowDown')) this.rankingScroll = Math.min(this.rankingScroll + 1, maxScroll);
-      if (consumeKey('ArrowUp')) this.rankingScroll = Math.max(this.rankingScroll - 1, 0);
+    // Update DOM ranking when data changes
+    if (this.rankingStatus === 'loaded' && !this._rankingBuilt) {
+      const playerName = nameInputEl ? nameInputEl.value.trim() : '';
+      buildRankingDOM(this.rankingData, playerName);
+      this._rankingBuilt = true;
     }
   },
 
@@ -5632,32 +5699,22 @@ const gameOverState = {
       );
     }
 
-    // --- Ranking section ---
-    // Name form (HTML) is at canvas y=195, ~76px tall → ends at y≈271
-    const rankLabelY = 280;
-    ctx.fillStyle = 'rgba(255,255,255,0.70)';
-    ctx.font = 'bold 11px monospace';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'left';
-    ctx.fillText('🏆  TOP RANKING', 14, rankLabelY);
-    if (this.rankingData.length > 8) {
-      ctx.fillStyle = 'rgba(255,255,255,0.28)';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('▲▼ deslize', CANVAS_WIDTH - 14, rankLabelY);
+    // --- Ranking section (DOM-based, rendered above canvas) ---
+    // Show loading/error state on canvas while DOM container handles loaded data
+    if (this.rankingStatus === 'loading') {
+      const dots = '.'.repeat(Math.floor(this.rankingDotTime * 2) % 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`Carregando ranking${dots}`, CX, 290);
+    } else if (this.rankingStatus === 'error') {
+      ctx.fillStyle = '#E53935';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Erro ao carregar ranking', CX, 290);
     }
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(14, rankLabelY + 16); ctx.lineTo(CANVAS_WIDTH - 14, rankLabelY + 16); ctx.stroke();
-
-    const playerName = nameInputEl ? nameInputEl.value.trim() : '';
-    renderRankingPanel(ctx, this.rankingData, this.rankingStatus, this.rankingScroll, this.rankingDotTime, playerName, {
-      startY: rankLabelY + 22,
-      rowH: 38,
-      visible: 8,
-      fontSize: '12px',
-      cards: true,
-    });
 
     // --- Pulsing retry hint ---
     const pulse = 0.45 + 0.45 * Math.sin(this.pulseTime * 2.6);
