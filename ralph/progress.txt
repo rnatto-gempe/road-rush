@@ -1,3 +1,18 @@
+## 2026-03-13 - US-003
+- Added `touchend` listener on canvas for tap-to-start (titleState) and tap-to-retry (gameOverState)
+- `e.preventDefault()` on touchend eliminates 300ms delay; `{ passive: false }` required
+- Tap during playingState is ignored (explicit check before acting)
+- titleState.render: shows "Press Enter or Tap to Start" when `'ontouchstart' in window`
+- gameOverState.render: shows "Press Enter or Tap to Retry" when `'ontouchstart' in window`
+- Touch listener placed before the mute click listener (~line 1923 in main.js)
+- Files changed: src/main.js, ralph/prd.json, ralph/progress.txt
+- Browser verified: title screen shows "Press Enter to Start" on desktop (correct)
+- **Learnings for future iterations:**
+  - `fsm.currentState` can be compared directly to state objects (e.g., `=== titleState`)
+  - Tap-to-start must replicate the full Enter handler: AudioManager.init, resume, startTitleDrone, playRiser, resetGameState, then transition
+  - `'ontouchstart' in window` is reliable for detecting touch-capable devices at render time
+---
+
 ## 2026-03-13 - US-002
 - Added CSS `<style>` tag injected into `document.head` for `.touch-left/.touch-right` and `.active` class styles
 - Arrow icons ◄/► set via `el.textContent`; idle opacity 0.30, active 0.90
