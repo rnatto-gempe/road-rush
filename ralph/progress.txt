@@ -1,105 +1,127 @@
-## 2026-03-14 - US-006
-- Created `#feedback-btn` (💡 Sugerir Melhoria, amber pill style) created once; visible in titleState and gameOverState, hidden in playingState, explosionState, titleRankingState
-- Created `positionFeedbackBtn()` at canvas logical y≈640; called in `resizeCanvas()`
-- Created `#feedback-modal` overlay with dark backdrop (closes on backdrop click), card with title/subtitle/textarea/name input/error/submit/close-X
-- All text inputs font-size 16px; card max-height 90vh; overflow-y auto
-- `#feedback-name` pre-filled from localStorage 'roadRushPlayerName' on open
-- keydown on textarea/name calls e.stopPropagation(); ESC key closes modal
-- Submit validates non-empty fields; POST JSON {name, suggestion} to FEEDBACK_WEBHOOK_URL; shows 'Enviando...' → 'Obrigado! ✓' → close after 1500ms; error → re-enable button
-- Subtitle uses realistic language (no AI promises): 'Sua sugestão será analisada pela equipe...'
-- Files changed: src/main.js
-- **Learnings for future iterations:**
-  - Modal built entirely in JS (no HTML changes needed); all elements created with document.createElement pattern
-  - feedbackBtnEl declared null early like other UI elements; follows same show/hide in onEnter/onExit pattern
-  - Modal z-index:100 (above ad at z-index:50, above game buttons at z-index:20)
-  - Backdrop click detection: `if (e.target === feedbackModalEl)` — only fires when clicking the overlay itself, not the card
----
-
-## 2026-03-14 - US-005
-- Added AdSense script placeholder to index.html `<head>` with publisher ID comment
-- Added `<div id='ad-gameover'>` to index.html body after canvas (hidden by default, z-index 50)
-- Created `gameOverAdLabelEl` ('PUBLICIDADE' label) programmatically in main.js after resizeCanvas()
-- Created `positionGameOverAd()` using getBoundingClientRect() + scale; positions ad at logical y≈90, max-width 300px (or 90vw on mobile); label 14px above ad
-- Created `showGameOverAd()`: reads/increments sessionStorage 'roadrush_game_count'; shows ad on even counts (0,2,4...)
-- Created `hideGameOverAd()`: sets both ad+label to display:none
-- `gameOverState.onEnter()` calls `showGameOverAd()`; `gameOverState.onExit()` calls `hideGameOverAd()`
-- Added `positionGameOverAd()` call to `resizeCanvas()`; declared `gameOverAdEl = null` early before first resizeCanvas() call
-- Files changed: index.html, src/main.js
-- **Learnings for future iterations:**
-  - `#ad-gameover` div lives in index.html (not created in JS); fetched via `document.getElementById()` after resizeCanvas() call, following same null-guard pattern as other elements
-  - `PUBLICIDADE` label is created programmatically (not in HTML) so it can be shown/hidden alongside the ad element
-  - Ad slot has no pointer-events:none — required by AdSense policy for clickability
-  - showGameOverAd() uses count BEFORE increment to determine show/hide; increments regardless of whether ad shows
----
-
 ## Codebase Patterns
-- Road rendering is in `renderRoad(ctx, scrollOffset)` — rumble strips and lane dashes both use scrollOffset modulo their period to compute starting y position
-- To scroll visuals top-to-bottom (toward player), use `y = offset - PERIOD` (not `y = -offset`)
-- Game states are objects with `onEnter()`, `onExit()`, `update(dt)`, `render(ctx)` methods managed by `fsm`
-- gameOverState.render() is fully independent of renderRoad() — no scroll-related regression risk when modifying road rendering
-- Opponents spawn at `y = -type.height` (above screen) and move down via `v.y += visualSpeed * dt`
-- Speed lines already scroll correctly (positive offset direction via modulo wrap)
-- FEEDBACK_WEBHOOK_URL constant was pre-added to main.js (needed for US-006)
-- Opponent visual speed formula: `visualSpeed = getEffectiveScrollSpeed() * (1 - speedRatio)` — always positive, computed dynamically each frame (not stored at spawn)
-- Game state variables (fsm, gameOverState, etc.) are module-scoped, NOT accessible from Playwright evaluate() — browser testing limited to visual screenshots
-- Avoid long `sleep` between Playwright actions — browser context closes; navigate+act+screenshot must be done in rapid sequence
-- `renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName)` is now a shared function at line ~4486 — use it for any new state that needs a ranking panel
-- HTML overlay buttons (#ranking-btn, #ranking-back-btn) are created once at startup, positioned via positionRankingBtn()/positionRankingBackBtn() called in resizeCanvas() — show/hide in each state's onEnter()/onExit()
-- `titleRankingAbortController` aborts pending fetches when titleRankingState.onEnter() is called again — prevents stale data on repeat opens
-- Declare HTML element vars as `null` BEFORE the initial resizeCanvas() call so position guard functions don't crash; create the actual elements AFTER
+- `getComboColor(level)` returns combo-tier color: x1='#FF8800', x2='#FFD700', x3='#00FFDD', x4+='#FF44FF' — reuse for all combo-colored rendering
+- Near miss tracking vars (`nearMissCount`, `bestCombo`, `nearMissBonusTotal`) are module-scope, reset in `resetGameState()`
+- To apply combo multiplier to a score source: `* (comboMultiplier >= 2 ? comboMultiplier : 1)` — SURVIVOR_BONUS is intentionally excluded
+- `triggerNearMiss(v)` increments combo BEFORE tracking bestCombo, so bestCombo reflects the new level
+- `spawnFloatText(x, y, text, color, scale, duration)` — 6th param overrides FLOAT_TEXT_DURATION for hints/tutorials
+- `triggerShake(duration, intensity)` has priority guard — weaker shakes don't override stronger ones in progress
+- Particle shape: `{ x, y, vx, vy, life, maxLife, color, size }` + optional `isNitro` — add new types without new fields
+- AudioManager SFX pattern: check `this.ctx`, create osc+gain, connect to `this.masterGain`, schedule, cleanup onended
+- `gameOverState.onEnter()` captures module-scope vars as `this.finalXxx` for display
+- Combo HUD expire effects use separate timers (`comboExpireShakeTimer`, `comboExpireFadeTimer`) triggered when `comboResetTimer` hits 0
+- Milestone flash (`comboMilestoneFlash`) triggers at x3, x5, x8 — set in `triggerNearMiss()` after increment
+- `ralph/` is gitignored — use `git add -f ralph/prd.json` to force-add PRD updates
 
 # Ralph Progress Log
-Started: Sat Mar 14 16:57:25 -03 2026
+Started: Sat Mar 14 18:40:39 -03 2026
 ---
 
-## 2026-03-14 17:05 - US-001
-- Reversed lane dash and rumble strip scroll direction from bottom-to-top to top-to-bottom
-- Changed rumble strip offset: `y = -rumbleOffset` → `y = rumbleOffset - RUMBLE_PERIOD`
-- Changed dash offset: `-dashScrollOffset` → `dashScrollOffset - DASH_PERIOD`
-- Files changed: src/main.js
+## 2026-03-14 18:42 - US-001
+- Implemented `getComboColor(level)` utility function returning tier-based colors
+- Applied combo multiplier to distance score, overtake bonus, and coin pickup score (NOT survivor bonus)
+- Added tracking variables: `nearMissCount`, `bestCombo`, `nearMissBonusTotal` at module scope
+- Updated `triggerNearMiss()` to increment tracking vars
+- Reset all tracking vars in `resetGameState()`
+- Files changed: `src/main.js`
 - **Learnings for future iterations:**
-  - The offset math is: `y = offset - PERIOD` makes visuals scroll downward (toward player) as scrollOffset increases
-  - gameOverState rendering is completely independent of renderRoad — no regression risk
-  - Browser testing with Playwright is flaky due to context closures on long waits — use short evaluate calls
-  - scrollOffset increases monotonically: `effSpeed * dt` where effSpeed is always positive
+  - The combo multiplier increment happens at line ~2786 (`comboMultiplier += 1`) BEFORE the audio/visual feedback, so bestCombo should be tracked after the increment
+  - `SURVIVOR_BONUS` at line ~4617 is intentionally NOT multiplied per acceptance criteria
+  - The `(comboMultiplier >= 2 ? comboMultiplier : 1)` pattern avoids multiplying by 1 unnecessarily
+  - Build check via `npm run build` is sufficient for typecheck — no separate TS config
 ---
 
-## 2026-03-14 - US-002
-- Changed opponent ownSpeed from static (set at spawn) to dynamic (recomputed every frame): `v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio`
-- Changed visualSpeed formula: `getEffectiveScrollSpeed() - v.ownSpeed` → `getEffectiveScrollSpeed() * (1 - type.speedRatio)` — ensures always-positive (downward) displacement
-- Fixed `relativeVy` in collision handler to use same formula: `getEffectiveScrollSpeed() * (1 - speedRatio)`
-- Files changed: src/main.js
+## 2026-03-14 21:52 - US-002
+- Already implemented alongside US-001 — verified all acceptance criteria met
+- `spawnFloatText()` accepts `scale` param, `triggerNearMiss()` formats points+multiplier text, uses `getComboColor()`, spawns at player position
+- Files changed: none (already in place)
 - **Learnings for future iterations:**
-  - Game state variables (fsm, gameOverState, etc.) are module-scoped — cannot be accessed via Playwright evaluate(); browser testing is limited to visual screenshots
-  - Avoid `sleep` between Playwright calls — browser context closes; navigate+act+screenshot must run in rapid sequence without long pauses
-  - gameOverState is independent of traffic/speed physics — speed formula changes carry zero game over regression risk
-  - ownSpeed was previously set once at spawn time and became stale as scrollSpeed ramped up; now recomputed each frame for correct dynamic behavior
+  - US-001 implementation was thorough and included US-002 work — always check if prior stories already covered the next one
 ---
 
-## 2026-03-14 - US-003
-- Extracted ranking rendering logic from gameOverState.render() into standalone `renderRankingPanel(ctx, rankingData, rankingStatus, rankingScroll, rankingDotTime, highlightName)` function
-- gameOverState.render() now delegates to renderRankingPanel, passing `nameInputEl.value.trim()` as highlightName
-- Visual output is identical — same RANK_Y=537, row heights, colors, scroll indicators
-- Files changed: src/main.js
+## 2026-03-14 21:52 - US-003
+- Rewrote `renderComboHUD()` with: 'x{N} COMBO' label (30px bold), timer bar (green/yellow/red), pop/bounce animation, expire shake+fade, milestone white flash
+- Added module-scope vars: `comboExpireShakeTimer`, `comboExpireFadeTimer`, `comboMilestoneFlash`
+- Updated combo reset logic to trigger expire effects when `comboResetTimer` hits 0
+- Added milestone flash trigger in `triggerNearMiss()` for x3, x5, x8
+- Ticked all new timers in the game loop update section
+- Files changed: `src/main.js`
 - **Learnings for future iterations:**
-  - renderRankingPanel is defined just before `// --- GameOver State ---` — any new state (e.g. titleRankingState) can call it directly
-  - highlightName replaces the old `nameInputEl.value.trim()` inline lookup — callers supply the name string
-  - Build passes with `npm run build`; title screen renders correctly via Playwright
+  - The combo HUD fade-out needs to display at `comboMultiplier >= 2 || comboExpireFadeTimer > 0` since multiplier resets to 1 before the fade completes
+  - Shake uses `Math.sin(timer * 80) * 3` for rapid oscillation — the multiplier 80 controls frequency
+  - Timer bar ratio is `comboResetTimer / COMBO_RESET_TIME` for consistent fill regardless of combo duration
 ---
 
-## 2026-03-14 - US-004
-- Created #ranking-btn (glassmorphism pill, text '🏆 RANKING') created once at startup; shown in titleState.onEnter(), hidden in onExit() and all other states' onEnter()
-- Created positionRankingBtn() and positionRankingBackBtn() called inside resizeCanvas()
-- Added R/r key handler in titleState.update() → fsm.transition(titleRankingState)
-- Created titleRankingState with own rankingData/rankingStatus/rankingScroll/rankingDotTime
-- titleRankingState.onEnter() aborts previous fetch via titleRankingAbortController, starts fresh fetch with 10s AbortController timeout → sets errorMessage 'Timeout — tente novamente'
-- titleRankingState.render() draws background + gold '🏆 RANKING GLOBAL' title + calls renderRankingPanel for loading/loaded; handles error case with custom errorMessage
-- Created #ranking-back-btn 'VOLTAR'; click → titleState; ESC key in titleRankingState.update() → titleState
-- Added titleRankingState swipe scroll handling in canvas touchend handler
-- Files changed: src/main.js
+## 2026-03-14 21:55 - US-004
+- Added priority guard to `triggerShake()`: compares new intensity vs remaining intensity (`shake.intensity * (shake.time / shake.maxTime)`)
+- Added `triggerShake(0.12, Math.min(2 + comboMultiplier, 5))` call in `triggerNearMiss()`
+- Collision shake (0.5s, 10px) still always overrides near miss shake (0.12s, 2-5px) due to higher intensity
+- Files changed: `src/main.js`
 - **Learnings for future iterations:**
-  - State buttons pattern: declare `let btnEl = null` before resizeCanvas(), create element after; position function guards against null
-  - titleRankingState uses its own fetch separate from fetchRanking() (which writes to gameOverState) — two independent fetch chains
-  - renderRankingPanel RANK_Y is hardcoded at 537 — for titleRankingState this creates natural space for the header (title + subtitle at y=55–85)
-  - Error branch in titleRankingState.render() handles error directly (not via renderRankingPanel) to support custom error message from AbortController timeout
+  - `triggerShake()` now has a priority guard — any caller with lower intensity than remaining shake will be silently ignored
+  - Collision shake is called at line ~2909 with (0.5, 10) — this is the strongest shake and serves as the baseline
+---
+
+## 2026-03-14 21:57 - US-005
+- Added near miss spark particles emitted from player's side closest to vehicle
+- Base 8 particles +3/combo level (cap 20), lateral velocity away from vehicle, combo-colored
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - Existing particle shape: `{ x, y, vx, vy, life, maxLife, color, size }` + optional `isNitro`
+  - No new fields needed — sparks use standard particle shape, rendered by existing `renderParticles()`
+---
+
+## 2026-03-14 21:58 - US-006
+- Added `renderComboGlow()` — ambient glow on top/bottom canvas edges during active combo
+- Added `comboGlowAlpha` state var, fades in 0.3s / out 0.5s, pulses at ~1Hz
+- Rendered after danger flash, before ctx.restore() (inside world layer)
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - Danger flash uses radial gradient on lateral edges; combo glow uses linear gradients on top/bottom — visually distinct
+  - `gameState.elapsedTime` provides a reliable time source for sin-based animation
+---
+
+## 2026-03-14 22:00 - US-007
+- Added `scorePunchScale` and `scorePunchColor` — score display scales up and flashes combo color on near miss
+- Integrated with existing `scoreScale` (beatPulse + coinPulse) by adding scorePunchScale
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - Score rendering already had beat-pulse and coin-pulse scales — new effects can simply add to `scoreScale`
+---
+
+## 2026-03-14 22:01 - US-008
+- Added `AudioManager.playComboMilestone(level)` — ascending ding with harmonics at x3/x5/x8
+- Added `AudioManager.playComboLost()` — descending triangle wave deflation tone
+- Called milestone SFX in triggerNearMiss, combo lost SFX in combo reset logic (before resetting multiplier)
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - AudioManager methods follow pattern: check `this.ctx`, create oscillator+gain, connect to masterGain, schedule start/stop, cleanup via onended
+  - playComboLost called BEFORE `comboMultiplier = 1` to access the current combo level if needed
+---
+
+## 2026-03-14 22:03 - US-009
+- Added `comboZoom` variable — camera zoom at high combo (1.02 at x4-5, 1.04 at x6+)
+- Lerps toward target at rate `dt * 3`, applied in play state render after camera roll
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - Zoom transform wraps all world rendering inside play state but is inside the outer ctx.save/restore
+  - Only applied when `comboZoom !== 1.0` to skip identity transform overhead
+---
+
+## 2026-03-14 22:05 - US-010
+- Captures `nearMissCount`, `bestCombo`, `nearMissBonusTotal` in `gameOverState.onEnter()`
+- Renders stats section below stat cards, gold color + 'NICE!' when bestCombo >= 3
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - gameOverState captures final stats in `onEnter()` — pattern: `this.finalXxx = moduleVar`
+  - Stats section positioned at `cardsY + cardH + 32` to fit below best score line
+---
+
+## 2026-03-14 22:06 - US-011
+- Added `nearMissHintShown` flag, triggers 'Passe rente aos carros!' float text when first vehicle enters screen
+- Extended `spawnFloatText` with optional `duration` parameter (default FLOAT_TEXT_DURATION)
+- Updated float text render to use `ft.maxTimer` for alpha calculation
+- Files changed: `src/main.js`
+- **Learnings for future iterations:**
+  - `spawnFloatText` now supports custom duration via 6th parameter — useful for tutorial/hint texts
+  - Float text alpha uses `ft.timer / ft.maxTimer` instead of hardcoded FLOAT_TEXT_DURATION
 ---

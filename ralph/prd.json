@@ -58,7 +58,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "The existing renderComboHUD is small (~25 lines). The rewrite replaces it entirely. comboScaleTimer and comboResetTimer already exist and are ticked in the game loop."
     },
     {
@@ -75,7 +75,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "triggerShake() already exists at line ~2458. The collision handler calls triggerShake(0.5, 10). The change is: add a priority/intensity guard so weaker shakes don't replace stronger ones."
     },
     {
@@ -93,7 +93,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "The particles[] array already exists for collision sparks. Check the existing particle object shape before adding fields — maintain backward compatibility with existing particle types."
     },
     {
@@ -112,7 +112,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "The danger flash already exists (dangerFlashAlpha, red glow on lateral edges when traffic is near). The combo glow uses TOP/BOTTOM edges with the combo color palette to stay visually distinct."
     },
     {
@@ -129,7 +129,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "The score rendering currently uses ctx.fillText with lerped displayScore. The punch adds a temporary scale transform and color flash around that same draw call."
     },
     {
@@ -146,7 +146,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "AudioManager uses Web Audio API with oscillators. playComboUp already exists and raises pitch with combo level. The new milestone SFX should be distinct — a celebratory ding vs the existing power chord. playComboLost needs a reference to comboMultiplier before it resets."
     },
     {
@@ -165,7 +165,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "The zoom transform must wrap ALL rendering inside the play state's render function but be applied AFTER the ctx.save() that handles screen shake. Order: save → translate(shake) → translate+scale(zoom) → render world → restore."
     },
     {
@@ -183,7 +183,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "The tracking vars (nearMissCount, bestCombo, nearMissBonusTotal) are created in US-001. gameOverState already captures finalScore, finalDistance, finalTime, coinsCollected. The new stats follow the same capture pattern. May need to adjust RANK_Y or stats positioning to fit the new section."
     },
     {
@@ -201,7 +201,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Use the existing spawnFloatText system. The hint is a regular float text with longer duration (3s vs the normal FLOAT_TEXT_DURATION). May need to allow spawnFloatText to accept a custom duration parameter, or just set a longer timer directly."
     }
   ]
