@@ -173,7 +173,7 @@
         "Verificar no browser usando dev-browser skill — fighter e cruiser aparecem, animações funcionam, colisão ok"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "cruiser.width = 48px (não 55) para que 2 cruisers em lanes adjacentes deixem gap suficiente (80-48=32px, igual ao hitbox width do jogador)."
     },
     {

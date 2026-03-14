@@ -151,3 +151,18 @@ Started: Sat Mar 14 19:39:09 -03 2026
   - `ctx.save/translate/rotate/restore` pattern for rotating sprites — translate to center, rotate, draw relative to origin
   - Asteroid is `behavior: 'none'` (passive) — space phase will need aggressive types too (fighter in US-010)
 ---
+
+## 2026-03-14 - US-010
+- Added `fighter` vehicle type: `{ width: 30, height: 48, speedRatio: 0.8, behavior: 'laneChange', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'space' }`
+- Added `cruiser` vehicle type: `{ width: 48, height: 72, speedRatio: 0.25, behavior: 'none', phase: 'space' }`
+- Fighter sprite: inverted red triangle (#F44336), darker center stripe, 2 lateral cannons (4×8 rectangles), 2 oscillating fire trail rectangles at rear (color interpolates orange→yellow)
+- Cruiser sprite: large dark roundRect (#455A64) with rounded corners, 4 horizontal panel lines + 2 vertical panel lines, 2 blinking blue lights at top (toggle every 0.5s between bright #42A5F5 and dim #1565C0)
+- Both types added to `VEHICLE_TYPES` after asteroid, sprites rendered in `renderTraffic()` after asteroid block
+- No special spawn data needed — fighter/cruiser use standard vehicle object properties
+- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Space phase now has good mix: asteroid (passive/slow), cruiser (passive/very slow/large), fighter (aggressive/fast) — similar balance to sky phase
+  - Cruiser width 48px (not 55) is critical for fairness system — 2 cruisers in adjacent lanes leave 80-48=32px gap matching player hitbox width
+  - Blinking lights use `Math.floor(elapsedTime / 0.5) % 2` for 0.5s toggle — simple pattern for any blinking effect
+  - Fire trail flame interpolation: use sin() for height oscillation and lerp factor between two colors simultaneously
+---

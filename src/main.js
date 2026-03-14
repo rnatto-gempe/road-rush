@@ -260,6 +260,26 @@ const VEHICLE_TYPES = {
     behavior: 'none',
     phase: 'space',
   },
+  fighter: {
+    color: '#F44336',
+    width: 30,
+    height: 48,
+    speedRatio: 0.8,
+    minTime: 0,
+    behavior: 'laneChange',
+    laneChangeMin: 1.5,
+    laneChangeMax: 3,
+    phase: 'space',
+  },
+  cruiser: {
+    color: '#455A64',
+    width: 48,
+    height: 72,
+    speedRatio: 0.25,
+    minTime: 0,
+    behavior: 'none',
+    phase: 'space',
+  },
 };
 
 // Debug mode
@@ -4474,6 +4494,83 @@ function renderTraffic (ctx) {
         ctx.lineWidth = 2;
         ctx.stroke();
       }
+      ctx.restore();
+    } else if (v.type === 'fighter') {
+      // Fighter: inverted red triangle with cannons and fire trail
+      const fcx = v.x + v.width / 2;
+      ctx.save();
+      // Main body — inverted triangle (point at bottom)
+      ctx.fillStyle = '#F44336';
+      ctx.beginPath();
+      ctx.moveTo(fcx, v.y + v.height);            // bottom point
+      ctx.lineTo(v.x, v.y);                        // top-left
+      ctx.lineTo(v.x + v.width, v.y);              // top-right
+      ctx.closePath();
+      ctx.fill();
+      // Darker center stripe
+      ctx.fillStyle = '#C62828';
+      ctx.beginPath();
+      ctx.moveTo(fcx, v.y + v.height);
+      ctx.lineTo(fcx - 5, v.y);
+      ctx.lineTo(fcx + 5, v.y);
+      ctx.closePath();
+      ctx.fill();
+      // 2 cannons (lateral rectangles)
+      ctx.fillStyle = '#B71C1C';
+      ctx.fillRect(v.x - 2, v.y + 4, 4, 8);
+      ctx.fillRect(v.x + v.width - 2, v.y + 4, 4, 8);
+      // Fire trail at rear (2 oscillating flame rectangles)
+      const ft = gameState.elapsedTime || 0;
+      const flameH1 = 8 + Math.sin(ft * 10) * 3;
+      const flameH2 = 8 + Math.sin(ft * 10 + 2) * 3;
+      const flameLerp1 = (Math.sin(ft * 10) + 1) / 2;
+      const flameLerp2 = (Math.sin(ft * 10 + 2) + 1) / 2;
+      // Flame 1 (left thruster)
+      ctx.fillStyle = `rgb(${Math.round(255 - flameLerp1 * 0)}, ${Math.round(102 + flameLerp1 * 102)}, ${Math.round(flameLerp1 * 0)})`;
+      ctx.fillRect(fcx - 7, v.y + v.height, 5, flameH1);
+      // Flame 2 (right thruster)
+      ctx.fillStyle = `rgb(${Math.round(255 - flameLerp2 * 0)}, ${Math.round(102 + flameLerp2 * 102)}, ${Math.round(flameLerp2 * 0)})`;
+      ctx.fillRect(fcx + 2, v.y + v.height, 5, flameH2);
+      ctx.restore();
+    } else if (v.type === 'cruiser') {
+      // Cruiser: large dark roundRect with internal panels and blinking lights
+      ctx.save();
+      ctx.fillStyle = '#455A64';
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 6);
+      ctx.fill();
+      // 4 internal panel lines (horizontal)
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      const panelSpacing = v.height / 5;
+      for (let i = 1; i <= 4; i++) {
+        const py = v.y + panelSpacing * i;
+        ctx.beginPath();
+        ctx.moveTo(v.x + 4, py);
+        ctx.lineTo(v.x + v.width - 4, py);
+        ctx.stroke();
+      }
+      // 2 lateral panel lines (vertical, near edges)
+      ctx.beginPath();
+      ctx.moveTo(v.x + 8, v.y + 6);
+      ctx.lineTo(v.x + 8, v.y + v.height - 6);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width - 8, v.y + 6);
+      ctx.lineTo(v.x + v.width - 8, v.y + v.height - 6);
+      ctx.stroke();
+      // 2 blinking blue lights at top (toggle every 0.5s)
+      const ct = gameState.elapsedTime || 0;
+      const lightOn = Math.floor(ct / 0.5) % 2 === 0;
+      ctx.fillStyle = lightOn ? '#42A5F5' : '#1565C0';
+      ctx.globalAlpha = lightOn ? 1.0 : 0.4;
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2 - 8, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2 + 8, v.y + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     }
 
