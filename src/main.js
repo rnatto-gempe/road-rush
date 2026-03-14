@@ -1643,6 +1643,7 @@ let comboZoom = 1.0;           // camera zoom level (lerps toward target)
 let nearMissCount = 0;
 let bestCombo = 0;
 let nearMissBonusTotal = 0;
+let nearMissHintShown = false; // first-time discoverability hint (US-011)
 
 // DDA (Dynamic Difficulty Adjustment) state
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
@@ -2857,9 +2858,9 @@ function renderSpeedLines (ctx) {
 }
 
 // Spawn a floating pickup text at (x, y) (US-009); max 8 simultaneous, oldest removed if exceeded
-function spawnFloatText (x, y, text, color, scale = 1.0) {
+function spawnFloatText (x, y, text, color, scale = 1.0, duration = FLOAT_TEXT_DURATION) {
   if (floatTexts.length >= 8) floatTexts.splice(0, 1);
-  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color, scale });
+  floatTexts.push({ x, y, timer: duration, maxTimer: duration, text, color, scale });
 }
 
 // Combo color palette: returns a color based on combo level
@@ -3099,6 +3100,7 @@ function resetGameState () {
   nearMissCount = 0;
   bestCombo = 0;
   nearMissBonusTotal = 0;
+  nearMissHintShown = false;
   // Reset DDA fully on game over / retry
   ddaCleanTimer = 0;
   ddaSpawnRate = 1.0;
@@ -3627,6 +3629,12 @@ function updateTraffic (dt) {
     v.ownSpeed = getEffectiveScrollSpeed() * type.speedRatio;
     const visualSpeed = getEffectiveScrollSpeed() * (1 - type.speedRatio);
     v.y += visualSpeed * dt;
+
+    // First-time near miss discoverability hint (US-011)
+    if (!nearMissHintShown && v.y > 0) {
+      nearMissHintShown = true;
+      spawnFloatText(CANVAS_WIDTH / 2, 80, 'Passe rente aos carros!', '#FFFFFF', 1.0, 3.0);
+    }
 
     // Track minimum horizontal distance during vertical sprite overlap (near miss detection)
     if (v.y + v.height > nearMissPlayer.y && v.y < nearMissPlayer.y + PLAYER_HEIGHT) {
@@ -4213,7 +4221,7 @@ function renderFloatTexts (ctx) {
   for (const ft of floatTexts) {
     const fontSize = Math.round(16 * (ft.scale || 1.0));
     ctx.font = 'bold ' + fontSize + 'px monospace';
-    ctx.globalAlpha = ft.timer / FLOAT_TEXT_DURATION;
+    ctx.globalAlpha = ft.timer / (ft.maxTimer || FLOAT_TEXT_DURATION);
     ctx.fillStyle = ft.color;
     ctx.fillText(ft.text, ft.x, ft.y);
   }
