@@ -108,7 +108,7 @@ const COIN_POINTS = 100;               // points per coin collected
 const COIN_SPAWN_MIN = 600;            // px traveled min between cluster spawns
 const COIN_SPAWN_MAX = 1000;           // px traveled max between cluster spawns
 const COIN_COLLECT_ANIM_DURATION = 0.2;
-const COIN_FLOAT_DURATION = 0.8;       // float '+100' text duration
+const FLOAT_TEXT_DURATION = 0.9;       // float pickup text duration (US-009)
 
 // Nitro boost constants
 const NITRO_ITEM_HALF = 10;            // half-size (so sprite is ~20px)
@@ -1563,8 +1563,8 @@ let comboScaleTimer = 0;  // countdown for scale-in animation on new near miss
 let ddaCleanTimer = 0;   // seconds since last collision (resets on any hit)
 let ddaSpawnRate = 1.0;  // traffic spawn rate multiplier; +5% per 10s clean, cap 1.5; halves on collision
 
-// Coin float text state (populated on coin collection, rendered over game elements)
-const coinFloatTexts = []; // {x, y, timer}
+// Floating pickup text state (US-009): all item collects + near-miss, rendered above world below HUD
+const floatTexts = []; // {x, y, timer, text, color}
 
 // Nitro state
 let nitroTimer = 0;      // countdown during active boost (3s → 0)
@@ -2026,6 +2026,12 @@ function renderSpeedLines(ctx) {
   ctx.lineWidth = 1;
 }
 
+// Spawn a floating pickup text at (x, y) (US-009); max 8 simultaneous, oldest removed if exceeded
+function spawnFloatText(x, y, text, color) {
+  if (floatTexts.length >= 8) floatTexts.splice(0, 1);
+  floatTexts.push({ x, y, timer: FLOAT_TEXT_DURATION, text, color });
+}
+
 // Trigger a near miss event for vehicle v (called when min distance < threshold)
 function triggerNearMiss(v) {
   const pts = NEAR_MISS_BASE_POINTS * comboMultiplier;
@@ -2045,6 +2051,9 @@ function triggerNearMiss(v) {
     side: playerCenterX < vCenterX ? 'left' : 'right',
     timer: NEAR_MISS_FLASH_DURATION,
   };
+
+  // Floating near-miss text (US-009)
+  spawnFloatText(playerCenterX, gameState.player.y + PLAYER_HEIGHT / 2, 'NEAR MISS!', '#FF8800');
 }
 
 function updateParticles(dt) {
@@ -2199,7 +2208,7 @@ function resetGameState() {
   // Reset coin state
   gameState.coins = [];
   gameState.nextCoinSpawnDistance = COIN_SPAWN_MIN + Math.random() * (COIN_SPAWN_MAX - COIN_SPAWN_MIN);
-  coinFloatTexts.length = 0;
+  floatTexts.length = 0; // US-009
   // Reset nitro state
   gameState.nitroItems = [];
   gameState.nextNitroSpawnDistance = NITRO_SPAWN_MIN + Math.random() * (NITRO_SPAWN_MAX - NITRO_SPAWN_MIN);
@@ -2916,6 +2925,7 @@ function updateFuelItems(dt) {
       gameState.fuel = Math.min(FUEL_INITIAL, gameState.fuel + fuelAdd);
       AudioManager.playFuelPickup();
       item.collectAnim = { timer: FUEL_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+FUEL', '#00FF88'); // US-009
     }
   }
 }
@@ -3028,19 +3038,13 @@ function updateCoins(dt) {
     };
     if (aabbOverlap(ph, coinHb)) {
       gameState.score += COIN_POINTS;
-      coinFloatTexts.push({ x: coin.x, y: coin.y, timer: COIN_FLOAT_DURATION });
+      spawnFloatText(coin.x, coin.y, '+1', '#FFD700'); // US-009
       AudioManager.playCoinPickup();
       coin.collectAnim = { timer: COIN_COLLECT_ANIM_DURATION };
       coinPulse = 1.0; // beat-pulse HUD: coin counter bounce (US-008)
     }
   }
 
-  // Tick float texts
-  for (let i = coinFloatTexts.length - 1; i >= 0; i--) {
-    coinFloatTexts[i].y -= 60 * dt; // float upward at 60 px/s
-    coinFloatTexts[i].timer -= dt;
-    if (coinFloatTexts[i].timer <= 0) coinFloatTexts.splice(i, 1);
-  }
 }
 
 function renderCoins(ctx) {
@@ -3073,17 +3077,6 @@ function renderCoins(ctx) {
     ctx.restore();
   }
 
-  // Floating '+100' text
-  for (const ft of coinFloatTexts) {
-    const alpha = ft.timer / COIN_FLOAT_DURATION;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('+100', ft.x, ft.y);
-  }
-  ctx.globalAlpha = 1;
 }
 
 // --- Nitro Item ---
@@ -3139,6 +3132,7 @@ function updateNitroItems(dt) {
       chromaTimer = 0.25;
       chromaDuration = 0.25;
       chromaIntensity = 0.6;
+      spawnFloatText(item.x, item.y, '+NITRO', '#00FFFF'); // US-009
     }
   }
 }
@@ -3231,6 +3225,7 @@ function updateShieldItems(dt) {
       }
       AudioManager.playShieldPickup();
       item.collectAnim = { timer: SHIELD_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+SHIELD', '#4488FF'); // US-009
     }
   }
 }
@@ -3295,6 +3290,22 @@ function renderShieldItems(ctx) {
 
     ctx.restore();
   }
+}
+
+// --- Floating pickup texts (US-009) ---
+// Rendered above world layer, below main HUD panel
+function renderFloatTexts(ctx) {
+  if (floatTexts.length === 0) return;
+  ctx.save();
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const ft of floatTexts) {
+    ctx.globalAlpha = ft.timer / FLOAT_TEXT_DURATION;
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+  }
+  ctx.restore();
 }
 
 // --- Fuel HUD ---
@@ -3585,6 +3596,12 @@ const playingState = {
     updateCoins(dt);
     updateNitroItems(dt);
     updateShieldItems(dt);
+    // Tick floating pickup texts (US-009)
+    for (let i = floatTexts.length - 1; i >= 0; i--) {
+      floatTexts[i].y -= 60 * dt;
+      floatTexts[i].timer -= dt;
+      if (floatTexts[i].timer <= 0) floatTexts.splice(i, 1);
+    }
     AudioManager.updateCoinSeq(dt);
     updateParticles(dt);
 
@@ -3729,6 +3746,9 @@ const playingState = {
 
     ctx.restore();
     // --- End world layer ---
+
+    // Floating pickup texts — above world, below HUD (US-009)
+    renderFloatTexts(ctx);
 
     // Chromatic aberration — RGB split on collision/nitro (US-002)
     // Applied after restore so it post-processes the full rolled frame
