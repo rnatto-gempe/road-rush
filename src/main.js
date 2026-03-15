@@ -128,6 +128,21 @@ const SHIELD_SPAWN_MAX = 7500;          // px traveled max between spawns
 const SHIELD_COLLECT_ANIM_DURATION = 0.2;
 const SHIELD_BREAK_FLASH_DURATION = 0.3; // bright flash when shield absorbs a hit
 
+// Weapon (shooting) item constants — 2-3x rarer than shield
+const WEAPON_ITEM_RADIUS = 10;           // 20px bounding circle
+const WEAPON_SPAWN_MIN = 7000;           // px traveled min between spawns
+const WEAPON_SPAWN_MAX = 13000;          // px traveled max between spawns
+const WEAPON_COLLECT_ANIM_DURATION = 0.2;
+const WEAPON_DURATION = 3.0;             // seconds of active shooting
+
+// Bullet (projectile) constants — US-002
+const BULLET_FIRE_INTERVAL = 0.2;        // seconds between automatic shots
+const BULLET_SPEED = 600;                // px/s upward
+const BULLET_WIDTH = 4;                  // px
+const BULLET_HEIGHT = 12;                // px
+const BULLET_MAX = 10;                   // max simultaneous bullets on screen
+const BULLET_KILL_POINTS = 50;           // bonus points per vehicle destroyed
+
 // Speed lines: drawn in rumble-strip margins when scrollSpeed > 500
 const SPEED_LINE_PERIOD = CANVAS_HEIGHT + 80; // vertical wrap period
 const speedLineData = (() => {
@@ -851,6 +866,86 @@ const AudioManager = {
         if (endedCount === 2) gain.disconnect();
       };
     }
+  },
+
+  // Weapon pickup: rapid ascending sawtooth sweep with a punchy attack (~0.25s)
+  playWeaponPickup () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.03);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+    gain.gain.linearRampToValueAtTime(0, now + 0.25);
+    gain.connect(this.masterGain);
+
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.25);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Short percussive bullet shot SFX — high-freq click (US-002)
+  playBulletShoot () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1200, now);
+    osc.frequency.exponentialRampToValueAtTime(300, now + 0.06);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.06);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Vehicle destruction boom — mid-range noise burst + low thump (US-002)
+  playVehicleDestroy () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Noise burst
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.12);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const bpFilter = this.ctx.createBiquadFilter();
+    bpFilter.type = 'bandpass';
+    bpFilter.frequency.setValueAtTime(800, now);
+    bpFilter.Q.setValueAtTime(1.5, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.3, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    noiseSrc.connect(bpFilter);
+    bpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.12);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); bpFilter.disconnect(); noiseGain.disconnect(); };
+    // Low thump
+    const thump = this.ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(80, now);
+    thump.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+    const thumpGain = this.ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.25, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+    thump.start(now);
+    thump.stop(now + 0.1);
+    thump.onended = () => { thump.disconnect(); thumpGain.disconnect(); };
   },
 
   // ─── Near Miss, Combo, and Bonus SFX ───
@@ -1849,6 +1944,14 @@ let chromaIntensity = 1.0;  // peak intensity: 1.0 = full (collision), 0.6 = nit
 // Shield state
 let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
 
+// Weapon (shooting) state
+let shootingTimer = 0; // countdown during active shooting power-up
+let bulletFireTimer = 0; // cooldown between automatic shots (US-002)
+
+// Pause state (US-003)
+let gamePaused = false;
+let pauseAudioWasMuted = false; // track if audio was already muted before pause
+
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
 
@@ -2015,6 +2118,242 @@ function setupTouchBtn (el, key) {
 setupTouchBtn(touchLeft, 'ArrowLeft');
 setupTouchBtn(touchRight, 'ArrowRight');
 
+// --- Gyroscope Controls (US-004 / US-005) ---
+let gyroEnabled = false;        // Whether gyroscope control is currently active
+let gyroSupported = false;      // Whether device supports DeviceOrientation
+let gyroPermissionGranted = false; // iOS 13+ permission state
+let gyroGamma = 0;              // Raw gamma reading (left/right tilt, -90 to +90)
+const GYRO_DEAD_ZONE = 5;       // ±5° dead zone
+const GYRO_MAX_ANGLE = 35;      // Max tilt angle for full speed
+const GYRO_SENSITIVITY_LEVELS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+let gyroSensitivityIndex = 2;   // Default index → 1.0x
+let gyroSensitivity = 1.0;      // Current sensitivity multiplier (US-005)
+
+// Load gyroscope preferences from localStorage (US-005)
+function loadGyroPrefs () {
+  try {
+    const saved = localStorage.getItem('roadrush_gyro');
+    if (saved) {
+      const prefs = JSON.parse(saved);
+      if (typeof prefs.enabled === 'boolean') gyroEnabled = prefs.enabled;
+      if (typeof prefs.sensitivityIndex === 'number') {
+        gyroSensitivityIndex = Math.max(0, Math.min(GYRO_SENSITIVITY_LEVELS.length - 1, prefs.sensitivityIndex));
+        gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      }
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function saveGyroPrefs () {
+  try {
+    localStorage.setItem('roadrush_gyro', JSON.stringify({
+      enabled: gyroEnabled,
+      sensitivityIndex: gyroSensitivityIndex
+    }));
+  } catch (_) { /* ignore */ }
+}
+
+// Load prefs on startup
+loadGyroPrefs();
+
+// Detect gyroscope support
+if (window.DeviceOrientationEvent) {
+  gyroSupported = true;
+}
+
+function onDeviceOrientation (e) {
+  if (e.gamma !== null && e.gamma !== undefined) {
+    gyroGamma = e.gamma; // -90 (left) to +90 (right)
+  }
+}
+
+function startGyroscope () {
+  window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  gyroEnabled = true;
+  saveGyroPrefs();
+  // Hide arrow buttons when gyroscope active
+  if (isMobileDevice) {
+    touchLeft.style.display = 'none';
+    touchRight.style.display = 'none';
+    // Clear any stuck key states from touch buttons
+    keys['ArrowLeft'] = false;
+    keys['ArrowRight'] = false;
+  }
+}
+
+function stopGyroscope () {
+  window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+  gyroEnabled = false;
+  gyroGamma = 0;
+  saveGyroPrefs();
+  // Restore arrow buttons if in playingState
+  if (isMobileDevice && fsm.currentState === playingState) {
+    touchLeft.style.display = 'flex';
+    touchRight.style.display = 'flex';
+  }
+}
+
+async function requestGyroPermissionAndStart () {
+  // iOS 13+ requires explicit permission request from a user gesture
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === 'granted') {
+        gyroPermissionGranted = true;
+        startGyroscope();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  } else {
+    // Non-iOS or older iOS — no permission needed
+    gyroPermissionGranted = true;
+    startGyroscope();
+    return true;
+  }
+}
+
+function toggleGyroscope () {
+  if (gyroEnabled) {
+    stopGyroscope();
+  } else {
+    if (gyroPermissionGranted) {
+      startGyroscope();
+    } else {
+      requestGyroPermissionAndStart();
+    }
+  }
+}
+
+// Change gyro sensitivity by delta steps (US-005)
+function changeGyroSensitivity (delta) {
+  gyroSensitivityIndex = Math.max(0, Math.min(GYRO_SENSITIVITY_LEVELS.length - 1, gyroSensitivityIndex + delta));
+  gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+  saveGyroPrefs();
+}
+
+// --- Gyroscope Toggle Button + Sensitivity Slider HUD (US-005) ---
+// Positioned at top-left of canvas, only visible on mobile during playingState
+const GYRO_BTN_X = 28;       // Center X of gyro toggle icon
+const GYRO_BTN_Y = 20;       // Center Y of gyro toggle icon
+const GYRO_SLIDER_Y = 46;    // Y position of sensitivity slider
+const GYRO_SLIDER_W = 90;    // Total slider width
+const GYRO_SLIDER_X = 10;    // Left edge of slider
+
+function renderGyroToggle (ctx) {
+  if (!isMobileDevice) return;
+  if (fsm.currentState !== playingState || gamePaused) return;
+  if (!gyroSupported) return;
+
+  ctx.save();
+
+  // Toggle button: tilted phone icon
+  const x = GYRO_BTN_X;
+  const y = GYRO_BTN_Y;
+  ctx.globalAlpha = gyroEnabled ? 0.85 : 0.4;
+
+  // Phone body (rotated rectangle)
+  ctx.translate(x, y);
+  ctx.rotate(gyroEnabled ? 0.3 : 0); // Tilt when active
+  ctx.strokeStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-7, -10, 14, 20);
+  // Screen area
+  ctx.fillStyle = gyroEnabled ? 'rgba(0, 255, 136, 0.25)' : 'rgba(255, 255, 255, 0.1)';
+  ctx.fillRect(-5, -7, 10, 14);
+  // Home button dot
+  ctx.beginPath();
+  ctx.arc(0, 8, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.fill();
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+
+  // Status label
+  ctx.globalAlpha = gyroEnabled ? 0.7 : 0.35;
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.fillText(gyroEnabled ? 'GYRO' : 'GYRO', x, y + 18);
+
+  // Sensitivity slider (only when gyro is active)
+  if (gyroEnabled) {
+    const sliderX = GYRO_SLIDER_X;
+    const sliderY = GYRO_SLIDER_Y;
+    const sliderW = GYRO_SLIDER_W;
+    const levels = GYRO_SENSITIVITY_LEVELS.length;
+
+    // Slider track background
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(sliderX, sliderY, sliderW, 3);
+
+    // Filled portion
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#00FF88';
+    const fillW = (gyroSensitivityIndex / (levels - 1)) * sliderW;
+    ctx.fillRect(sliderX, sliderY, fillW, 3);
+
+    // Tick marks
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < levels; i++) {
+      const tx = sliderX + (i / (levels - 1)) * sliderW;
+      ctx.fillStyle = i <= gyroSensitivityIndex ? '#00FF88' : '#FFFFFF';
+      ctx.fillRect(tx - 1, sliderY - 2, 2, 7);
+    }
+
+    // Slider handle (current position)
+    ctx.globalAlpha = 0.9;
+    const handleX = sliderX + (gyroSensitivityIndex / (levels - 1)) * sliderW;
+    ctx.beginPath();
+    ctx.arc(handleX, sliderY + 1.5, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#00FF88';
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Sensitivity label
+    ctx.globalAlpha = 0.6;
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#00FF88';
+    ctx.fillText(gyroSensitivity.toFixed(2) + 'x', sliderX + sliderW / 2, sliderY + 16);
+  }
+
+  ctx.restore();
+}
+
+// Hit detection for gyro toggle button (US-005)
+function handleGyroToggleTap (cx, cy) {
+  if (!isMobileDevice || !gyroSupported) return false;
+  if (fsm.currentState !== playingState || gamePaused) return false;
+
+  // Toggle button hit area: 44x44 centered on icon
+  if (cx >= GYRO_BTN_X - 22 && cx <= GYRO_BTN_X + 22 && cy >= GYRO_BTN_Y - 16 && cy <= GYRO_BTN_Y + 24) {
+    toggleGyroscope();
+    return true;
+  }
+
+  // Sensitivity slider hit area (only when gyro active)
+  if (gyroEnabled) {
+    const sliderY = GYRO_SLIDER_Y;
+    if (cy >= sliderY - 10 && cy <= sliderY + 20 && cx >= GYRO_SLIDER_X - 5 && cx <= GYRO_SLIDER_X + GYRO_SLIDER_W + 5) {
+      // Map tap position to nearest sensitivity level
+      const ratio = Math.max(0, Math.min(1, (cx - GYRO_SLIDER_X) / GYRO_SLIDER_W));
+      const newIndex = Math.round(ratio * (GYRO_SENSITIVITY_LEVELS.length - 1));
+      gyroSensitivityIndex = newIndex;
+      gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      saveGyroPrefs();
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas () {
   const windowWidth = window.innerWidth;
@@ -2039,6 +2378,8 @@ function resizeCanvas () {
   positionRankingBtn();
   positionRankingBackBtn();
   positionFeedbackBtn();
+  positionCommunityBtns();
+  positionSettingsBackBtn();
   positionGameOverRanking();
 }
 
@@ -2068,6 +2409,11 @@ let rankingBtnEl = null;
 let rankingBackBtnEl = null;
 // Declared early so positionFeedbackBtn() guard works when resizeCanvas() is called below
 let feedbackBtnEl = null;
+// Declared early so positionCommunityBtns() guard works when resizeCanvas() is called below
+let communityBackBtnEl = null;
+let communitySuggestBtnEl = null;
+// Declared early so positionSettingsBackBtn guard works when resizeCanvas() is called below
+let settingsBackBtnEl = null;
 // DOM ranking container for game over screen
 let gameOverRankingEl = null;
 
@@ -2586,7 +2932,13 @@ function closeFeedbackModal () {
   feedbackModalEl.style.display = 'none';
 }
 
-feedbackBtnEl.addEventListener('click', openFeedbackModal);
+feedbackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === titleState) {
+    fsm.transition(communityFeaturesState);
+  } else {
+    openFeedbackModal();
+  }
+});
 feedbackCloseEl.addEventListener('click', closeFeedbackModal);
 
 // Close on backdrop click (not on card click)
@@ -2629,6 +2981,107 @@ feedbackSubmitEl.addEventListener('click', async () => {
   }
 });
 
+// --- Community Features Buttons (US-006) ---
+communityBackBtnEl = document.createElement('button');
+communityBackBtnEl.id = 'community-back-btn';
+communityBackBtnEl.textContent = 'VOLTAR';
+communityBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(communityBackBtnEl);
+
+communityBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === communityFeaturesState) {
+    fsm.transition(titleState);
+  }
+});
+
+communitySuggestBtnEl = document.createElement('button');
+communitySuggestBtnEl.id = 'community-suggest-btn';
+communitySuggestBtnEl.textContent = '💡 Sugerir Feature';
+communitySuggestBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(255,193,7,0.13)',
+  'color:#FFC107',
+  'border:1.5px solid rgba(255,193,7,0.40)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(communitySuggestBtnEl);
+
+communitySuggestBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === communityFeaturesState) {
+    openFeedbackModal();
+  }
+});
+
+function positionCommunityBtns () {
+  if (!communityBackBtnEl || !communitySuggestBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  // Back button: bottom-left area
+  communityBackBtnEl.style.left = `${rect.left + 70 * scale}px`;
+  communityBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  communityBackBtnEl.style.transform = 'translateX(-50%)';
+  // Suggest button: bottom-right area
+  communitySuggestBtnEl.style.left = `${rect.left + 310 * scale}px`;
+  communitySuggestBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  communitySuggestBtnEl.style.transform = 'translateX(-50%)';
+}
+
+// --- Settings Back Button ---
+settingsBackBtnEl = document.createElement('button');
+settingsBackBtnEl.id = 'settings-back-btn';
+settingsBackBtnEl.textContent = 'VOLTAR';
+settingsBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+  'transform:translateX(-50%)',
+].join(';') + ';';
+document.body.appendChild(settingsBackBtnEl);
+
+settingsBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === settingsState) {
+    fsm.transition(titleState);
+  }
+});
+
+function positionSettingsBackBtn () {
+  if (!settingsBackBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  settingsBackBtnEl.style.left = `${rect.left + rect.width / 2}px`;
+  settingsBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  settingsBackBtnEl.style.transform = 'translateX(-50%)';
+}
+
 // Abort controller for title ranking fetch
 let titleRankingAbortController = null;
 
@@ -2652,6 +3105,9 @@ canvas.addEventListener('touchend', (e) => {
   const cx = (touch.clientX - rect.left) * scaleX;
   const cy = (touch.clientY - rect.top) * scaleY;
 
+  // Gyroscope toggle + sensitivity slider (US-005)
+  if (handleGyroToggleTap(cx, cy)) return;
+
   // Check mute icon tap first (44×44 area centered on CANVAS_WIDTH-28, 54)
   const muteX = CANVAS_WIDTH - 28;
   const muteY = 54;
@@ -2660,7 +3116,17 @@ canvas.addEventListener('touchend', (e) => {
     return;
   }
 
+  // Settings screen tap handling
+  if (handleSettingsTap(cx, cy)) return;
+
   if (fsm.currentState === titleState) {
+    // Settings gear icon tap (top-right corner)
+    const gearX = CANVAS_WIDTH - 30;
+    const gearY = 30;
+    if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      fsm.transition(settingsState);
+      return;
+    }
     AudioManager.init();
     AudioManager.resume();
     AudioManager.startTitleDrone();
@@ -2688,6 +3154,13 @@ canvas.addEventListener('touchend', (e) => {
         titleRankingState.rankingScroll = Math.max(0, Math.min(titleRankingState.rankingScroll + scrollDelta, maxScroll));
       }
     }
+  } else if (fsm.currentState === communityFeaturesState) {
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * 110);
+      const scrollDelta = delta * 2;
+      communityFeaturesState.scrollOffset = Math.max(0, Math.min(communityFeaturesState.scrollOffset + scrollDelta, maxScroll));
+    }
   }
   // No tap action during playingState
 }, { passive: false });
@@ -2699,16 +3172,54 @@ document.body.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 
-// --- Mute icon click detection ---
+// --- Mute icon + Pause button click detection ---
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
   const scaleX = CANVAS_WIDTH / rect.width;
   const scaleY = CANVAS_HEIGHT / rect.height;
   const cx = (e.clientX - rect.left) * scaleX;
   const cy = (e.clientY - rect.top) * scaleY;
-  // Icon area: top-right corner, 32x32 region
+
+  // Pause overlay "Continuar" button (US-003): centered at (200, CANVAS_HEIGHT/2+40), 180x44
+  if (gamePaused) {
+    const btnX = CANVAS_WIDTH / 2;
+    const btnY = CANVAS_HEIGHT / 2 + 40;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= btnY - 22 && cy <= btnY + 22) {
+      togglePause();
+      return;
+    }
+    // Any click while paused that's not the button — also unpause
+    togglePause();
+    return;
+  }
+
+  // Pause button area: top-right, near mute but above it (US-003)
+  // Icon centered at (CANVAS_WIDTH - 28, 20), hit area ~32x24
+  if (cx >= CANVAS_WIDTH - 44 && cx <= CANVAS_WIDTH - 12 && cy >= 4 && cy <= 36) {
+    togglePause();
+    return;
+  }
+
+  // Mute icon area: top-right corner, 32x32 region
   if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
     AudioManager.toggleMute();
+    return;
+  }
+
+  // Gyroscope toggle + sensitivity slider (US-005) — click handler for desktop testing
+  if (handleGyroToggleTap(cx, cy)) return;
+
+  // Settings screen click handling
+  if (handleSettingsTap(cx, cy)) return;
+
+  // Settings gear icon click on title screen
+  if (fsm.currentState === titleState) {
+    const gearX = CANVAS_WIDTH - 30;
+    const gearY = 30;
+    if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      fsm.transition(settingsState);
+      return;
+    }
   }
 });
 
@@ -3025,6 +3536,34 @@ function renderBloom () {
     bloomCtx.scale(2, 2);
     bloomCtx.beginPath();
     bloomCtx.arc(0, 0, SHIELD_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Weapon halos (red-orange)
+  bloomCtx.fillStyle = '#FF5522';
+  for (const item of gameState.weaponItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
+  // Bullet halos (phase-dependent color) — US-002
+  for (const b of gameState.bullets) {
+    const phase = b.phase || gameState.phase;
+    bloomCtx.fillStyle = phase === 'space' ? '#00FF66' : phase === 'sky' ? '#42A5F5' : '#FFCC00';
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.5;
+    bloomCtx.translate(b.x, b.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, BULLET_WIDTH, 0, Math.PI * 2);
     bloomCtx.fill();
     bloomCtx.restore();
   }
@@ -3357,6 +3896,11 @@ const gameState = {
   // Shield items
   shieldItems: [],
   nextShieldSpawnDistance: SHIELD_SPAWN_MIN,
+  // Weapon items
+  weaponItems: [],
+  nextWeaponSpawnDistance: WEAPON_SPAWN_MIN,
+  // Bullets (projectiles from weapon power-up) — US-002
+  bullets: [],
   // Phase system
   phase: 'road',
   phaseTransition: { progress: 0, active: false, from: '', to: '' },
@@ -3443,6 +3987,13 @@ function resetGameState () {
   gameState.shieldItems = [];
   gameState.nextShieldSpawnDistance = SHIELD_SPAWN_MIN + Math.random() * (SHIELD_SPAWN_MAX - SHIELD_SPAWN_MIN);
   shieldBreakFlash = 0;
+  // Reset weapon state
+  gameState.player.shooting = false;
+  shootingTimer = 0;
+  bulletFireTimer = 0;
+  gameState.bullets = [];
+  gameState.weaponItems = [];
+  gameState.nextWeaponSpawnDistance = WEAPON_SPAWN_MIN + Math.random() * (WEAPON_SPAWN_MAX - WEAPON_SPAWN_MIN);
   // Reset VFX
   explosions.length = 0;
   shockwaveRings.length = 0;
@@ -3820,7 +4371,26 @@ function updatePlayer (dt) {
   const left = keys['ArrowLeft'];
   const right = keys['ArrowRight'];
 
-  if (left && !right) {
+  // Gyroscope control (US-004): overrides keyboard/touch left/right
+  if (gyroEnabled) {
+    let gamma = gyroGamma * gyroSensitivity;
+    // Apply dead zone
+    if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
+      gamma = 0;
+    } else {
+      // Remove dead zone offset and normalize
+      gamma = gamma > 0 ? gamma - GYRO_DEAD_ZONE : gamma + GYRO_DEAD_ZONE;
+    }
+    // Clamp to max angle (after dead zone removal)
+    const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
+    gamma = Math.max(-effectiveMax, Math.min(effectiveMax, gamma));
+    // Map to target velocity: -1..+1 → -MAX_SPEED..+MAX_SPEED
+    const targetVx = (gamma / effectiveMax) * PLAYER_MAX_SPEED;
+    // Smooth lerp toward target velocity
+    player.vx += (targetVx - player.vx) * 0.15;
+    // Snap to zero if very small
+    if (Math.abs(player.vx) < 2) player.vx = 0;
+  } else if (left && !right) {
     player.vx -= PLAYER_ACCEL * dt;
     if (player.vx < -PLAYER_MAX_SPEED) player.vx = -PLAYER_MAX_SPEED;
   } else if (right && !left) {
@@ -3868,8 +4438,15 @@ function updatePlayer (dt) {
     }
   }
 
-  // Camera roll: ease toward target based on lateral input (US-006)
-  const rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  // Camera roll: ease toward target based on lateral input (US-004/006)
+  let rollTarget;
+  if (gyroEnabled) {
+    // Map gyro gamma to camera roll (-2.5 to +2.5)
+    const clampedGamma = Math.max(-GYRO_MAX_ANGLE, Math.min(GYRO_MAX_ANGLE, gyroGamma));
+    rollTarget = -(clampedGamma / GYRO_MAX_ANGLE) * 2.5;
+  } else {
+    rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  }
   cameraRoll += (rollTarget - cameraRoll) * 0.12;
   cameraRoll = Math.max(-3, Math.min(3, cameraRoll));
 }
@@ -5551,6 +6128,312 @@ function renderShieldItems (ctx) {
   }
 }
 
+// --- Weapon Item ---
+
+function spawnWeaponItem () {
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const x = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+  gameState.weaponItems.push({ x, y: -WEAPON_ITEM_RADIUS * 2, collectAnim: null });
+  gameState.nextWeaponSpawnDistance =
+    gameState.distanceTraveled + WEAPON_SPAWN_MIN + Math.random() * (WEAPON_SPAWN_MAX - WEAPON_SPAWN_MIN);
+}
+
+function updateWeaponItems (dt) {
+  const effSpeed = getEffectiveScrollSpeed();
+
+  if (gameState.distanceTraveled >= gameState.nextWeaponSpawnDistance) {
+    spawnWeaponItem();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.weaponItems.length - 1; i >= 0; i--) {
+    const item = gameState.weaponItems[i];
+
+    if (item.collectAnim !== null) {
+      item.collectAnim.timer -= dt;
+      if (item.collectAnim.timer <= 0) gameState.weaponItems.splice(i, 1);
+      continue;
+    }
+
+    item.y += effSpeed * dt;
+
+    if (item.y > CANVAS_HEIGHT + WEAPON_ITEM_RADIUS * 2) {
+      gameState.weaponItems.splice(i, 1);
+      continue;
+    }
+
+    // Collection: player 80% hitbox vs item full bounding box
+    const itemHb = {
+      x: item.x - WEAPON_ITEM_RADIUS,
+      y: item.y - WEAPON_ITEM_RADIUS,
+      w: WEAPON_ITEM_RADIUS * 2,
+      h: WEAPON_ITEM_RADIUS * 2,
+    };
+    if (aabbOverlap(ph, itemHb)) {
+      // Stack duration: add +3s to remaining time
+      shootingTimer += WEAPON_DURATION;
+      gameState.player.shooting = true;
+      AudioManager.playWeaponPickup();
+      item.collectAnim = { timer: WEAPON_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+WEAPON', '#FF6633');
+    }
+  }
+}
+
+function renderWeaponItems (ctx) {
+  // Pulsing scale: 0.9 to 1.1 over a 0.5s cycle
+  const pulseScale = 1.0 + 0.1 * Math.sin(gameState.elapsedTime * 4 * Math.PI);
+
+  for (const item of gameState.weaponItems) {
+    let scale = pulseScale;
+    let alpha = 1;
+    if (item.collectAnim !== null) {
+      const progress = 1 - item.collectAnim.timer / WEAPON_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(item.x, item.y);
+    ctx.scale(scale, scale);
+
+    // Outer glow (red-orange)
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, WEAPON_ITEM_RADIUS * 1.8);
+    glow.addColorStop(0, 'rgba(255, 100, 50, 0.4)');
+    glow.addColorStop(1, 'rgba(255, 100, 50, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Circular body (red-orange)
+    ctx.fillStyle = '#FF5522';
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Projectile icon: upward arrow/bullet shape
+    const r = WEAPON_ITEM_RADIUS * 0.55;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.moveTo(0, -r);                     // tip
+    ctx.lineTo(r * 0.4, -r * 0.2);         // right shoulder
+    ctx.lineTo(r * 0.4, r * 0.6);          // right base
+    ctx.lineTo(-r * 0.4, r * 0.6);         // left base
+    ctx.lineTo(-r * 0.4, -r * 0.2);        // left shoulder
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+// --- Weapon Shooting Timer HUD ---
+// Small bar below the nitro bar; visible when weapon is active.
+function renderWeaponHUD (ctx) {
+  if (shootingTimer <= 0) return;
+  const pct = Math.min(shootingTimer / WEAPON_DURATION, 1.0);
+
+  const barW = 80;
+  const barH = 5;
+  const x = CANVAS_WIDTH / 2 - barW / 2;
+  const y = CANVAS_HEIGHT - 8;
+
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  // Background track
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, barW, barH);
+  // Orange fill
+  ctx.fillStyle = '#FF6633';
+  ctx.fillRect(x, y, barW * pct, barH);
+  // Label
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#FF6633';
+  ctx.fillText('WEAPON', CANVAS_WIDTH / 2, y - 1);
+  ctx.restore();
+}
+
+// --- Bullet (Projectile) System — US-002 ---
+// Automatic shooting while weapon power-up is active
+
+function updateBullets (dt) {
+  // Spawn bullets while weapon is active
+  if (gameState.player.shooting) {
+    bulletFireTimer -= dt;
+    if (bulletFireTimer <= 0 && gameState.bullets.length < BULLET_MAX) {
+      const player = gameState.player;
+      gameState.bullets.push({
+        x: player.x + PLAYER_WIDTH / 2,
+        y: player.y,
+        phase: gameState.phase, // track phase at spawn for visual
+      });
+      bulletFireTimer = BULLET_FIRE_INTERVAL;
+      AudioManager.playBulletShoot();
+    }
+  } else {
+    bulletFireTimer = 0; // reset cooldown when weapon not active
+  }
+
+  // Update bullet positions + check collision with traffic
+  for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+    const b = gameState.bullets[i];
+    b.y -= BULLET_SPEED * dt;
+
+    // Remove if off screen
+    if (b.y + BULLET_HEIGHT < 0) {
+      gameState.bullets.splice(i, 1);
+      continue;
+    }
+
+    // Bullet hitbox (centered on x)
+    const bHb = {
+      x: b.x - BULLET_WIDTH / 2,
+      y: b.y - BULLET_HEIGHT / 2,
+      w: BULLET_WIDTH,
+      h: BULLET_HEIGHT,
+    };
+
+    // Check collision with traffic vehicles
+    for (let j = gameState.traffic.length - 1; j >= 0; j--) {
+      const v = gameState.traffic[j];
+      if (v.destroyed) continue; // skip already destroyed
+      const vHb = getVehicleHitbox(v);
+      if (aabbOverlap(bHb, vHb)) {
+        // Destroy vehicle
+        spawnVehicleDestroyParticles(v);
+        AudioManager.playVehicleDestroy();
+
+        // Score bonus + combo
+        const pts = BULLET_KILL_POINTS * (comboMultiplier >= 2 ? comboMultiplier : 1);
+        gameState.score += pts;
+        comboMultiplier += 1;
+        comboResetTimer = COMBO_RESET_TIME;
+        comboScaleTimer = COMBO_SCALE_DURATION;
+        bestCombo = Math.max(bestCombo, comboMultiplier);
+        scorePunchScale = Math.min(0.4, 0.15 + comboMultiplier * 0.05);
+        scorePunchColor = getComboColor(comboMultiplier);
+
+        // Float text
+        const comboColor = getComboColor(comboMultiplier - 1);
+        const label = comboMultiplier > 2
+          ? 'x' + (comboMultiplier - 1) + ' +' + pts + '!'
+          : '+' + pts;
+        spawnFloatText(v.x + v.width / 2, v.y + v.height / 2, label, comboColor);
+
+        // Screen shake (light)
+        triggerShake(0.08, 2);
+
+        // Remove vehicle and bullet
+        gameState.traffic.splice(j, 1);
+        gameState.bullets.splice(i, 1);
+        break; // bullet consumed
+      }
+    }
+  }
+}
+
+// Explosion particles when a vehicle is destroyed by bullet (US-002)
+function spawnVehicleDestroyParticles (v) {
+  const cx = v.x + v.width / 2;
+  const cy = v.y + v.height / 2;
+  const fireColors = ['#FFF176', '#FFB74D', '#FF7043', '#E53935'];
+  const debrisColors = ['#757575', '#4E342E', '#424242'];
+  // Fire particles
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 160;
+    particles.push({
+      x: cx + (Math.random() - 0.5) * v.width * 0.4,
+      y: cy + (Math.random() - 0.5) * v.height * 0.4,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.3 + Math.random() * 0.3,
+      maxLife: 0.6,
+      color: fireColors[Math.floor(Math.random() * fireColors.length)],
+      size: 2 + Math.random() * 3,
+    });
+  }
+  // Debris particles
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 100;
+    particles.push({
+      x: cx + (Math.random() - 0.5) * v.width * 0.3,
+      y: cy + (Math.random() - 0.5) * v.height * 0.3,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed + 30,
+      life: 0.4 + Math.random() * 0.3,
+      maxLife: 0.7,
+      color: debrisColors[Math.floor(Math.random() * debrisColors.length)],
+      size: 1.5 + Math.random() * 2,
+    });
+  }
+}
+
+function renderBullets (ctx) {
+  if (gameState.bullets.length === 0) return;
+  const phase = gameState.phase;
+
+  for (const b of gameState.bullets) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    if (phase === 'space' || b.phase === 'space') {
+      // Space: green laser bolt
+      ctx.shadowColor = '#00FF66';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = '#00FF66';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright core
+      ctx.fillStyle = '#AAFFAA';
+      ctx.fillRect(-1, -BULLET_HEIGHT / 2, 2, BULLET_HEIGHT);
+    } else if (phase === 'sky' || b.phase === 'sky') {
+      // Sky: blue missile/laser
+      ctx.shadowColor = '#42A5F5';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = '#42A5F5';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright core
+      ctx.fillStyle = '#BBDEFB';
+      ctx.fillRect(-1, -BULLET_HEIGHT / 2, 2, BULLET_HEIGHT);
+      // Pointed tip
+      ctx.fillStyle = '#42A5F5';
+      ctx.beginPath();
+      ctx.moveTo(0, -BULLET_HEIGHT / 2 - 3);
+      ctx.lineTo(BULLET_WIDTH / 2, -BULLET_HEIGHT / 2);
+      ctx.lineTo(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Road: metallic bullet
+      ctx.shadowColor = '#FFCC00';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright tip
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, 3);
+      // Trail glow
+      ctx.fillStyle = '#FFCC00';
+      ctx.fillRect(-1, BULLET_HEIGHT / 2 - 2, 2, 4);
+    }
+
+    ctx.restore();
+  }
+}
+
 // --- Floating pickup texts (US-009) ---
 // Rendered above world layer, below main HUD panel
 function renderFloatTexts (ctx) {
@@ -5741,6 +6624,98 @@ function renderMuteIcon (ctx) {
   ctx.restore();
 }
 
+// --- Pause Button HUD (US-003) ---
+function renderPauseButton (ctx) {
+  // Only show during playingState and not paused
+  if (fsm.currentState !== playingState || gamePaused) return;
+  const x = CANVAS_WIDTH - 28;
+  const y = 20;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#FFFFFF';
+  // Two vertical bars ❚❚
+  ctx.fillRect(x - 6, y - 8, 4, 16);
+  ctx.fillRect(x + 2, y - 8, 4, 16);
+  ctx.restore();
+}
+
+// --- Pause Overlay (US-003) ---
+function renderPauseOverlay (ctx) {
+  if (!gamePaused) return;
+
+  // Dark semi-transparent overlay
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // "PAUSADO" text
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Glow effect
+  ctx.shadowColor = '#00FFFF';
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText('PAUSADO', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+  ctx.shadowBlur = 0;
+
+  // "Continuar" button
+  const btnX = CANVAS_WIDTH / 2;
+  const btnY = CANVAS_HEIGHT / 2 + 40;
+  const btnW = 180;
+  const btnH = 44;
+
+  // Button background
+  ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
+  ctx.strokeStyle = '#00FFFF';
+  ctx.lineWidth = 2;
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(btnX - btnW / 2 + r, btnY - btnH / 2);
+  ctx.lineTo(btnX + btnW / 2 - r, btnY - btnH / 2);
+  ctx.arcTo(btnX + btnW / 2, btnY - btnH / 2, btnX + btnW / 2, btnY - btnH / 2 + r, r);
+  ctx.lineTo(btnX + btnW / 2, btnY + btnH / 2 - r);
+  ctx.arcTo(btnX + btnW / 2, btnY + btnH / 2, btnX + btnW / 2 - r, btnY + btnH / 2, r);
+  ctx.lineTo(btnX - btnW / 2 + r, btnY + btnH / 2);
+  ctx.arcTo(btnX - btnW / 2, btnY + btnH / 2, btnX - btnW / 2, btnY + btnH / 2 - r, r);
+  ctx.lineTo(btnX - btnW / 2, btnY - btnH / 2 + r);
+  ctx.arcTo(btnX - btnW / 2, btnY - btnH / 2, btnX - btnW / 2 + r, btnY - btnH / 2, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Button text
+  ctx.fillStyle = '#00FFFF';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText('Continuar', btnX, btnY);
+
+  // Hint text
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.font = '12px monospace';
+  ctx.fillText('P / Esc para continuar', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90);
+
+  ctx.restore();
+}
+
+// Helper to toggle pause state (US-003)
+function togglePause () {
+  if (fsm.currentState !== playingState) return;
+  gamePaused = !gamePaused;
+  if (gamePaused) {
+    // Reduce audio volume during pause
+    pauseAudioWasMuted = AudioManager.muted;
+    if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+      AudioManager.masterGain.gain.setTargetAtTime(0.05, AudioManager.ctx.currentTime, 0.01);
+    }
+  } else {
+    // Restore audio volume
+    if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+      AudioManager.masterGain.gain.setTargetAtTime(1, AudioManager.ctx.currentTime, 0.01);
+    }
+  }
+}
+
 // --- Combo HUD ---
 function renderComboHUD (ctx) {
   // Show during active combo OR during expire fade-out
@@ -5820,6 +6795,9 @@ function renderComboHUD (ctx) {
 
 // --- Title State ---
 const TOAST_NEWS = [
+  { icon: '🎯', text: 'Feature solicitada por S implementada: Power-up de Tiro!' },
+  { icon: '📱', text: 'Feature solicitada por John Snow implementada: Controle por Giroscópio!' },
+  { icon: '⏸️', text: 'Novo: Pause no jogo!' },
   { icon: '🎨', text: 'Sprites renovados em todas as fases!' },
   { icon: '⚡', text: 'Near Miss — passe rente e ganhe pontos!' },
   { icon: '🎁', text: 'Surpresas esperando nos 25k e 50k...' },
@@ -6131,6 +7109,42 @@ const titleState = {
       }
     }
 
+    // --- Settings gear icon (top-right) ---
+    {
+      const gx = CANVAS_WIDTH - 30;
+      const gy = 30;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.translate(gx, gy);
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      // Gear teeth
+      const teeth = 8;
+      const outerR = 12;
+      const innerR = 8;
+      ctx.beginPath();
+      for (let i = 0; i < teeth; i++) {
+        const a1 = (i / teeth) * Math.PI * 2;
+        const a2 = ((i + 0.35) / teeth) * Math.PI * 2;
+        const a3 = ((i + 0.5) / teeth) * Math.PI * 2;
+        const a4 = ((i + 0.85) / teeth) * Math.PI * 2;
+        if (i === 0) ctx.moveTo(Math.cos(a1) * outerR, Math.sin(a1) * outerR);
+        ctx.lineTo(Math.cos(a2) * outerR, Math.sin(a2) * outerR);
+        ctx.lineTo(Math.cos(a3) * innerR, Math.sin(a3) * innerR);
+        ctx.lineTo(Math.cos(a4) * innerR, Math.sin(a4) * innerR);
+        const aNext = ((i + 1) / teeth) * Math.PI * 2;
+        ctx.lineTo(Math.cos(aNext) * outerR, Math.sin(aNext) * outerR);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      // Center hole
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // --- Footer hint ---
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.font = '10px monospace';
@@ -6151,12 +7165,36 @@ const playingState = {
     AudioManager.startArp();
     AudioManager.startBass();
     if (isMobileDevice) {
-      touchLeft.style.display = 'flex';
-      touchRight.style.display = 'flex';
+      // Show arrow buttons only if gyroscope is not active (US-004)
+      if (gyroEnabled) {
+        if (gyroPermissionGranted) {
+          // Re-attach listener (was detached in onExit)
+          window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        } else {
+          // Restored from localStorage but no permission yet — request it (user gesture context from tap to start)
+          requestGyroPermissionAndStart();
+        }
+      } else {
+        touchLeft.style.display = 'flex';
+        touchRight.style.display = 'flex';
+      }
     }
   },
 
   onExit () {
+    // Restore audio if paused when exiting (US-003)
+    if (gamePaused) {
+      gamePaused = false;
+      if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+        AudioManager.masterGain.gain.setTargetAtTime(1, AudioManager.ctx.currentTime, 0.01);
+      }
+    }
+    // Stop gyroscope listener when leaving playing state (US-004)
+    if (gyroEnabled) {
+      window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+      gyroGamma = 0;
+      // Note: we keep gyroEnabled=true so it auto-restarts on next playingState enter
+    }
     AudioManager.stopNitro();
     AudioManager.stopBeat();
     AudioManager.stopArp();
@@ -6202,6 +7240,7 @@ const playingState = {
     // Debug shortcuts: P = jump near 25k (sky), O = jump near 50k (space)
     if (debugMode && (consumeKey('p') || consumeKey('P'))) gameState.score = 24500;
     if (debugMode && (consumeKey('o') || consumeKey('O'))) gameState.score = 49500;
+    if (debugMode && (consumeKey('w') || consumeKey('W'))) { shootingTimer += WEAPON_DURATION; gameState.player.shooting = true; }
 
     updatePlayer(dt);
     updateTraffic(dt);
@@ -6209,6 +7248,17 @@ const playingState = {
     updateCoins(dt);
     updateNitroItems(dt);
     updateShieldItems(dt);
+    updateWeaponItems(dt);
+    updateBullets(dt);
+
+    // Tick weapon shooting timer
+    if (shootingTimer > 0) {
+      shootingTimer = Math.max(0, shootingTimer - dt);
+      if (shootingTimer === 0) {
+        gameState.player.shooting = false;
+      }
+    }
+
     // Tick floating pickup texts (US-009)
     for (let i = floatTexts.length - 1; i >= 0; i--) {
       floatTexts[i].y -= 60 * dt;
@@ -6422,6 +7472,8 @@ const playingState = {
     renderCoins(ctx);
     renderNitroItems(ctx);
     renderShieldItems(ctx);
+    renderWeaponItems(ctx);
+    renderBullets(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
     // Capture road/traffic/player/particles layer for motion blur next frame (US-003)
@@ -6477,6 +7529,8 @@ const playingState = {
 
     // Nitro meter (bottom-center, visible during boost; beat-reactive glow) (US-008)
     renderNitroHUD(ctx);
+    // Weapon shooting meter (below nitro bar)
+    renderWeaponHUD(ctx);
 
     // Show elapsed time overlay
     ctx.font = '14px monospace';
@@ -7129,6 +8183,425 @@ const gameOverState = {
   },
 };
 
+// --- Settings State ---
+const settingsState = {
+  onEnter () {
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+    settingsBtnEl.style.display = 'none';
+    settingsBackBtnEl.style.display = 'block';
+    positionSettingsBackBtn();
+  },
+
+  onExit () {
+    settingsBackBtnEl.style.display = 'none';
+  },
+
+  update (dt) {
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    bg.addColorStop(0, '#0D0D1A');
+    bg.addColorStop(1, '#1A1A2E');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    }
+
+    // Header background bar
+    ctx.fillStyle = 'rgba(138,43,226,0.10)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 75);
+
+    // Title
+    ctx.fillStyle = '#BB86FC';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CONFIGURAÇÕES', CX, 30);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '11px monospace';
+    ctx.fillText('Ajuste o jogo do seu jeito', CX, 55);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(187,134,252,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(16, 75); ctx.lineTo(CANVAS_WIDTH - 16, 75); ctx.stroke();
+
+    // Settings cards
+    const cardX = 24;
+    const cardW = CANVAS_WIDTH - 48;
+    const cardH = 80;
+    const cardGap = 16;
+    let cardY = 100;
+
+    // --- Card 1: Som ---
+    {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 12); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, cardH / 2); ctx.stroke();
+
+      // Icon + Label
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(AudioManager.muted ? '🔇  SOM' : '🔊  SOM', cardX + 16, cardY + cardH / 2 - 10);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '10px monospace';
+      ctx.fillText('Música e efeitos sonoros', cardX + 16, cardY + cardH / 2 + 10);
+
+      // Toggle switch
+      const toggleX = cardX + cardW - 60;
+      const toggleY = cardY + cardH / 2;
+      const isOn = !AudioManager.muted;
+      // Track
+      ctx.fillStyle = isOn ? 'rgba(0,255,136,0.35)' : 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.fill();
+      ctx.strokeStyle = isOn ? 'rgba(0,255,136,0.6)' : 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.stroke();
+      // Knob
+      ctx.fillStyle = isOn ? '#00FF88' : '#888888';
+      ctx.beginPath();
+      ctx.arc(isOn ? toggleX + 32 : toggleX + 12, toggleY, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    cardY += cardH + cardGap;
+
+    // --- Card 2: Giroscópio ---
+    {
+      const gyroAvailable = gyroSupported || !isMobileDevice;
+      const dimAlpha = gyroAvailable ? 1 : 0.4;
+      ctx.globalAlpha = dimAlpha;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.stroke();
+
+      // Icon + Label
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('📱  GIROSCÓPIO', cardX + 16, cardY + 30);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '10px monospace';
+      if (!isMobileDevice) {
+        ctx.fillText('Disponível apenas no celular', cardX + 16, cardY + 50);
+      } else if (!gyroSupported) {
+        ctx.fillText('Seu dispositivo não suporta giroscópio', cardX + 16, cardY + 50);
+      } else {
+        ctx.fillText('Controle inclinando o celular', cardX + 16, cardY + 50);
+      }
+
+      // Toggle switch
+      const toggleX = cardX + cardW - 60;
+      const toggleY = cardY + 30;
+      const isOn = gyroEnabled;
+      ctx.fillStyle = isOn ? 'rgba(0,255,136,0.35)' : 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.fill();
+      ctx.strokeStyle = isOn ? 'rgba(0,255,136,0.6)' : 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.stroke();
+      ctx.fillStyle = isOn ? '#00FF88' : '#888888';
+      ctx.beginPath();
+      ctx.arc(isOn ? toggleX + 32 : toggleX + 12, toggleY, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sensitivity slider (when gyro enabled)
+      if (gyroEnabled) {
+        const sliderY = cardY + 80;
+        const sliderX = cardX + 24;
+        const sliderW = cardW - 48;
+
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('Sensibilidade', sliderX, sliderY);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#00FF88';
+        ctx.fillText(gyroSensitivity.toFixed(2) + 'x', sliderX + sliderW, sliderY);
+
+        const trackY = sliderY + 16;
+        // Slider track
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath(); ctx.roundRect(sliderX, trackY, sliderW, 6, 3); ctx.fill();
+
+        // Filled portion
+        const levels = GYRO_SENSITIVITY_LEVELS.length;
+        const fillW = (gyroSensitivityIndex / (levels - 1)) * sliderW;
+        ctx.fillStyle = 'rgba(0,255,136,0.5)';
+        ctx.beginPath(); ctx.roundRect(sliderX, trackY, fillW, 6, 3); ctx.fill();
+
+        // Tick marks
+        for (let i = 0; i < levels; i++) {
+          const tx = sliderX + (i / (levels - 1)) * sliderW;
+          ctx.fillStyle = i <= gyroSensitivityIndex ? '#00FF88' : 'rgba(255,255,255,0.3)';
+          ctx.beginPath(); ctx.arc(tx, trackY + 3, 3, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Slider handle
+        const handleX = sliderX + (gyroSensitivityIndex / (levels - 1)) * sliderW;
+        ctx.fillStyle = '#00FF88';
+        ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('ESC ou VOLTAR para sair', CX, CANVAS_HEIGHT - 6);
+  },
+};
+
+// --- Settings State click/tap handler ---
+function handleSettingsTap (cx, cy) {
+  if (fsm.currentState !== settingsState) return false;
+
+  const cardX = 24;
+  const cardW = CANVAS_WIDTH - 48;
+  const cardH = 80;
+  const cardGap = 16;
+
+  // Card 1: Som toggle — toggle area is the whole card
+  const card1Y = 100;
+  if (cx >= cardX && cx <= cardX + cardW && cy >= card1Y && cy <= card1Y + cardH) {
+    AudioManager.toggleMute();
+    return true;
+  }
+
+  // Card 2: Giroscópio
+  const card2Y = card1Y + cardH + cardGap;
+  const card2H = gyroEnabled ? cardH + 50 : cardH;
+
+  // Toggle area (top part of card)
+  if (cx >= cardX && cx <= cardX + cardW && cy >= card2Y && cy <= card2Y + 60) {
+    if (isMobileDevice && gyroSupported) {
+      toggleGyroscope();
+    }
+    return true;
+  }
+
+  // Sensitivity slider (when gyro enabled)
+  if (gyroEnabled && cy >= card2Y + 70 && cy <= card2Y + card2H) {
+    const sliderX = cardX + 24;
+    const sliderW = cardW - 48;
+    if (cx >= sliderX - 10 && cx <= sliderX + sliderW + 10) {
+      const ratio = Math.max(0, Math.min(1, (cx - sliderX) / sliderW));
+      const newIndex = Math.round(ratio * (GYRO_SENSITIVITY_LEVELS.length - 1));
+      gyroSensitivityIndex = newIndex;
+      gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      saveGyroPrefs();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// --- Community Features Data (US-006) ---
+const COMMUNITY_FEATURES = [
+  { name: 'Power-up de Tiro', by: 'S', desc: 'Colete e destrua veículos com tiros automáticos!', status: 'done' },
+  { name: 'Controle por Giroscópio', by: 'John Snow', desc: 'Controle o carro inclinando o celular!', status: 'done' },
+  { name: 'Botão de Pause', by: 'Comunidade', desc: 'Pause o jogo a qualquer momento!', status: 'done' },
+];
+
+// --- Community Features State (US-006) ---
+const communityFeaturesState = {
+  scrollOffset: 0,
+
+  onEnter () {
+    this.scrollOffset = 0;
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+    communityBackBtnEl.style.display = 'block';
+    communitySuggestBtnEl.style.display = 'block';
+    positionCommunityBtns();
+  },
+
+  onExit () {
+    communityBackBtnEl.style.display = 'none';
+    communitySuggestBtnEl.style.display = 'none';
+  },
+
+  update (dt) {
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+    // Keyboard scroll
+    const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * 110);
+    if (consumeKey('ArrowDown')) this.scrollOffset = Math.min(this.scrollOffset + 110, maxScroll);
+    if (consumeKey('ArrowUp')) this.scrollOffset = Math.max(this.scrollOffset - 110, 0);
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    bg.addColorStop(0, '#0D0D1A');
+    bg.addColorStop(1, '#1A1A2E');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    }
+
+    // Header background bar
+    ctx.fillStyle = 'rgba(138,43,226,0.10)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 75);
+
+    // Title
+    ctx.fillStyle = '#BB86FC';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('FEATURES DA COMUNIDADE', CX, 30);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '11px monospace';
+    ctx.fillText('Solicitadas por jogadores como você!', CX, 55);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(187,134,252,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(16, 75); ctx.lineTo(CANVAS_WIDTH - 16, 75); ctx.stroke();
+
+    // Clip area for feature cards (scrollable)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 80, CANVAS_WIDTH, 570);
+    ctx.clip();
+
+    // Feature cards
+    const cardX = 20;
+    const cardW = CANVAS_WIDTH - 40;
+    const cardH = 100;
+    const cardGap = 10;
+
+    for (let i = 0; i < COMMUNITY_FEATURES.length; i++) {
+      const feat = COMMUNITY_FEATURES[i];
+      const cardY = 90 + i * (cardH + cardGap) - this.scrollOffset;
+
+      // Skip rendering cards fully outside clip
+      if (cardY + cardH < 80 || cardY > 650) continue;
+
+      // Card background
+      const isDone = feat.status === 'done';
+      ctx.fillStyle = isDone ? 'rgba(76,175,80,0.08)' : 'rgba(255,193,7,0.08)';
+      ctx.strokeStyle = isDone ? 'rgba(76,175,80,0.25)' : 'rgba(255,193,7,0.25)';
+      ctx.lineWidth = 1;
+      // Rounded rect
+      const r = 10;
+      ctx.beginPath();
+      ctx.moveTo(cardX + r, cardY);
+      ctx.lineTo(cardX + cardW - r, cardY);
+      ctx.quadraticCurveTo(cardX + cardW, cardY, cardX + cardW, cardY + r);
+      ctx.lineTo(cardX + cardW, cardY + cardH - r);
+      ctx.quadraticCurveTo(cardX + cardW, cardY + cardH, cardX + cardW - r, cardY + cardH);
+      ctx.lineTo(cardX + r, cardY + cardH);
+      ctx.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - r);
+      ctx.lineTo(cardX, cardY + r);
+      ctx.quadraticCurveTo(cardX, cardY, cardX + r, cardY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Status badge
+      const statusText = isDone ? '✅ Implementada' : '🔜 Em breve';
+      const statusColor = isDone ? '#4CAF50' : '#FFC107';
+      ctx.fillStyle = statusColor;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(statusText, cardX + cardW - 12, cardY + 12);
+
+      // Feature name
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(feat.name, cardX + 14, cardY + 12);
+
+      // Requested by
+      ctx.fillStyle = 'rgba(187,134,252,0.8)';
+      ctx.font = '11px monospace';
+      ctx.fillText(`Solicitada por ${feat.by}`, cardX + 14, cardY + 34);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = '11px monospace';
+      ctx.fillText(feat.desc, cardX + 14, cardY + 56);
+
+      // Decorative line at bottom of card
+      ctx.strokeStyle = isDone ? 'rgba(76,175,80,0.15)' : 'rgba(255,193,7,0.15)';
+      ctx.beginPath();
+      ctx.moveTo(cardX + 14, cardY + 78);
+      ctx.lineTo(cardX + cardW - 14, cardY + 78);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Scroll indicator (if content overflows)
+    const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * (cardH + cardGap));
+    if (maxScroll > 0) {
+      const trackH = 560;
+      const thumbH = Math.max(40, trackH * (4 / COMMUNITY_FEATURES.length));
+      const thumbY = 85 + (this.scrollOffset / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(CANVAS_WIDTH - 6, 85, 3, trackH);
+      ctx.fillStyle = 'rgba(187,134,252,0.40)';
+      ctx.fillRect(CANVAS_WIDTH - 6, thumbY, 3, thumbH);
+    }
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('ESC ou VOLTAR para sair', CX, CANVAS_HEIGHT - 6);
+  },
+};
+
 // --- Title Ranking State ---
 const titleRankingState = {
   rankingData: [],
@@ -7292,14 +8765,34 @@ function gameLoop (timestamp) {
     AudioManager.toggleMute();
   }
 
-  while (accumulator >= FIXED_DT) {
-    if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
-    if (hitStopFrames > 0) {
-      hitStopFrames--;
-    } else {
-      fsm.update(FIXED_DT);
+  // Pause toggle: P or Escape during playingState (US-003)
+  // P is also a debug shortcut (score=24500) but only when debugMode is on,
+  // so we only use P for pause when NOT in debugMode
+  if (fsm.currentState === playingState) {
+    const pPressed = consumeKey('p') || consumeKey('P');
+    const escPressed = consumeKey('Escape');
+    if (escPressed || (pPressed && !debugMode)) {
+      togglePause();
+    } else if (pPressed && debugMode && !gamePaused) {
+      // Re-inject the P press so playingState.update() debug shortcut can consume it
+      justPressed['P'] = true;
     }
-    accumulator -= FIXED_DT;
+  }
+
+  // Skip updates when paused — timers frozen, game world frozen
+  if (!gamePaused) {
+    while (accumulator >= FIXED_DT) {
+      if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
+      if (hitStopFrames > 0) {
+        hitStopFrames--;
+      } else {
+        fsm.update(FIXED_DT);
+      }
+      accumulator -= FIXED_DT;
+    }
+  } else {
+    // Drain accumulator so we don't get a burst of updates on resume
+    accumulator = 0;
   }
 
   ctx.save();
@@ -7315,6 +8808,11 @@ function gameLoop (timestamp) {
   ctx.restore();
   // Mute icon rendered outside shake transform, visible in all states
   renderMuteIcon(ctx);
+  // Gyroscope toggle + sensitivity slider (US-005) — mobile only
+  renderGyroToggle(ctx);
+  // Pause button + overlay rendered on top of everything (US-003)
+  renderPauseButton(ctx);
+  renderPauseOverlay(ctx);
   requestAnimationFrame(gameLoop);
 }
 
