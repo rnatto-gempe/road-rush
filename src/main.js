@@ -8386,21 +8386,69 @@ const gameOverState = {
 
 // --- Settings State ---
 const settingsState = {
+  // Test car state for gyro preview
+  testCarX: 0,
+  testCarVx: 0,
+  testRoadScroll: 0,
+
   onEnter () {
     rankingBtnEl.style.display = 'none';
     feedbackBtnEl.style.display = 'none';
     settingsBackBtnEl.style.display = 'block';
     positionSettingsBackBtn();
+    // Init test car at center of road
+    this.testCarX = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
+    this.testCarVx = 0;
+    this.testRoadScroll = 0;
+    // Start gyro listener for settings preview (if enabled)
+    if (gyroEnabled && isMobileDevice) {
+      if (gyroPermissionGranted) {
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+      }
+      calibrateGyroscope();
+    }
   },
 
   onExit () {
     settingsBackBtnEl.style.display = 'none';
+    // Stop gyro listener when leaving settings
+    if (gyroEnabled) {
+      window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+      gyroGamma = 0;
+    }
   },
 
   update (dt) {
     if (consumeKey('Escape')) {
       fsm.transition(titleState);
       return;
+    }
+
+    // Update test car with gyro (same physics as game)
+    if (gyroEnabled) {
+      this.testRoadScroll += 200 * dt;
+
+      let gamma = gyroGamma * gyroSensitivity;
+      if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
+        gamma = 0;
+      } else {
+        gamma = gamma > 0 ? gamma - GYRO_DEAD_ZONE : gamma + GYRO_DEAD_ZONE;
+      }
+      const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
+      gamma = Math.max(-effectiveMax, Math.min(effectiveMax, gamma));
+      const targetVx = (gamma / effectiveMax) * PLAYER_MAX_SPEED;
+      this.testCarVx += (targetVx - this.testCarVx) * 0.15;
+      if (Math.abs(this.testCarVx) < 2) this.testCarVx = 0;
+
+      this.testCarX += this.testCarVx * dt;
+      // Clamp to road
+      if (this.testCarX < ROAD_LEFT) { this.testCarX = ROAD_LEFT; this.testCarVx = 0; }
+      if (this.testCarX + PLAYER_WIDTH > ROAD_RIGHT) { this.testCarX = ROAD_RIGHT - PLAYER_WIDTH; this.testCarVx = 0; }
+    } else {
+      // Reset when gyro off
+      this.testCarX = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
+      this.testCarVx = 0;
+      this.testRoadScroll = 0;
     }
   },
 
@@ -8571,6 +8619,95 @@ const settingsState = {
       ctx.globalAlpha = 1;
     }
 
+    // --- Gyro test area: mini road with car ---
+    if (gyroEnabled) {
+      const card2Bottom = cardY + (gyroEnabled ? cardH + 50 : cardH);
+      const testY = card2Bottom + cardGap;
+      const testH = 200;
+
+      // Mini road background
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(cardX, testY, cardW, testH, 12);
+      ctx.clip();
+
+      // Road surface
+      ctx.fillStyle = '#333842';
+      ctx.fillRect(cardX, testY, cardW, testH);
+
+      // Mini road boundaries (scaled to card width)
+      const miniRoadLeft = cardX + 16;
+      const miniRoadRight = cardX + cardW - 16;
+      const miniRoadW = miniRoadRight - miniRoadLeft;
+      const miniLaneW = miniRoadW / 4;
+
+      // Road edge lines
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(miniRoadLeft, testY); ctx.lineTo(miniRoadLeft, testY + testH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(miniRoadRight, testY); ctx.lineTo(miniRoadRight, testY + testH); ctx.stroke();
+
+      // Lane dashes (scrolling)
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([12, 16]);
+      const dashOffset = this.testRoadScroll % 28;
+      for (let lane = 1; lane < 4; lane++) {
+        const lx = miniRoadLeft + lane * miniLaneW;
+        ctx.beginPath();
+        ctx.moveTo(lx, testY - dashOffset);
+        ctx.lineTo(lx, testY + testH);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      // Map test car from game coords to mini road
+      const carRatio = (this.testCarX - ROAD_LEFT) / ROAD_WIDTH;
+      const miniCarX = miniRoadLeft + carRatio * miniRoadW;
+      const miniCarY = testY + testH - 80;
+      const miniCarW = PLAYER_WIDTH * (miniRoadW / ROAD_WIDTH);
+      const miniCarH = PLAYER_HEIGHT * (miniRoadW / ROAD_WIDTH);
+
+      // Car shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(miniCarX + miniCarW / 2, miniCarY + miniCarH + 4, miniCarW * 0.5, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Car body
+      ctx.save();
+      // Slight tilt based on velocity
+      const tilt = -(this.testCarVx / PLAYER_MAX_SPEED) * 0.08;
+      ctx.translate(miniCarX + miniCarW / 2, miniCarY + miniCarH / 2);
+      ctx.rotate(tilt);
+      ctx.fillStyle = '#E53935';
+      ctx.beginPath(); ctx.roundRect(-miniCarW / 2, -miniCarH / 2, miniCarW, miniCarH, 4); ctx.fill();
+      // Windshield
+      ctx.fillStyle = 'rgba(100,180,255,0.6)';
+      ctx.fillRect(-miniCarW / 2 + 4, -miniCarH / 2 + 5, miniCarW - 8, 10);
+      // Rear window
+      ctx.fillRect(-miniCarW / 2 + 4, miniCarH / 2 - 14, miniCarW - 8, 8);
+      // Headlights
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath(); ctx.arc(-miniCarW / 2 + 5, -miniCarH / 2 + 3, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(miniCarW / 2 - 5, -miniCarH / 2 + 3, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+
+      ctx.restore(); // Restore clip
+
+      // Border around test area
+      ctx.strokeStyle = 'rgba(0,255,136,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, testY, cardW, testH, 12); ctx.stroke();
+
+      // Label
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Incline o celular para testar', CX, testY + 6);
+    }
+
     // Footer hint
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.font = '10px monospace';
@@ -8603,7 +8740,15 @@ function handleSettingsTap (cx, cy) {
   // Toggle area (top part of card)
   if (cx >= cardX && cx <= cardX + cardW && cy >= card2Y && cy <= card2Y + 60) {
     if (isMobileDevice) {
+      const wasEnabled = gyroEnabled;
       toggleGyroscope();
+      // Calibrate and reset test car when toggling on
+      if (!wasEnabled && gyroEnabled) {
+        setTimeout(() => calibrateGyroscope(), 200);
+        settingsState.testCarX = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
+        settingsState.testCarVx = 0;
+        settingsState.testRoadScroll = 0;
+      }
     }
     return true;
   }
