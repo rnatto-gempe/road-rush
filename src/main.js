@@ -8290,10 +8290,6 @@ const settingsState = {
 
     // --- Card 2: Giroscópio ---
     {
-      const gyroAvailable = gyroSupported || !isMobileDevice;
-      const dimAlpha = gyroAvailable ? 1 : 0.4;
-      ctx.globalAlpha = dimAlpha;
-
       ctx.fillStyle = 'rgba(255,255,255,0.06)';
       ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
@@ -8312,8 +8308,6 @@ const settingsState = {
       ctx.font = '10px monospace';
       if (!isMobileDevice) {
         ctx.fillText('Disponível apenas no celular', cardX + 16, cardY + 50);
-      } else if (!gyroSupported) {
-        ctx.fillText('Seu dispositivo não suporta giroscópio', cardX + 16, cardY + 50);
       } else {
         ctx.fillText('Controle inclinando o celular', cardX + 16, cardY + 50);
       }
@@ -8408,7 +8402,7 @@ function handleSettingsTap (cx, cy) {
 
   // Toggle area (top part of card)
   if (cx >= cardX && cx <= cardX + cardW && cy >= card2Y && cy <= card2Y + 60) {
-    if (isMobileDevice && gyroSupported) {
+    if (isMobileDevice) {
       toggleGyroscope();
     }
     return true;
