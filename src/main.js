@@ -4029,10 +4029,36 @@ function renderPlayer (ctx, player) {
       ctx.closePath();
       ctx.fill();
 
+      // Hull detail lines (2 horizontal white lines)
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, y + 28);
+      ctx.lineTo(cx + 10, y + 28);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - 12, y + 34);
+      ctx.lineTo(cx + 12, y + 34);
+      ctx.stroke();
+      ctx.globalAlpha = spaceAlpha;
+
       // Thruster housings (2 orange rectangles 6×10 at rear)
       ctx.fillStyle = '#FF6600';
       ctx.fillRect(cx - 10, y + height - 10, 6, 10);
       ctx.fillRect(cx + 4, y + height - 10, 6, 10);
+
+      // Thruster glow (pulsing arc behind thrusters)
+      const glowAlpha = 0.3 + 0.25 * Math.sin(gameState.elapsedTime * 6);
+      ctx.globalAlpha = glowAlpha * spaceAlpha;
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.arc(cx - 7, y + height, 6, 0, Math.PI);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 7, y + height, 6, 0, Math.PI);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
 
       ctx.restore();
     }
@@ -4863,7 +4889,7 @@ function renderTraffic (ctx) {
       ctx.lineTo(v.x + v.width - 6, v.y + v.height - 1);
       ctx.stroke();
     } else if (v.type === 'asteroid') {
-      // Asteroid: rotating irregular polygon
+      // Asteroid: rotating irregular polygon with craters and highlight
       const acx = v.x + v.width / 2;
       const acy = v.y + v.height / 2;
       ctx.save();
@@ -4885,9 +4911,29 @@ function renderTraffic (ctx) {
         ctx.lineWidth = 2;
         ctx.stroke();
       }
+      // Craters (3 fixed positions relative to center, seeded from vertex count)
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#5D4037';
+      ctx.beginPath();
+      ctx.arc(-5, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(6, 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-2, 7, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+      // Highlight arc on top
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(0, -4, 10, Math.PI, 0);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     } else if (v.type === 'fighter') {
-      // Fighter: inverted red triangle with cannons and fire trail
+      // Fighter: inverted red triangle with cyan outline, weapons, and thruster glow
       const fcx = v.x + v.width / 2;
       ctx.save();
       // Main body — inverted triangle (point at bottom)
@@ -4898,6 +4944,10 @@ function renderTraffic (ctx) {
       ctx.lineTo(v.x + v.width, v.y);              // top-right
       ctx.closePath();
       ctx.fill();
+      // Cyan outline
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
       // Darker center stripe
       ctx.fillStyle = '#C62828';
       ctx.beginPath();
@@ -4910,6 +4960,10 @@ function renderTraffic (ctx) {
       ctx.fillStyle = '#B71C1C';
       ctx.fillRect(v.x - 2, v.y + 4, 4, 8);
       ctx.fillRect(v.x + v.width - 2, v.y + 4, 4, 8);
+      // Weapon details on wing tips (thin red rectangles)
+      ctx.fillStyle = '#FF5252';
+      ctx.fillRect(v.x - 3, v.y + 2, 2, 6);
+      ctx.fillRect(v.x + v.width + 1, v.y + 2, 2, 6);
       // Fire trail at rear (2 oscillating flame rectangles)
       const ft = gameState.elapsedTime || 0;
       const flameH1 = 8 + Math.sin(ft * 10) * 3;
@@ -4922,13 +4976,38 @@ function renderTraffic (ctx) {
       // Flame 2 (right thruster)
       ctx.fillStyle = `rgb(${Math.round(255 - flameLerp2 * 0)}, ${Math.round(102 + flameLerp2 * 102)}, ${Math.round(flameLerp2 * 0)})`;
       ctx.fillRect(fcx + 2, v.y + v.height, 5, flameH2);
+      // Thruster glow (subtle cyan arc behind flames)
+      ctx.globalAlpha = 0.3 + 0.2 * Math.sin(ft * 8);
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.arc(fcx - 4.5, v.y + v.height, 5, 0, Math.PI);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(fcx + 4.5, v.y + v.height, 5, 0, Math.PI);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     } else if (v.type === 'cruiser') {
-      // Cruiser: large dark roundRect with internal panels and blinking lights
+      // Cruiser: large dark roundRect with outline, window panels, antenna, and blinking lights
       ctx.save();
       ctx.fillStyle = '#455A64';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 6);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#263238';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Antenna on top (thin line + arc at tip)
+      ctx.strokeStyle = '#78909C';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width / 2, v.y);
+      ctx.lineTo(v.x + v.width / 2, v.y - 8);
+      ctx.stroke();
+      ctx.fillStyle = '#B0BEC5';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y - 8, 2, 0, Math.PI * 2);
       ctx.fill();
       // 4 internal panel lines (horizontal)
       ctx.strokeStyle = '#37474F';
@@ -4950,6 +5029,14 @@ function renderTraffic (ctx) {
       ctx.moveTo(v.x + v.width - 8, v.y + 6);
       ctx.lineTo(v.x + v.width - 8, v.y + v.height - 6);
       ctx.stroke();
+      // Window/panel rectangles (blue, along body)
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#64B5F6';
+      ctx.fillRect(v.x + 12, v.y + 16, 8, 5);
+      ctx.fillRect(v.x + v.width - 20, v.y + 16, 8, 5);
+      ctx.fillRect(v.x + 12, v.y + 32, 8, 5);
+      ctx.fillRect(v.x + v.width - 20, v.y + 32, 8, 5);
+      ctx.globalAlpha = 1.0;
       // 2 blinking blue lights at top (toggle every 0.5s)
       const ct = gameState.elapsedTime || 0;
       const lightOn = Math.floor(ct / 0.5) % 2 === 0;

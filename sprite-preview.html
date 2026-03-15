@@ -623,10 +623,35 @@ function drawSpaceship(ctx, x, y, w, h, elapsedTime) {
   ctx.closePath();
   ctx.fill();
 
+  // Hull detail lines
+  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, y + 28);
+  ctx.lineTo(cx + 10, y + 28);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, y + 34);
+  ctx.lineTo(cx + 12, y + 34);
+  ctx.stroke();
+  ctx.globalAlpha = 1.0;
+
   // Thruster housings
   ctx.fillStyle = '#FF6600';
   ctx.fillRect(cx - 10, y + h - 10, 6, 10);
   ctx.fillRect(cx + 4, y + h - 10, 6, 10);
+
+  // Thruster glow (pulsing)
+  ctx.globalAlpha = 0.3 + 0.25 * Math.sin(elapsedTime * 6);
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.arc(cx - 7, y + h, 6, 0, Math.PI);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 7, y + h, 6, 0, Math.PI);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
 }
 
 function drawAsteroid(ctx, x, y, w, h, elapsedTime) {
@@ -646,6 +671,26 @@ function drawAsteroid(ctx, x, y, w, h, elapsedTime) {
   ctx.strokeStyle = '#5D4037';
   ctx.lineWidth = 2;
   ctx.stroke();
+  // Craters
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#5D4037';
+  ctx.beginPath();
+  ctx.arc(-5, -4, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(6, 3, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-2, 7, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  // Highlight arc on top
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(0, -4, 10, Math.PI, 0);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
   ctx.restore();
 }
 
@@ -660,6 +705,10 @@ function drawFighter(ctx, x, y, w, h, elapsedTime) {
   ctx.lineTo(x + w, y);
   ctx.closePath();
   ctx.fill();
+  // Cyan outline
+  ctx.strokeStyle = '#00E5FF';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
   // Darker center stripe
   ctx.fillStyle = '#C62828';
   ctx.beginPath();
@@ -672,6 +721,10 @@ function drawFighter(ctx, x, y, w, h, elapsedTime) {
   ctx.fillStyle = '#B71C1C';
   ctx.fillRect(x - 2, y + 4, 4, 8);
   ctx.fillRect(x + w - 2, y + 4, 4, 8);
+  // Weapon details on wing tips
+  ctx.fillStyle = '#FF5252';
+  ctx.fillRect(x - 3, y + 2, 2, 6);
+  ctx.fillRect(x + w + 1, y + 2, 2, 6);
   // Fire trail
   const ft = elapsedTime;
   const flameH1 = 8 + Math.sin(ft * 10) * 3;
@@ -682,6 +735,16 @@ function drawFighter(ctx, x, y, w, h, elapsedTime) {
   ctx.fillRect(fcx - 7, y + h, 5, flameH1);
   ctx.fillStyle = `rgb(${Math.round(255)}, ${Math.round(102 + flameLerp2 * 102)}, 0)`;
   ctx.fillRect(fcx + 2, y + h, 5, flameH2);
+  // Thruster glow
+  ctx.globalAlpha = 0.3 + 0.2 * Math.sin(ft * 8);
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.arc(fcx - 4.5, y + h, 5, 0, Math.PI);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(fcx + 4.5, y + h, 5, 0, Math.PI);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
   ctx.restore();
 }
 
@@ -690,6 +753,21 @@ function drawCruiser(ctx, x, y, w, h, elapsedTime) {
   ctx.fillStyle = '#455A64';
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Antenna on top
+  ctx.strokeStyle = '#78909C';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y);
+  ctx.lineTo(x + w / 2, y - 8);
+  ctx.stroke();
+  ctx.fillStyle = '#B0BEC5';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y - 8, 2, 0, Math.PI * 2);
   ctx.fill();
   // Panel lines
   ctx.strokeStyle = '#37474F';
@@ -711,6 +789,14 @@ function drawCruiser(ctx, x, y, w, h, elapsedTime) {
   ctx.moveTo(x + w - 8, y + 6);
   ctx.lineTo(x + w - 8, y + h - 6);
   ctx.stroke();
+  // Window/panel rectangles (blue, along body)
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = '#64B5F6';
+  ctx.fillRect(x + 12, y + 16, 8, 5);
+  ctx.fillRect(x + w - 20, y + 16, 8, 5);
+  ctx.fillRect(x + 12, y + 32, 8, 5);
+  ctx.fillRect(x + w - 20, y + 32, 8, 5);
+  ctx.globalAlpha = 1.0;
   // Blinking lights
   const lightOn = Math.floor(elapsedTime / 0.5) % 2 === 0;
   ctx.fillStyle = lightOn ? '#42A5F5' : '#1565C0';
