@@ -4475,36 +4475,133 @@ function renderTraffic (ctx) {
   for (const v of gameState.traffic) {
     if (v.scattered) continue; // scattered vehicles rendered separately with rotation
     if (v.type === 'truck') {
+      // Body with rounded rect
       ctx.fillStyle = '#616161';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 4);
       ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Cargo container (slightly different shade)
+      ctx.fillStyle = '#757575';
+      ctx.fillRect(v.x + 4, v.y + 28, v.width - 8, v.height - 36);
+      // Front grill (rectangle with 2 horizontal lines)
+      ctx.fillStyle = '#424242';
+      ctx.fillRect(v.x + 10, v.y + 4, v.width - 20, 10);
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.x + 12, v.y + 7);
+      ctx.lineTo(v.x + v.width - 12, v.y + 7);
+      ctx.moveTo(v.x + 12, v.y + 11);
+      ctx.lineTo(v.x + v.width - 12, v.y + 11);
+      ctx.stroke();
       // Cab windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-      ctx.fillRect(v.x + 8, v.y + 8, v.width - 16, 18);
-      ctx.fillRect(v.x + 8, v.y + v.height - 22, v.width - 16, 12);
+      ctx.fillRect(v.x + 8, v.y + 16, v.width - 16, 10);
+      // Headlights (2 white arcs at front)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 8, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 8, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'sedan') {
+      // Body
       ctx.fillStyle = '#1E88E5';
-      ctx.fillRect(v.x, v.y, v.width, v.height);
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 4);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Hood highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.fillRect(v.x + 8, v.y + 2, v.width - 16, 4);
+      // Windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
-      ctx.fillRect(v.x + 5, v.y + 6, v.width - 10, 14);
+      ctx.fillRect(v.x + 5, v.y + 10, v.width - 10, 14);
       ctx.fillRect(v.x + 5, v.y + v.height - 18, v.width - 10, 10);
+      // Headlights (2 white arcs at front y+4)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 6, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 6, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Tail lights (2 red arcs at rear)
+      ctx.fillStyle = '#EF5350';
+      ctx.beginPath();
+      ctx.arc(v.x + 6, v.y + v.height - 4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 6, v.y + v.height - 4, 2, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'sports') {
-      // Sleek dark-red with large windows
+      // Body with rounded rect
       ctx.fillStyle = '#B71C1C';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 8);
       ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Racing stripe (center vertical line on hood)
+      ctx.strokeStyle = '#E53935';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width / 2, v.y + 2);
+      ctx.lineTo(v.x + v.width / 2, v.y + 20);
+      ctx.stroke();
+      // Windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-      ctx.fillRect(v.x + 4, v.y + 7, v.width - 8, 12);
+      ctx.fillRect(v.x + 4, v.y + 10, v.width - 8, 12);
       ctx.fillRect(v.x + 4, v.y + v.height - 17, v.width - 8, 10);
+      // Spoiler (thin rectangle at rear)
+      ctx.fillStyle = '#880E0E';
+      ctx.fillRect(v.x + 2, v.y + v.height - 3, v.width - 4, 3);
+      // Headlights (bright white)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 5, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 5, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'moto') {
-      // Narrow yellow motorcycle
+      // Motorcycle body
       ctx.fillStyle = '#FFC107';
-      ctx.fillRect(v.x, v.y, v.width, v.height);
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 3);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
       // Rider silhouette
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+      // Helmet (semicircle on top of rider)
+      ctx.fillStyle = '#212121';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + 12, v.width / 2 - 2, Math.PI, 0);
+      ctx.fill();
+      // Headlight (white arc at front)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Tail light (red arc at rear)
+      ctx.fillStyle = '#EF5350';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + v.height - 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'bird') {
       // Bird: oval body + oscillating wings with offset, tail, eye, beak
       const bx = v.x + v.width / 2;

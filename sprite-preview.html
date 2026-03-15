@@ -134,38 +134,139 @@ function drawSprite(ctx, type, x, y, w, h, elapsedTime) {
 
 // --- Road sprites ---
 function drawSedan(ctx, x, y, w, h) {
+  // Body
   ctx.fillStyle = '#1E88E5';
-  ctx.fillRect(x, y, w, h);
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Hood highlight
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.fillRect(x + 8, y + 2, w - 16, 4);
+  // Windows
   ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
-  ctx.fillRect(x + 5, y + 6, w - 10, 14);
+  ctx.fillRect(x + 5, y + 10, w - 10, 14);
   ctx.fillRect(x + 5, y + h - 18, w - 10, 10);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 6, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 6, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Tail lights
+  ctx.fillStyle = '#EF5350';
+  ctx.beginPath();
+  ctx.arc(x + 6, y + h - 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 6, y + h - 4, 2, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawTruck(ctx, x, y, w, h) {
+  // Body
   ctx.fillStyle = '#616161';
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 4);
   ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Cargo container
+  ctx.fillStyle = '#757575';
+  ctx.fillRect(x + 4, y + 28, w - 8, h - 36);
+  // Front grill
+  ctx.fillStyle = '#424242';
+  ctx.fillRect(x + 10, y + 4, w - 20, 10);
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 12, y + 7);
+  ctx.lineTo(x + w - 12, y + 7);
+  ctx.moveTo(x + 12, y + 11);
+  ctx.lineTo(x + w - 12, y + 11);
+  ctx.stroke();
+  // Cab windows
   ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-  ctx.fillRect(x + 8, y + 8, w - 16, 18);
-  ctx.fillRect(x + 8, y + h - 22, w - 16, 12);
+  ctx.fillRect(x + 8, y + 16, w - 16, 10);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 8, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawSports(ctx, x, y, w, h) {
+  // Body
   ctx.fillStyle = '#B71C1C';
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 8);
   ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Racing stripe
+  ctx.strokeStyle = '#E53935';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y + 2);
+  ctx.lineTo(x + w / 2, y + 20);
+  ctx.stroke();
+  // Windows
   ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-  ctx.fillRect(x + 4, y + 7, w - 8, 12);
+  ctx.fillRect(x + 4, y + 10, w - 8, 12);
   ctx.fillRect(x + 4, y + h - 17, w - 8, 10);
+  // Spoiler
+  ctx.fillStyle = '#880E0E';
+  ctx.fillRect(x + 2, y + h - 3, w - 4, 3);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 5, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 5, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawMoto(ctx, x, y, w, h) {
+  // Body
   ctx.fillStyle = '#FFC107';
-  ctx.fillRect(x, y, w, h);
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 3);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Rider silhouette
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(x + 3, y + 12, w - 6, 20);
+  // Helmet
+  ctx.fillStyle = '#212121';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + 12, w / 2 - 2, Math.PI, 0);
+  ctx.fill();
+  // Headlight
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + 2, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Tail light
+  ctx.fillStyle = '#EF5350';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h - 2, 1.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // --- Sky sprites ---
