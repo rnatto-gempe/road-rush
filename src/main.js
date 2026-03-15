@@ -3587,8 +3587,8 @@ function renderRoad (ctx, scrollOffset) {
 
 function renderRoadSky (ctx, scrollOffset) {
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, '#4A90D9');
-  gradient.addColorStop(1, '#87CEEB');
+  gradient.addColorStop(0, PHASE_BG_COLORS.sky.top);
+  gradient.addColorStop(1, PHASE_BG_COLORS.sky.bottom);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   renderSkyElements(ctx, scrollOffset);
@@ -3606,7 +3606,7 @@ function renderRoadSpace (ctx, scrollOffset) {
 // Phase background color definitions for transitions
 const PHASE_BG_COLORS = {
   road:  { top: '#1A1A2E', bottom: '#16213E' },
-  sky:   { top: '#4A90D9', bottom: '#87CEEB' },
+  sky:   { top: '#1B3A5C', bottom: '#4A7FB5' },
   space: { top: '#0A0A1A', bottom: '#0D1B2A' }
 };
 
@@ -3723,7 +3723,7 @@ function renderRoadSurface (ctx, scrollOffset) {
 // Extracted: sky phase elements (clouds + corridor + borders + lanes)
 function renderSkyElements (ctx, scrollOffset) {
   const cloudScrollY = (scrollOffset * 0.3) % SKY_CLOUD_PERIOD;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
   for (const cloud of skyCloudData) {
     let cy = (cloud.yPhase + cloudScrollY) % SKY_CLOUD_PERIOD - 20;
     if (cy < -20) cy += SKY_CLOUD_PERIOD;
@@ -4029,10 +4029,36 @@ function renderPlayer (ctx, player) {
       ctx.closePath();
       ctx.fill();
 
+      // Hull detail lines (2 horizontal white lines)
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, y + 28);
+      ctx.lineTo(cx + 10, y + 28);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - 12, y + 34);
+      ctx.lineTo(cx + 12, y + 34);
+      ctx.stroke();
+      ctx.globalAlpha = spaceAlpha;
+
       // Thruster housings (2 orange rectangles 6×10 at rear)
       ctx.fillStyle = '#FF6600';
       ctx.fillRect(cx - 10, y + height - 10, 6, 10);
       ctx.fillRect(cx + 4, y + height - 10, 6, 10);
+
+      // Thruster glow (pulsing arc behind thrusters)
+      const glowAlpha = 0.3 + 0.25 * Math.sin(gameState.elapsedTime * 6);
+      ctx.globalAlpha = glowAlpha * spaceAlpha;
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.arc(cx - 7, y + height, 6, 0, Math.PI);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 7, y + height, 6, 0, Math.PI);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
 
       ctx.restore();
     }
@@ -4046,14 +4072,14 @@ function renderPlayer (ctx, player) {
     if (pt.active && pt.to === 'sky') wingScale = pt.progress;
     else if (pt.active && pt.from === 'sky') wingScale = 1 - pt.progress;
 
-    // Wind trail lines (behind car, drawn first)
-    const trailAlpha = 0.15 * wingScale;
+    // Wind trail lines (behind car, drawn first) — sinusoidal undulation, higher alpha
+    const trailAlpha = 0.25 * wingScale;
     if (trailAlpha > 0.01) {
       const scrollAnim = (gameState.scrollOffset * 0.5) % 20;
       ctx.strokeStyle = `rgba(255, 255, 255, ${trailAlpha})`;
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 3; i++) {
-        const trailX = x + 8 + i * 12;
+        const trailX = x + 8 + i * 12 + Math.sin(gameState.elapsedTime * 3 + i) * 2;
         const trailY = y + height + 2 + i * 3 + scrollAnim;
         ctx.beginPath();
         ctx.moveTo(trailX, trailY);
@@ -4062,34 +4088,71 @@ function renderPlayer (ctx, player) {
       }
     }
 
-    // Car body (same red car)
+    // Car body (same red car) with outline
     ctx.fillStyle = '#E53935';
     ctx.beginPath();
     ctx.roundRect(x, y, width, height, 6);
     ctx.fill();
+    ctx.strokeStyle = '#B71C1C';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
-    // Wings (triangular, white, alpha 0.8, 12×20px each, centered vertically on body)
+    // Wings (triangular, gradient, alpha 0.8, 12×20px each, centered vertically on body)
     if (wingScale > 0.01) {
       const wingW = 12 * wingScale;
       const wingH = 20 * wingScale;
       const wingY = y + (height - wingH) / 2;
       ctx.save();
       ctx.globalAlpha = 0.8;
-      ctx.fillStyle = '#FFFFFF';
-      // Left wing
+
+      // Left wing with gradient
+      const leftGrad = ctx.createLinearGradient(x - wingW, wingY, x, wingY);
+      leftGrad.addColorStop(0, '#CFD8DC');
+      leftGrad.addColorStop(1, '#FFFFFF');
+      ctx.fillStyle = leftGrad;
       ctx.beginPath();
       ctx.moveTo(x, wingY);
       ctx.lineTo(x - wingW, wingY + wingH / 2);
       ctx.lineTo(x, wingY + wingH);
       ctx.closePath();
       ctx.fill();
-      // Right wing
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Right wing with gradient
+      const rightGrad = ctx.createLinearGradient(x + width, wingY, x + width + wingW, wingY);
+      rightGrad.addColorStop(0, '#FFFFFF');
+      rightGrad.addColorStop(1, '#CFD8DC');
+      ctx.fillStyle = rightGrad;
       ctx.beginPath();
       ctx.moveTo(x + width, wingY);
       ctx.lineTo(x + width + wingW, wingY + wingH / 2);
       ctx.lineTo(x + width, wingY + wingH);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Ailerons/flaps at wing tips
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#B0BEC5';
+      // Left aileron
+      ctx.beginPath();
+      ctx.moveTo(x - wingW, wingY + wingH / 2);
+      ctx.lineTo(x - wingW - 4 * wingScale, wingY + wingH / 2 - 3 * wingScale);
+      ctx.lineTo(x - wingW - 4 * wingScale, wingY + wingH / 2 + 3 * wingScale);
+      ctx.closePath();
+      ctx.fill();
+      // Right aileron
+      ctx.beginPath();
+      ctx.moveTo(x + width + wingW, wingY + wingH / 2);
+      ctx.lineTo(x + width + wingW + 4 * wingScale, wingY + wingH / 2 - 3 * wingScale);
+      ctx.lineTo(x + width + wingW + 4 * wingScale, wingY + wingH / 2 + 3 * wingScale);
+      ctx.closePath();
+      ctx.fill();
+
       ctx.restore();
     }
 
@@ -4475,111 +4538,364 @@ function renderTraffic (ctx) {
   for (const v of gameState.traffic) {
     if (v.scattered) continue; // scattered vehicles rendered separately with rotation
     if (v.type === 'truck') {
+      // Body with rounded rect
       ctx.fillStyle = '#616161';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 4);
       ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Cargo container (slightly different shade)
+      ctx.fillStyle = '#757575';
+      ctx.fillRect(v.x + 4, v.y + 28, v.width - 8, v.height - 36);
+      // Front grill (rectangle with 2 horizontal lines)
+      ctx.fillStyle = '#424242';
+      ctx.fillRect(v.x + 10, v.y + 4, v.width - 20, 10);
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.x + 12, v.y + 7);
+      ctx.lineTo(v.x + v.width - 12, v.y + 7);
+      ctx.moveTo(v.x + 12, v.y + 11);
+      ctx.lineTo(v.x + v.width - 12, v.y + 11);
+      ctx.stroke();
       // Cab windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-      ctx.fillRect(v.x + 8, v.y + 8, v.width - 16, 18);
-      ctx.fillRect(v.x + 8, v.y + v.height - 22, v.width - 16, 12);
+      ctx.fillRect(v.x + 8, v.y + 16, v.width - 16, 10);
+      // Headlights (2 white arcs at front)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 8, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 8, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'sedan') {
+      // Body
       ctx.fillStyle = '#1E88E5';
-      ctx.fillRect(v.x, v.y, v.width, v.height);
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 4);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Hood highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.fillRect(v.x + 8, v.y + 2, v.width - 16, 4);
+      // Windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
-      ctx.fillRect(v.x + 5, v.y + 6, v.width - 10, 14);
+      ctx.fillRect(v.x + 5, v.y + 10, v.width - 10, 14);
       ctx.fillRect(v.x + 5, v.y + v.height - 18, v.width - 10, 10);
+      // Headlights (2 white arcs at front y+4)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 6, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 6, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Tail lights (2 red arcs at rear)
+      ctx.fillStyle = '#EF5350';
+      ctx.beginPath();
+      ctx.arc(v.x + 6, v.y + v.height - 4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 6, v.y + v.height - 4, 2, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'sports') {
-      // Sleek dark-red with large windows
+      // Body with rounded rect
       ctx.fillStyle = '#B71C1C';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 8);
       ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Racing stripe (center vertical line on hood)
+      ctx.strokeStyle = '#E53935';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width / 2, v.y + 2);
+      ctx.lineTo(v.x + v.width / 2, v.y + 20);
+      ctx.stroke();
+      // Windows
       ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
-      ctx.fillRect(v.x + 4, v.y + 7, v.width - 8, 12);
+      ctx.fillRect(v.x + 4, v.y + 10, v.width - 8, 12);
       ctx.fillRect(v.x + 4, v.y + v.height - 17, v.width - 8, 10);
+      // Spoiler (thin rectangle at rear)
+      ctx.fillStyle = '#880E0E';
+      ctx.fillRect(v.x + 2, v.y + v.height - 3, v.width - 4, 3);
+      // Headlights (bright white)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + 5, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 5, v.y + 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'moto') {
-      // Narrow yellow motorcycle
+      // Motorcycle body
       ctx.fillStyle = '#FFC107';
-      ctx.fillRect(v.x, v.y, v.width, v.height);
+      ctx.beginPath();
+      ctx.roundRect(v.x, v.y, v.width, v.height, 3);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#0D1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
       // Rider silhouette
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
+      // Helmet (semicircle on top of rider)
+      ctx.fillStyle = '#212121';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + 12, v.width / 2 - 2, Math.PI, 0);
+      ctx.fill();
+      // Headlight (white arc at front)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Tail light (red arc at rear)
+      ctx.fillStyle = '#EF5350';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y + v.height - 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'bird') {
-      // Bird: oval body + oscillating wings
+      // Bird: oval body + oscillating wings with offset, tail, eye, beak
       const bx = v.x + v.width / 2;
       const by = v.y + v.height / 2;
-      const wingAngle = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6); // ±30 degrees
-      ctx.fillStyle = '#5D4037';
-      // Body oval
+      const wingAngleL = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6);
+      const wingAngleR = Math.sin(gameState.elapsedTime * 8 + 0.3) * (Math.PI / 6);
+
+      // Tail: small triangle behind body
+      ctx.fillStyle = '#4E342E';
+      ctx.beginPath();
+      ctx.moveTo(bx, by + 6);
+      ctx.lineTo(bx - 4, by + 10);
+      ctx.lineTo(bx + 4, by + 10);
+      ctx.closePath();
+      ctx.fill();
+
+      // Body oval with darker color + outline
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
       // Left wing
       ctx.save();
       ctx.translate(bx - 8, by);
-      ctx.rotate(-wingAngle);
+      ctx.rotate(-wingAngleL);
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(-10, -6);
       ctx.lineTo(-2, 4);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
+
       // Right wing
       ctx.save();
       ctx.translate(bx + 8, by);
-      ctx.rotate(wingAngle);
+      ctx.rotate(wingAngleR);
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(10, -6);
       ctx.lineTo(2, 4);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
+
+      // Beak: small orange triangle at front
+      ctx.fillStyle = '#FF8F00';
+      ctx.beginPath();
+      ctx.moveTo(bx, by - 7);
+      ctx.lineTo(bx - 1.5, by - 4);
+      ctx.lineTo(bx + 1.5, by - 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Eye: small yellow arc
+      ctx.fillStyle = '#FFD600';
+      ctx.beginPath();
+      ctx.arc(bx + 2, by - 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'airplane') {
-      // Airplane: fuselage + horizontal wings + tail + windows
+      // Airplane: fuselage with gradient, wings with engines, tail, windows, nav lights
       const ax = v.x;
       const ay = v.y;
-      const acx = ax + v.width / 2; // center x
-      // Fuselage (narrow roundRect centered)
-      ctx.fillStyle = '#B0BEC5';
+      const acx = ax + v.width / 2;
+
+      // --- Tail (empenagem) - vertical fin + horizontal stabilizer ---
+      // Vertical fin (triangle at top of fuselage)
+      ctx.fillStyle = '#90A4AE';
+      ctx.beginPath();
+      ctx.moveTo(acx, ay - 2);
+      ctx.lineTo(acx - 6, ay + 14);
+      ctx.lineTo(acx + 6, ay + 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Horizontal stabilizer (small rectangle at tail base)
+      ctx.fillStyle = '#90A4AE';
+      ctx.fillRect(acx - 12, ay + 10, 24, 4);
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(acx - 12, ay + 10, 24, 4);
+
+      // --- Fuselage with metallic gradient ---
+      const fuseGrad = ctx.createLinearGradient(acx - 8, ay, acx + 8, ay);
+      fuseGrad.addColorStop(0, '#90A4AE');
+      fuseGrad.addColorStop(0.4, '#CFD8DC');
+      fuseGrad.addColorStop(1, '#90A4AE');
+      ctx.fillStyle = fuseGrad;
       ctx.beginPath();
       ctx.roundRect(acx - 8, ay, 16, 70, 4);
       ctx.fill();
-      // Horizontal wings (centered at ~40% from top)
-      ctx.fillRect(ax, ay + 25, 50, 10);
-      // Tail (triangle at top)
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // --- Horizontal wings with outline ---
+      const wingGrad = ctx.createLinearGradient(ax, ay + 25, ax, ay + 35);
+      wingGrad.addColorStop(0, '#CFD8DC');
+      wingGrad.addColorStop(1, '#90A4AE');
+      ctx.fillStyle = wingGrad;
       ctx.beginPath();
-      ctx.moveTo(acx, ay);
-      ctx.lineTo(acx - 10, ay + 14);
-      ctx.lineTo(acx + 10, ay + 14);
-      ctx.closePath();
+      ctx.rect(ax, ay + 25, 50, 10);
       ctx.fill();
-      // Windows (4 blue dots in a row along fuselage)
-      ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // --- Engine/turbine details on wings ---
+      ctx.fillStyle = '#455A64';
+      ctx.beginPath();
+      ctx.arc(ax + 8, ay + 30, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ax + 42, ay + 30, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- Windows (larger, brighter) ---
+      ctx.fillStyle = 'rgba(100, 181, 246, 0.9)';
       for (let wi = 0; wi < 4; wi++) {
-        ctx.fillRect(acx - 1, ay + 32 + wi * 8, 2, 2);
+        ctx.beginPath();
+        ctx.arc(acx, ay + 34 + wi * 8, 1.5, 0, Math.PI * 2);
+        ctx.fill();
       }
+
+      // --- Navigation lights (blinking) ---
+      const blinkOn = Math.floor(gameState.elapsedTime * 4) % 2 === 0;
+      // Red on left wing tip
+      ctx.fillStyle = '#FF1744';
+      ctx.globalAlpha = blinkOn ? 1.0 : 0.2;
+      ctx.beginPath();
+      ctx.arc(ax + 1, ay + 30, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Green on right wing tip
+      ctx.fillStyle = '#00E676';
+      ctx.beginPath();
+      ctx.arc(ax + 49, ay + 30, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // White on tail
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(acx, ay + 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
     } else if (v.type === 'helicopter') {
-      // Helicopter: oval body + spinning rotor + skids
+      // Helicopter: oval body with gradient + 4-blade rotor + tail boom + cockpit + nav lights + skids
       const hcx = v.x + v.width / 2;
       const hcy = v.y + v.height / 2;
-      // Body (oval)
-      ctx.fillStyle = '#78909C';
+
+      // Tail boom (behind body)
+      ctx.strokeStyle = '#546E7A';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hcx, hcy + 10);
+      ctx.lineTo(hcx, v.y + v.height - 6);
+      ctx.stroke();
+      // Tail rotor (small perpendicular line at end of boom)
+      const tailRotorY = v.y + v.height - 6;
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(hcx - 6, tailRotorY);
+      ctx.lineTo(hcx + 6, tailRotorY);
+      ctx.stroke();
+
+      // Body (oval) with gradient for volume
+      const bodyGrad = ctx.createLinearGradient(hcx, hcy - 22, hcx, hcy + 22);
+      bodyGrad.addColorStop(0, '#B0BEC5');
+      bodyGrad.addColorStop(1, '#607D8B');
+      ctx.fillStyle = bodyGrad;
       ctx.beginPath();
       ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Rotor (spinning line at top)
+      // Body outline
+      ctx.strokeStyle = '#263238';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Cockpit/window (ellipse at top of body)
+      ctx.fillStyle = 'rgba(100, 181, 246, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(hcx, hcy - 10, 10, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Navigation lights
+      const blinkOn = Math.floor(gameState.elapsedTime * 4) % 2;
+      // Red left
+      ctx.fillStyle = '#FF1744';
+      ctx.globalAlpha = blinkOn ? 1.0 : 0.3;
+      ctx.beginPath();
+      ctx.arc(v.x + 4, hcy, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Green right
+      ctx.fillStyle = '#00E676';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 4, hcy, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // White top
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(hcx, v.y + 4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+
+      // Rotor — 4 blades (2 crossed lines) with blur alpha
       const rotorAngle = gameState.elapsedTime * 15;
       ctx.save();
       ctx.translate(hcx, v.y + 8);
       ctx.rotate(rotorAngle);
-      ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(-20, 0);
       ctx.lineTo(20, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -20);
+      ctx.lineTo(0, 20);
       ctx.stroke();
       ctx.restore();
       // Rotor hub
@@ -4587,19 +4903,30 @@ function renderTraffic (ctx) {
       ctx.beginPath();
       ctx.arc(hcx, v.y + 8, 3, 0, Math.PI * 2);
       ctx.fill();
-      // Skids at base (2 horizontal lines)
-      ctx.strokeStyle = '#455A64';
+
+      // Skids — 2 horizontal lines + vertical supports
+      ctx.strokeStyle = '#37474F';
       ctx.lineWidth = 2;
+      // Vertical supports (left pair)
       ctx.beginPath();
-      ctx.moveTo(v.x + 6, v.y + v.height - 4);
-      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 4);
+      ctx.moveTo(hcx - 10, hcy + 16);
+      ctx.lineTo(hcx - 12, v.y + v.height - 4);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(v.x + 10, v.y + v.height - 1);
-      ctx.lineTo(v.x + v.width - 10, v.y + v.height - 1);
+      ctx.moveTo(hcx + 10, hcy + 16);
+      ctx.lineTo(hcx + 12, v.y + v.height - 4);
+      ctx.stroke();
+      // Horizontal skid bars
+      ctx.beginPath();
+      ctx.moveTo(v.x + 4, v.y + v.height - 4);
+      ctx.lineTo(v.x + v.width - 4, v.y + v.height - 4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + 6, v.y + v.height - 1);
+      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 1);
       ctx.stroke();
     } else if (v.type === 'asteroid') {
-      // Asteroid: rotating irregular polygon
+      // Asteroid: rotating irregular polygon with craters and highlight
       const acx = v.x + v.width / 2;
       const acy = v.y + v.height / 2;
       ctx.save();
@@ -4621,9 +4948,29 @@ function renderTraffic (ctx) {
         ctx.lineWidth = 2;
         ctx.stroke();
       }
+      // Craters (3 fixed positions relative to center, seeded from vertex count)
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#5D4037';
+      ctx.beginPath();
+      ctx.arc(-5, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(6, 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-2, 7, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+      // Highlight arc on top
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(0, -4, 10, Math.PI, 0);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     } else if (v.type === 'fighter') {
-      // Fighter: inverted red triangle with cannons and fire trail
+      // Fighter: inverted red triangle with cyan outline, weapons, and thruster glow
       const fcx = v.x + v.width / 2;
       ctx.save();
       // Main body — inverted triangle (point at bottom)
@@ -4634,6 +4981,10 @@ function renderTraffic (ctx) {
       ctx.lineTo(v.x + v.width, v.y);              // top-right
       ctx.closePath();
       ctx.fill();
+      // Cyan outline
+      ctx.strokeStyle = '#00E5FF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
       // Darker center stripe
       ctx.fillStyle = '#C62828';
       ctx.beginPath();
@@ -4646,6 +4997,10 @@ function renderTraffic (ctx) {
       ctx.fillStyle = '#B71C1C';
       ctx.fillRect(v.x - 2, v.y + 4, 4, 8);
       ctx.fillRect(v.x + v.width - 2, v.y + 4, 4, 8);
+      // Weapon details on wing tips (thin red rectangles)
+      ctx.fillStyle = '#FF5252';
+      ctx.fillRect(v.x - 3, v.y + 2, 2, 6);
+      ctx.fillRect(v.x + v.width + 1, v.y + 2, 2, 6);
       // Fire trail at rear (2 oscillating flame rectangles)
       const ft = gameState.elapsedTime || 0;
       const flameH1 = 8 + Math.sin(ft * 10) * 3;
@@ -4658,13 +5013,38 @@ function renderTraffic (ctx) {
       // Flame 2 (right thruster)
       ctx.fillStyle = `rgb(${Math.round(255 - flameLerp2 * 0)}, ${Math.round(102 + flameLerp2 * 102)}, ${Math.round(flameLerp2 * 0)})`;
       ctx.fillRect(fcx + 2, v.y + v.height, 5, flameH2);
+      // Thruster glow (subtle cyan arc behind flames)
+      ctx.globalAlpha = 0.3 + 0.2 * Math.sin(ft * 8);
+      ctx.fillStyle = '#00E5FF';
+      ctx.beginPath();
+      ctx.arc(fcx - 4.5, v.y + v.height, 5, 0, Math.PI);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(fcx + 4.5, v.y + v.height, 5, 0, Math.PI);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
       ctx.restore();
     } else if (v.type === 'cruiser') {
-      // Cruiser: large dark roundRect with internal panels and blinking lights
+      // Cruiser: large dark roundRect with outline, window panels, antenna, and blinking lights
       ctx.save();
       ctx.fillStyle = '#455A64';
       ctx.beginPath();
       ctx.roundRect(v.x, v.y, v.width, v.height, 6);
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = '#263238';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Antenna on top (thin line + arc at tip)
+      ctx.strokeStyle = '#78909C';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.x + v.width / 2, v.y);
+      ctx.lineTo(v.x + v.width / 2, v.y - 8);
+      ctx.stroke();
+      ctx.fillStyle = '#B0BEC5';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width / 2, v.y - 8, 2, 0, Math.PI * 2);
       ctx.fill();
       // 4 internal panel lines (horizontal)
       ctx.strokeStyle = '#37474F';
@@ -4686,6 +5066,14 @@ function renderTraffic (ctx) {
       ctx.moveTo(v.x + v.width - 8, v.y + 6);
       ctx.lineTo(v.x + v.width - 8, v.y + v.height - 6);
       ctx.stroke();
+      // Window/panel rectangles (blue, along body)
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#64B5F6';
+      ctx.fillRect(v.x + 12, v.y + 16, 8, 5);
+      ctx.fillRect(v.x + v.width - 20, v.y + 16, 8, 5);
+      ctx.fillRect(v.x + 12, v.y + 32, 8, 5);
+      ctx.fillRect(v.x + v.width - 20, v.y + 32, 8, 5);
+      ctx.globalAlpha = 1.0;
       // 2 blinking blue lights at top (toggle every 0.5s)
       const ct = gameState.elapsedTime || 0;
       const lightOn = Math.floor(ct / 0.5) % 2 === 0;

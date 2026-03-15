@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Road Rush - Sprite Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #fff; font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; }
+  h1 { text-align: center; margin-bottom: 30px; font-size: 28px; letter-spacing: 2px; }
+  .section { margin-bottom: 40px; }
+  .section h2 { margin-bottom: 12px; font-size: 20px; border-bottom: 1px solid #444; padding-bottom: 6px; }
+  .sprites-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end; }
+  .sprite-card { display: flex; flex-direction: column; align-items: center; }
+  .sprite-card canvas { border: 1px solid #333; border-radius: 4px; }
+  .sprite-card .label { margin-top: 6px; font-size: 13px; color: #aaa; }
+</style>
+</head>
+<body>
+<h1>ROAD RUSH — Sprite Preview</h1>
+
+<div class="section" id="road-section">
+  <h2>Road Phase</h2>
+  <div class="sprites-row" id="road-sprites"></div>
+</div>
+
+<div class="section" id="sky-section">
+  <h2>Sky Phase</h2>
+  <div class="sprites-row" id="sky-sprites"></div>
+</div>
+
+<div class="section" id="space-section">
+  <h2>Space Phase</h2>
+  <div class="sprites-row" id="space-sprites"></div>
+</div>
+
+<script>
+// --- Sprite definitions ---
+const SPRITES = {
+  road: [
+    { type: 'sedan', width: 40, height: 60, label: 'Sedan' },
+    { type: 'truck', width: 60, height: 72, label: 'Truck' },
+    { type: 'sports', width: 36, height: 58, label: 'Sports' },
+    { type: 'moto', width: 20, height: 48, label: 'Moto' },
+  ],
+  sky: [
+    { type: 'bird', width: 24, height: 20, label: 'Bird' },
+    { type: 'airplane', width: 50, height: 70, label: 'Airplane' },
+    { type: 'helicopter', width: 44, height: 50, label: 'Helicopter' },
+    { type: 'player-sky', width: 40, height: 64, label: 'Player (with wings)' },
+  ],
+  space: [
+    { type: 'spaceship', width: 40, height: 64, label: 'Player Spaceship' },
+    { type: 'asteroid', width: 36, height: 36, label: 'Asteroid' },
+    { type: 'fighter', width: 30, height: 48, label: 'Fighter' },
+    { type: 'cruiser', width: 48, height: 72, label: 'Cruiser' },
+  ],
+};
+
+const BG_COLORS = {
+  road:  { top: '#1A1A2E', bottom: '#16213E' },
+  sky:   { top: '#1B3A5C', bottom: '#4A7FB5' },
+  space: { top: '#0A0A1A', bottom: '#0D1B2A' },
+};
+
+const PADDING = 30;
+
+// Pre-generate asteroid vertices
+const asteroidVertices = [];
+const asteroidRadius = 18;
+for (let i = 0; i < 7; i++) {
+  const angle = (i / 7) * Math.PI * 2;
+  const r = asteroidRadius + (Math.sin(i * 137.5) * 4);
+  asteroidVertices.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+}
+
+// --- Create canvases ---
+function createSpriteCard(phase, sprite) {
+  const cw = sprite.width + PADDING * 2;
+  const ch = sprite.height + PADDING * 2;
+
+  const card = document.createElement('div');
+  card.className = 'sprite-card';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  canvas.dataset.type = sprite.type;
+  canvas.dataset.phase = phase;
+  canvas.dataset.spriteW = sprite.width;
+  canvas.dataset.spriteH = sprite.height;
+
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = `${sprite.label} (${sprite.width}×${sprite.height})`;
+
+  card.appendChild(canvas);
+  card.appendChild(label);
+  return card;
+}
+
+for (const phase of ['road', 'sky', 'space']) {
+  const container = document.getElementById(`${phase}-sprites`);
+  for (const sprite of SPRITES[phase]) {
+    container.appendChild(createSpriteCard(phase, sprite));
+  }
+}
+
+// --- Draw functions ---
+function drawBackground(ctx, w, h, colors) {
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, colors.top);
+  grad.addColorStop(1, colors.bottom);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function drawSprite(ctx, type, x, y, w, h, elapsedTime) {
+  switch (type) {
+    case 'sedan': drawSedan(ctx, x, y, w, h); break;
+    case 'truck': drawTruck(ctx, x, y, w, h); break;
+    case 'sports': drawSports(ctx, x, y, w, h); break;
+    case 'moto': drawMoto(ctx, x, y, w, h); break;
+    case 'bird': drawBird(ctx, x, y, w, h, elapsedTime); break;
+    case 'airplane': drawAirplane(ctx, x, y, w, h, elapsedTime); break;
+    case 'helicopter': drawHelicopter(ctx, x, y, w, h, elapsedTime); break;
+    case 'player-sky': drawPlayerSky(ctx, x, y, w, h, elapsedTime); break;
+    case 'spaceship': drawSpaceship(ctx, x, y, w, h, elapsedTime); break;
+    case 'asteroid': drawAsteroid(ctx, x, y, w, h, elapsedTime); break;
+    case 'fighter': drawFighter(ctx, x, y, w, h, elapsedTime); break;
+    case 'cruiser': drawCruiser(ctx, x, y, w, h, elapsedTime); break;
+  }
+}
+
+// --- Road sprites ---
+function drawSedan(ctx, x, y, w, h) {
+  // Body
+  ctx.fillStyle = '#1E88E5';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Hood highlight
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.fillRect(x + 8, y + 2, w - 16, 4);
+  // Windows
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+  ctx.fillRect(x + 5, y + 10, w - 10, 14);
+  ctx.fillRect(x + 5, y + h - 18, w - 10, 10);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 6, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 6, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  // Tail lights
+  ctx.fillStyle = '#EF5350';
+  ctx.beginPath();
+  ctx.arc(x + 6, y + h - 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 6, y + h - 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawTruck(ctx, x, y, w, h) {
+  // Body
+  ctx.fillStyle = '#616161';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Cargo container
+  ctx.fillStyle = '#757575';
+  ctx.fillRect(x + 4, y + 28, w - 8, h - 36);
+  // Front grill
+  ctx.fillStyle = '#424242';
+  ctx.fillRect(x + 10, y + 4, w - 20, 10);
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 12, y + 7);
+  ctx.lineTo(x + w - 12, y + 7);
+  ctx.moveTo(x + 12, y + 11);
+  ctx.lineTo(x + w - 12, y + 11);
+  ctx.stroke();
+  // Cab windows
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+  ctx.fillRect(x + 8, y + 16, w - 16, 10);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 8, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawSports(ctx, x, y, w, h) {
+  // Body
+  ctx.fillStyle = '#B71C1C';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 8);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Racing stripe
+  ctx.strokeStyle = '#E53935';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y + 2);
+  ctx.lineTo(x + w / 2, y + 20);
+  ctx.stroke();
+  // Windows
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+  ctx.fillRect(x + 4, y + 10, w - 8, 12);
+  ctx.fillRect(x + 4, y + h - 17, w - 8, 10);
+  // Spoiler
+  ctx.fillStyle = '#880E0E';
+  ctx.fillRect(x + 2, y + h - 3, w - 4, 3);
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 5, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 5, y + 4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawMoto(ctx, x, y, w, h) {
+  // Body
+  ctx.fillStyle = '#FFC107';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 3);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#0D1117';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Rider silhouette
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x + 3, y + 12, w - 6, 20);
+  // Helmet
+  ctx.fillStyle = '#212121';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + 12, w / 2 - 2, Math.PI, 0);
+  ctx.fill();
+  // Headlight
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + 2, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Tail light
+  ctx.fillStyle = '#EF5350';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h - 2, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// --- Sky sprites ---
+function drawBird(ctx, x, y, w, h, elapsedTime) {
+  const bx = x + w / 2;
+  const by = y + h / 2;
+  const wingAngleL = Math.sin(elapsedTime * 8) * (Math.PI / 6);
+  const wingAngleR = Math.sin(elapsedTime * 8 + 0.3) * (Math.PI / 6);
+
+  // Tail: small triangle behind body
+  ctx.fillStyle = '#4E342E';
+  ctx.beginPath();
+  ctx.moveTo(bx, by + 6);
+  ctx.lineTo(bx - 4, by + 10);
+  ctx.lineTo(bx + 4, by + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Body oval with darker color + outline
+  ctx.fillStyle = '#3E2723';
+  ctx.beginPath();
+  ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Left wing
+  ctx.save();
+  ctx.translate(bx - 8, by);
+  ctx.rotate(-wingAngleL);
+  ctx.fillStyle = '#3E2723';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-10, -6);
+  ctx.lineTo(-2, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+
+  // Right wing
+  ctx.save();
+  ctx.translate(bx + 8, by);
+  ctx.rotate(wingAngleR);
+  ctx.fillStyle = '#3E2723';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(10, -6);
+  ctx.lineTo(2, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+
+  // Beak: small orange triangle at front
+  ctx.fillStyle = '#FF8F00';
+  ctx.beginPath();
+  ctx.moveTo(bx, by - 7);
+  ctx.lineTo(bx - 1.5, by - 4);
+  ctx.lineTo(bx + 1.5, by - 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Eye: small yellow arc
+  ctx.fillStyle = '#FFD600';
+  ctx.beginPath();
+  ctx.arc(bx + 2, by - 3, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawAirplane(ctx, x, y, w, h, elapsedTime) {
+  const acx = x + w / 2;
+
+  // Tail - vertical fin
+  ctx.fillStyle = '#90A4AE';
+  ctx.beginPath();
+  ctx.moveTo(acx, y - 2);
+  ctx.lineTo(acx - 6, y + 14);
+  ctx.lineTo(acx + 6, y + 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Horizontal stabilizer
+  ctx.fillStyle = '#90A4AE';
+  ctx.fillRect(acx - 12, y + 10, 24, 4);
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(acx - 12, y + 10, 24, 4);
+
+  // Fuselage with metallic gradient
+  const fuseGrad = ctx.createLinearGradient(acx - 8, y, acx + 8, y);
+  fuseGrad.addColorStop(0, '#90A4AE');
+  fuseGrad.addColorStop(0.4, '#CFD8DC');
+  fuseGrad.addColorStop(1, '#90A4AE');
+  ctx.fillStyle = fuseGrad;
+  ctx.beginPath();
+  ctx.roundRect(acx - 8, y, 16, 70, 4);
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Wings with gradient + outline
+  const wingGrad = ctx.createLinearGradient(x, y + 25, x, y + 35);
+  wingGrad.addColorStop(0, '#CFD8DC');
+  wingGrad.addColorStop(1, '#90A4AE');
+  ctx.fillStyle = wingGrad;
+  ctx.beginPath();
+  ctx.rect(x, y + 25, 50, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Engine/turbine details
+  ctx.fillStyle = '#455A64';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 30, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + 42, y + 30, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Windows (larger, brighter)
+  ctx.fillStyle = 'rgba(100, 181, 246, 0.9)';
+  for (let wi = 0; wi < 4; wi++) {
+    ctx.beginPath();
+    ctx.arc(acx, y + 34 + wi * 8, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Navigation lights (blinking)
+  const blinkOn = Math.floor(elapsedTime * 4) % 2 === 0;
+  ctx.fillStyle = '#FF1744';
+  ctx.globalAlpha = blinkOn ? 1.0 : 0.2;
+  ctx.beginPath();
+  ctx.arc(x + 1, y + 30, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#00E676';
+  ctx.beginPath();
+  ctx.arc(x + 49, y + 30, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(acx, y + 2, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+}
+
+function drawHelicopter(ctx, x, y, w, h, elapsedTime) {
+  const hcx = x + w / 2;
+  const hcy = y + h / 2;
+
+  // Tail boom (behind body)
+  ctx.strokeStyle = '#546E7A';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(hcx, hcy + 10);
+  ctx.lineTo(hcx, y + h - 6);
+  ctx.stroke();
+  // Tail rotor
+  const tailRotorY = y + h - 6;
+  ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(hcx - 6, tailRotorY);
+  ctx.lineTo(hcx + 6, tailRotorY);
+  ctx.stroke();
+
+  // Body (oval) with gradient
+  const bodyGrad = ctx.createLinearGradient(hcx, hcy - 22, hcx, hcy + 22);
+  bodyGrad.addColorStop(0, '#B0BEC5');
+  bodyGrad.addColorStop(1, '#607D8B');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Body outline
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Cockpit/window
+  ctx.fillStyle = 'rgba(100, 181, 246, 0.7)';
+  ctx.beginPath();
+  ctx.ellipse(hcx, hcy - 10, 10, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Navigation lights
+  const blinkOn = Math.floor(elapsedTime * 4) % 2;
+  ctx.fillStyle = '#FF1744';
+  ctx.globalAlpha = blinkOn ? 1.0 : 0.3;
+  ctx.beginPath();
+  ctx.arc(x + 4, hcy, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#00E676';
+  ctx.beginPath();
+  ctx.arc(x + w - 4, hcy, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(hcx, y + 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+
+  // Rotor — 4 blades (2 crossed lines)
+  const rotorAngle = elapsedTime * 15;
+  ctx.save();
+  ctx.translate(hcx, y + 8);
+  ctx.rotate(rotorAngle);
+  ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-20, 0);
+  ctx.lineTo(20, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -20);
+  ctx.lineTo(0, 20);
+  ctx.stroke();
+  ctx.restore();
+  // Rotor hub
+  ctx.fillStyle = '#546E7A';
+  ctx.beginPath();
+  ctx.arc(hcx, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Skids — vertical supports + horizontal bars
+  ctx.strokeStyle = '#37474F';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(hcx - 10, hcy + 16);
+  ctx.lineTo(hcx - 12, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(hcx + 10, hcy + 16);
+  ctx.lineTo(hcx + 12, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 4, y + h - 4);
+  ctx.lineTo(x + w - 4, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 6, y + h - 1);
+  ctx.lineTo(x + w - 6, y + h - 1);
+  ctx.stroke();
+}
+
+function drawPlayerSky(ctx, x, y, w, h, elapsedTime) {
+  // Wind trail lines — sinusoidal undulation, higher alpha
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.lineWidth = 1.5;
+  const scrollAnim = (elapsedTime * 100) % 20;
+  for (let i = 0; i < 3; i++) {
+    const trailX = x + 8 + i * 12 + Math.sin(elapsedTime * 3 + i) * 2;
+    const trailY = y + h + 2 + i * 3 + scrollAnim;
+    ctx.beginPath();
+    ctx.moveTo(trailX, trailY);
+    ctx.lineTo(trailX, trailY + 20);
+    ctx.stroke();
+  }
+
+  // Car body with outline
+  ctx.fillStyle = '#E53935';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+  ctx.strokeStyle = '#B71C1C';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Wings with gradient and outline
+  const wingW = 12;
+  const wingH = 20;
+  const wingY = y + (h - wingH) / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+
+  // Left wing with gradient
+  const leftGrad = ctx.createLinearGradient(x - wingW, wingY, x, wingY);
+  leftGrad.addColorStop(0, '#CFD8DC');
+  leftGrad.addColorStop(1, '#FFFFFF');
+  ctx.fillStyle = leftGrad;
+  ctx.beginPath();
+  ctx.moveTo(x, wingY);
+  ctx.lineTo(x - wingW, wingY + wingH / 2);
+  ctx.lineTo(x, wingY + wingH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#37474F';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Right wing with gradient
+  const rightGrad = ctx.createLinearGradient(x + w, wingY, x + w + wingW, wingY);
+  rightGrad.addColorStop(0, '#FFFFFF');
+  rightGrad.addColorStop(1, '#CFD8DC');
+  ctx.fillStyle = rightGrad;
+  ctx.beginPath();
+  ctx.moveTo(x + w, wingY);
+  ctx.lineTo(x + w + wingW, wingY + wingH / 2);
+  ctx.lineTo(x + w, wingY + wingH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#37474F';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Ailerons/flaps at wing tips
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = '#B0BEC5';
+  // Left aileron
+  ctx.beginPath();
+  ctx.moveTo(x - wingW, wingY + wingH / 2);
+  ctx.lineTo(x - wingW - 4, wingY + wingH / 2 - 3);
+  ctx.lineTo(x - wingW - 4, wingY + wingH / 2 + 3);
+  ctx.closePath();
+  ctx.fill();
+  // Right aileron
+  ctx.beginPath();
+  ctx.moveTo(x + w + wingW, wingY + wingH / 2);
+  ctx.lineTo(x + w + wingW + 4, wingY + wingH / 2 - 3);
+  ctx.lineTo(x + w + wingW + 4, wingY + wingH / 2 + 3);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+
+  // Windshield
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+  ctx.fillRect(x + 6, y + 8, w - 12, 16);
+  ctx.fillRect(x + 6, y + h - 22, w - 12, 12);
+
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// --- Space sprites ---
+function drawSpaceship(ctx, x, y, w, h, elapsedTime) {
+  const cx = x + w / 2;
+
+  // Thruster flames
+  const flameTime = elapsedTime * 10;
+  const flameH1 = 8 + 6 * Math.abs(Math.sin(flameTime));
+  const flameH2 = 8 + 6 * Math.abs(Math.sin(flameTime + 2));
+  const flameLerp = 0.5 + 0.5 * Math.sin(flameTime * 1.3);
+  const flameG = Math.round(102 + (204 - 102) * flameLerp);
+  const flameColor = `rgb(255, ${flameG}, 0)`;
+
+  ctx.fillStyle = flameColor;
+  ctx.fillRect(cx - 10, y + h, 6, flameH1);
+  ctx.fillRect(cx + 4, y + h, 6, flameH2);
+
+  // Main body: triangular (cyan)
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.moveTo(cx, y);
+  ctx.lineTo(x + w - 4, y + h - 6);
+  ctx.lineTo(x + 4, y + h - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cockpit
+  ctx.fillStyle = '#0A1628';
+  ctx.beginPath();
+  ctx.moveTo(cx, y + 6);
+  ctx.lineTo(cx + 7, y + 22);
+  ctx.lineTo(cx - 7, y + 22);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cockpit glass highlight
+  ctx.fillStyle = 'rgba(100, 200, 255, 0.4)';
+  ctx.beginPath();
+  ctx.moveTo(cx, y + 8);
+  ctx.lineTo(cx + 5, y + 20);
+  ctx.lineTo(cx - 5, y + 20);
+  ctx.closePath();
+  ctx.fill();
+
+  // Hull detail lines
+  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, y + 28);
+  ctx.lineTo(cx + 10, y + 28);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, y + 34);
+  ctx.lineTo(cx + 12, y + 34);
+  ctx.stroke();
+  ctx.globalAlpha = 1.0;
+
+  // Thruster housings
+  ctx.fillStyle = '#FF6600';
+  ctx.fillRect(cx - 10, y + h - 10, 6, 10);
+  ctx.fillRect(cx + 4, y + h - 10, 6, 10);
+
+  // Thruster glow (pulsing)
+  ctx.globalAlpha = 0.3 + 0.25 * Math.sin(elapsedTime * 6);
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.arc(cx - 7, y + h, 6, 0, Math.PI);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 7, y + h, 6, 0, Math.PI);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+}
+
+function drawAsteroid(ctx, x, y, w, h, elapsedTime) {
+  const acx = x + w / 2;
+  const acy = y + h / 2;
+  ctx.save();
+  ctx.translate(acx, acy);
+  ctx.rotate(elapsedTime * 0.5);
+  ctx.fillStyle = '#795548';
+  ctx.beginPath();
+  ctx.moveTo(asteroidVertices[0].x, asteroidVertices[0].y);
+  for (let i = 1; i < asteroidVertices.length; i++) {
+    ctx.lineTo(asteroidVertices[i].x, asteroidVertices[i].y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Craters
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#5D4037';
+  ctx.beginPath();
+  ctx.arc(-5, -4, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(6, 3, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-2, 7, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  // Highlight arc on top
+  ctx.globalAlpha = 0.15;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(0, -4, 10, Math.PI, 0);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.restore();
+}
+
+function drawFighter(ctx, x, y, w, h, elapsedTime) {
+  const fcx = x + w / 2;
+  ctx.save();
+  // Main body — inverted triangle
+  ctx.fillStyle = '#F44336';
+  ctx.beginPath();
+  ctx.moveTo(fcx, y + h);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.closePath();
+  ctx.fill();
+  // Cyan outline
+  ctx.strokeStyle = '#00E5FF';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Darker center stripe
+  ctx.fillStyle = '#C62828';
+  ctx.beginPath();
+  ctx.moveTo(fcx, y + h);
+  ctx.lineTo(fcx - 5, y);
+  ctx.lineTo(fcx + 5, y);
+  ctx.closePath();
+  ctx.fill();
+  // Cannons
+  ctx.fillStyle = '#B71C1C';
+  ctx.fillRect(x - 2, y + 4, 4, 8);
+  ctx.fillRect(x + w - 2, y + 4, 4, 8);
+  // Weapon details on wing tips
+  ctx.fillStyle = '#FF5252';
+  ctx.fillRect(x - 3, y + 2, 2, 6);
+  ctx.fillRect(x + w + 1, y + 2, 2, 6);
+  // Fire trail
+  const ft = elapsedTime;
+  const flameH1 = 8 + Math.sin(ft * 10) * 3;
+  const flameH2 = 8 + Math.sin(ft * 10 + 2) * 3;
+  const flameLerp1 = (Math.sin(ft * 10) + 1) / 2;
+  const flameLerp2 = (Math.sin(ft * 10 + 2) + 1) / 2;
+  ctx.fillStyle = `rgb(${Math.round(255)}, ${Math.round(102 + flameLerp1 * 102)}, 0)`;
+  ctx.fillRect(fcx - 7, y + h, 5, flameH1);
+  ctx.fillStyle = `rgb(${Math.round(255)}, ${Math.round(102 + flameLerp2 * 102)}, 0)`;
+  ctx.fillRect(fcx + 2, y + h, 5, flameH2);
+  // Thruster glow
+  ctx.globalAlpha = 0.3 + 0.2 * Math.sin(ft * 8);
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.arc(fcx - 4.5, y + h, 5, 0, Math.PI);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(fcx + 4.5, y + h, 5, 0, Math.PI);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.restore();
+}
+
+function drawCruiser(ctx, x, y, w, h, elapsedTime) {
+  ctx.save();
+  ctx.fillStyle = '#455A64';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Antenna on top
+  ctx.strokeStyle = '#78909C';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + w / 2, y);
+  ctx.lineTo(x + w / 2, y - 8);
+  ctx.stroke();
+  ctx.fillStyle = '#B0BEC5';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y - 8, 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Panel lines
+  ctx.strokeStyle = '#37474F';
+  ctx.lineWidth = 1;
+  const panelSpacing = h / 5;
+  for (let i = 1; i <= 4; i++) {
+    const py = y + panelSpacing * i;
+    ctx.beginPath();
+    ctx.moveTo(x + 4, py);
+    ctx.lineTo(x + w - 4, py);
+    ctx.stroke();
+  }
+  // Lateral panel lines
+  ctx.beginPath();
+  ctx.moveTo(x + 8, y + 6);
+  ctx.lineTo(x + 8, y + h - 6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + w - 8, y + 6);
+  ctx.lineTo(x + w - 8, y + h - 6);
+  ctx.stroke();
+  // Window/panel rectangles (blue, along body)
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = '#64B5F6';
+  ctx.fillRect(x + 12, y + 16, 8, 5);
+  ctx.fillRect(x + w - 20, y + 16, 8, 5);
+  ctx.fillRect(x + 12, y + 32, 8, 5);
+  ctx.fillRect(x + w - 20, y + 32, 8, 5);
+  ctx.globalAlpha = 1.0;
+  // Blinking lights
+  const lightOn = Math.floor(elapsedTime / 0.5) % 2 === 0;
+  ctx.fillStyle = lightOn ? '#42A5F5' : '#1565C0';
+  ctx.globalAlpha = lightOn ? 1.0 : 0.4;
+  ctx.beginPath();
+  ctx.arc(x + w / 2 - 8, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w / 2 + 8, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.restore();
+}
+
+// --- Animation loop ---
+const allCanvases = document.querySelectorAll('canvas');
+
+function animate() {
+  const elapsedTime = performance.now() / 1000;
+
+  for (const canvas of allCanvases) {
+    const ctx = canvas.getContext('2d');
+    const phase = canvas.dataset.phase;
+    const type = canvas.dataset.type;
+    const sw = parseInt(canvas.dataset.spriteW);
+    const sh = parseInt(canvas.dataset.spriteH);
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    // Clear and draw background
+    drawBackground(ctx, cw, ch, BG_COLORS[phase]);
+
+    // Draw sprite centered
+    const sx = (cw - sw) / 2;
+    const sy = (ch - sh) / 2;
+    drawSprite(ctx, type, sx, sy, sw, sh, elapsedTime);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
