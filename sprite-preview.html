@@ -285,21 +285,73 @@ function drawAirplane(ctx, x, y, w, h, elapsedTime) {
 function drawHelicopter(ctx, x, y, w, h, elapsedTime) {
   const hcx = x + w / 2;
   const hcy = y + h / 2;
-  // Body oval
-  ctx.fillStyle = '#78909C';
+
+  // Tail boom (behind body)
+  ctx.strokeStyle = '#546E7A';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(hcx, hcy + 10);
+  ctx.lineTo(hcx, y + h - 6);
+  ctx.stroke();
+  // Tail rotor
+  const tailRotorY = y + h - 6;
+  ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(hcx - 6, tailRotorY);
+  ctx.lineTo(hcx + 6, tailRotorY);
+  ctx.stroke();
+
+  // Body (oval) with gradient
+  const bodyGrad = ctx.createLinearGradient(hcx, hcy - 22, hcx, hcy + 22);
+  bodyGrad.addColorStop(0, '#B0BEC5');
+  bodyGrad.addColorStop(1, '#607D8B');
+  ctx.fillStyle = bodyGrad;
   ctx.beginPath();
   ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
   ctx.fill();
-  // Rotor spinning
+  // Body outline
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Cockpit/window
+  ctx.fillStyle = 'rgba(100, 181, 246, 0.7)';
+  ctx.beginPath();
+  ctx.ellipse(hcx, hcy - 10, 10, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Navigation lights
+  const blinkOn = Math.floor(elapsedTime * 4) % 2;
+  ctx.fillStyle = '#FF1744';
+  ctx.globalAlpha = blinkOn ? 1.0 : 0.3;
+  ctx.beginPath();
+  ctx.arc(x + 4, hcy, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#00E676';
+  ctx.beginPath();
+  ctx.arc(x + w - 4, hcy, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(hcx, y + 4, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+
+  // Rotor — 4 blades (2 crossed lines)
   const rotorAngle = elapsedTime * 15;
   ctx.save();
   ctx.translate(hcx, y + 8);
   ctx.rotate(rotorAngle);
-  ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+  ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(-20, 0);
   ctx.lineTo(20, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -20);
+  ctx.lineTo(0, 20);
   ctx.stroke();
   ctx.restore();
   // Rotor hub
@@ -307,16 +359,25 @@ function drawHelicopter(ctx, x, y, w, h, elapsedTime) {
   ctx.beginPath();
   ctx.arc(hcx, y + 8, 3, 0, Math.PI * 2);
   ctx.fill();
-  // Skids
-  ctx.strokeStyle = '#455A64';
+
+  // Skids — vertical supports + horizontal bars
+  ctx.strokeStyle = '#37474F';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x + 6, y + h - 4);
-  ctx.lineTo(x + w - 6, y + h - 4);
+  ctx.moveTo(hcx - 10, hcy + 16);
+  ctx.lineTo(hcx - 12, y + h - 4);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(x + 10, y + h - 1);
-  ctx.lineTo(x + w - 10, y + h - 1);
+  ctx.moveTo(hcx + 10, hcy + 16);
+  ctx.lineTo(hcx + 12, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 4, y + h - 4);
+  ctx.lineTo(x + w - 4, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 6, y + h - 1);
+  ctx.lineTo(x + w - 6, y + h - 1);
   ctx.stroke();
 }
 

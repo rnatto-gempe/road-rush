@@ -4624,24 +4624,79 @@ function renderTraffic (ctx) {
       ctx.fill();
       ctx.globalAlpha = 1.0;
     } else if (v.type === 'helicopter') {
-      // Helicopter: oval body + spinning rotor + skids
+      // Helicopter: oval body with gradient + 4-blade rotor + tail boom + cockpit + nav lights + skids
       const hcx = v.x + v.width / 2;
       const hcy = v.y + v.height / 2;
-      // Body (oval)
-      ctx.fillStyle = '#78909C';
+
+      // Tail boom (behind body)
+      ctx.strokeStyle = '#546E7A';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(hcx, hcy + 10);
+      ctx.lineTo(hcx, v.y + v.height - 6);
+      ctx.stroke();
+      // Tail rotor (small perpendicular line at end of boom)
+      const tailRotorY = v.y + v.height - 6;
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(hcx - 6, tailRotorY);
+      ctx.lineTo(hcx + 6, tailRotorY);
+      ctx.stroke();
+
+      // Body (oval) with gradient for volume
+      const bodyGrad = ctx.createLinearGradient(hcx, hcy - 22, hcx, hcy + 22);
+      bodyGrad.addColorStop(0, '#B0BEC5');
+      bodyGrad.addColorStop(1, '#607D8B');
+      ctx.fillStyle = bodyGrad;
       ctx.beginPath();
       ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Rotor (spinning line at top)
+      // Body outline
+      ctx.strokeStyle = '#263238';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Cockpit/window (ellipse at top of body)
+      ctx.fillStyle = 'rgba(100, 181, 246, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(hcx, hcy - 10, 10, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Navigation lights
+      const blinkOn = Math.floor(gameState.elapsedTime * 4) % 2;
+      // Red left
+      ctx.fillStyle = '#FF1744';
+      ctx.globalAlpha = blinkOn ? 1.0 : 0.3;
+      ctx.beginPath();
+      ctx.arc(v.x + 4, hcy, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Green right
+      ctx.fillStyle = '#00E676';
+      ctx.beginPath();
+      ctx.arc(v.x + v.width - 4, hcy, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // White top
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(hcx, v.y + 4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+
+      // Rotor — 4 blades (2 crossed lines) with blur alpha
       const rotorAngle = gameState.elapsedTime * 15;
       ctx.save();
       ctx.translate(hcx, v.y + 8);
       ctx.rotate(rotorAngle);
-      ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+      ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(-20, 0);
       ctx.lineTo(20, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -20);
+      ctx.lineTo(0, 20);
       ctx.stroke();
       ctx.restore();
       // Rotor hub
@@ -4649,16 +4704,27 @@ function renderTraffic (ctx) {
       ctx.beginPath();
       ctx.arc(hcx, v.y + 8, 3, 0, Math.PI * 2);
       ctx.fill();
-      // Skids at base (2 horizontal lines)
-      ctx.strokeStyle = '#455A64';
+
+      // Skids — 2 horizontal lines + vertical supports
+      ctx.strokeStyle = '#37474F';
       ctx.lineWidth = 2;
+      // Vertical supports (left pair)
       ctx.beginPath();
-      ctx.moveTo(v.x + 6, v.y + v.height - 4);
-      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 4);
+      ctx.moveTo(hcx - 10, hcy + 16);
+      ctx.lineTo(hcx - 12, v.y + v.height - 4);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(v.x + 10, v.y + v.height - 1);
-      ctx.lineTo(v.x + v.width - 10, v.y + v.height - 1);
+      ctx.moveTo(hcx + 10, hcy + 16);
+      ctx.lineTo(hcx + 12, v.y + v.height - 4);
+      ctx.stroke();
+      // Horizontal skid bars
+      ctx.beginPath();
+      ctx.moveTo(v.x + 4, v.y + v.height - 4);
+      ctx.lineTo(v.x + v.width - 4, v.y + v.height - 4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(v.x + 6, v.y + v.height - 1);
+      ctx.lineTo(v.x + v.width - 6, v.y + v.height - 1);
       ctx.stroke();
     } else if (v.type === 'asteroid') {
       // Asteroid: rotating irregular polygon
