@@ -3114,14 +3114,31 @@ canvas.addEventListener('touchend', (e) => {
   const cx = (touch.clientX - rect.left) * scaleX;
   const cy = (touch.clientY - rect.top) * scaleY;
 
-  // Gyroscope toggle + sensitivity slider (US-005)
-  if (handleGyroToggleTap(cx, cy)) return;
+  // Pause button tap (top-right during gameplay)
+  if (fsm.currentState === playingState && !gamePaused) {
+    if (cx >= CANVAS_WIDTH - 50 && cx <= CANVAS_WIDTH - 6 && cy >= 2 && cy <= 46) {
+      togglePause();
+      return;
+    }
+  }
 
-  // Check mute icon tap first (44×44 area centered on CANVAS_WIDTH-28, 54)
-  const muteX = CANVAS_WIDTH - 28;
-  const muteY = 54;
-  if (cx >= muteX - 22 && cx <= muteX + 22 && cy >= muteY - 22 && cy <= muteY + 22) {
-    AudioManager.toggleMute();
+  // Pause overlay buttons (touch)
+  if (gamePaused) {
+    const btnX = CANVAS_WIDTH / 2;
+    // Sound toggle
+    const soundBtnY = CANVAS_HEIGHT / 2 + 20;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= soundBtnY - 22 && cy <= soundBtnY + 22) {
+      AudioManager.toggleMute();
+      return;
+    }
+    // Continuar button
+    const continueBtnY = CANVAS_HEIGHT / 2 + 80;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= continueBtnY - 22 && cy <= continueBtnY + 22) {
+      togglePause();
+      return;
+    }
+    // Any tap outside — unpause
+    togglePause();
     return;
   }
 
@@ -3199,34 +3216,32 @@ canvas.addEventListener('click', (e) => {
   // Countdown slider tap handling
   if (handleCountdownSliderTap(cx, cy)) return;
 
-  // Pause overlay "Continuar" button (US-003): centered at (200, CANVAS_HEIGHT/2+40), 180x44
+  // Pause overlay buttons (US-003)
   if (gamePaused) {
     const btnX = CANVAS_WIDTH / 2;
-    const btnY = CANVAS_HEIGHT / 2 + 40;
-    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= btnY - 22 && cy <= btnY + 22) {
+    // Sound toggle area: centered at (CX, CX/2+100), 180x44
+    const soundBtnY = CANVAS_HEIGHT / 2 + 20;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= soundBtnY - 22 && cy <= soundBtnY + 22) {
+      AudioManager.toggleMute();
+      return;
+    }
+    // "Continuar" button: centered at (CX, CX/2+80), 180x44
+    const continueBtnY = CANVAS_HEIGHT / 2 + 80;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= continueBtnY - 22 && cy <= continueBtnY + 22) {
       togglePause();
       return;
     }
-    // Any click while paused that's not the button — also unpause
+    // Any click outside buttons — also unpause
     togglePause();
     return;
   }
 
-  // Pause button area: top-right, near mute but above it (US-003)
-  // Icon centered at (CANVAS_WIDTH - 28, 20), hit area ~32x24
-  if (cx >= CANVAS_WIDTH - 44 && cx <= CANVAS_WIDTH - 12 && cy >= 4 && cy <= 36) {
+  // Pause button area: top-right (US-003)
+  // Icon centered at (CANVAS_WIDTH - 28, 24), hit area 44x44
+  if (cx >= CANVAS_WIDTH - 50 && cx <= CANVAS_WIDTH - 6 && cy >= 2 && cy <= 46) {
     togglePause();
     return;
   }
-
-  // Mute icon area: top-right corner, 32x32 region
-  if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
-    AudioManager.toggleMute();
-    return;
-  }
-
-  // Gyroscope toggle + sensitivity slider (US-005) — click handler for desktop testing
-  if (handleGyroToggleTap(cx, cy)) return;
 
   // Settings screen click handling
   if (handleSettingsTap(cx, cy)) return;
@@ -6648,19 +6663,25 @@ function renderPauseButton (ctx) {
   // Only show during playingState and not paused
   if (fsm.currentState !== playingState || gamePaused) return;
   const x = CANVAS_WIDTH - 28;
-  const y = 20;
+  const y = 24;
   ctx.save();
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = '#FFFFFF';
+  // Background circle for better visibility
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#000000';
+  ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.fill();
   // Two vertical bars ❚❚
-  ctx.fillRect(x - 6, y - 8, 4, 16);
-  ctx.fillRect(x + 2, y - 8, 4, 16);
+  ctx.globalAlpha = 0.65;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(x - 7, y - 9, 5, 18);
+  ctx.fillRect(x + 2, y - 9, 5, 18);
   ctx.restore();
 }
 
 // --- Pause Overlay (US-003) ---
 function renderPauseOverlay (ctx) {
   if (!gamePaused) return;
+
+  const CX = CANVAS_WIDTH / 2;
 
   // Dark semi-transparent overlay
   ctx.save();
@@ -6676,43 +6697,45 @@ function renderPauseOverlay (ctx) {
   ctx.shadowBlur = 20;
   ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 48px monospace';
-  ctx.fillText('PAUSADO', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+  ctx.fillText('PAUSADO', CX, CANVAS_HEIGHT / 2 - 60);
   ctx.shadowBlur = 0;
 
-  // "Continuar" button
-  const btnX = CANVAS_WIDTH / 2;
-  const btnY = CANVAS_HEIGHT / 2 + 40;
   const btnW = 180;
   const btnH = 44;
 
-  // Button background
-  ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
-  ctx.strokeStyle = '#00FFFF';
-  ctx.lineWidth = 2;
-  const r = 8;
-  ctx.beginPath();
-  ctx.moveTo(btnX - btnW / 2 + r, btnY - btnH / 2);
-  ctx.lineTo(btnX + btnW / 2 - r, btnY - btnH / 2);
-  ctx.arcTo(btnX + btnW / 2, btnY - btnH / 2, btnX + btnW / 2, btnY - btnH / 2 + r, r);
-  ctx.lineTo(btnX + btnW / 2, btnY + btnH / 2 - r);
-  ctx.arcTo(btnX + btnW / 2, btnY + btnH / 2, btnX + btnW / 2 - r, btnY + btnH / 2, r);
-  ctx.lineTo(btnX - btnW / 2 + r, btnY + btnH / 2);
-  ctx.arcTo(btnX - btnW / 2, btnY + btnH / 2, btnX - btnW / 2, btnY + btnH / 2 - r, r);
-  ctx.lineTo(btnX - btnW / 2, btnY - btnH / 2 + r);
-  ctx.arcTo(btnX - btnW / 2, btnY - btnH / 2, btnX - btnW / 2 + r, btnY - btnH / 2, r);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+  // --- Sound toggle button ---
+  {
+    const btnY = CANVAS_HEIGHT / 2 + 20;
+    const isOn = !AudioManager.muted;
+    ctx.fillStyle = isOn ? 'rgba(0, 255, 136, 0.15)' : 'rgba(255, 255, 255, 0.08)';
+    ctx.strokeStyle = isOn ? 'rgba(0, 255, 136, 0.6)' : 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.stroke();
 
-  // Button text
-  ctx.fillStyle = '#00FFFF';
-  ctx.font = 'bold 20px monospace';
-  ctx.fillText('Continuar', btnX, btnY);
+    ctx.fillStyle = isOn ? '#00FF88' : 'rgba(255,255,255,0.5)';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText(isOn ? '🔊 Som: ON' : '🔇 Som: OFF', CX, btnY);
+  }
+
+  // --- "Continuar" button ---
+  {
+    const btnY = CANVAS_HEIGHT / 2 + 80;
+    ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
+    ctx.strokeStyle = '#00FFFF';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.stroke();
+
+    ctx.fillStyle = '#00FFFF';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('Continuar', CX, btnY);
+  }
 
   // Hint text
   ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
   ctx.font = '12px monospace';
-  ctx.fillText('P / Esc para continuar', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90);
+  ctx.fillText('P / Esc para continuar', CX, CANVAS_HEIGHT / 2 + 130);
 
   ctx.restore();
 }
@@ -9145,10 +9168,6 @@ function gameLoop (timestamp) {
   }
   fsm.render(ctx);
   ctx.restore();
-  // Mute icon rendered outside shake transform, visible in all states
-  renderMuteIcon(ctx);
-  // Gyroscope toggle + sensitivity slider (US-005) — mobile only
-  renderGyroToggle(ctx);
   // Pause button + overlay rendered on top of everything (US-003)
   renderPauseButton(ctx);
   renderPauseOverlay(ctx);
