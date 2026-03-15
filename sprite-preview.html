@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Road Rush - Sprite Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #fff; font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; }
+  h1 { text-align: center; margin-bottom: 30px; font-size: 28px; letter-spacing: 2px; }
+  .section { margin-bottom: 40px; }
+  .section h2 { margin-bottom: 12px; font-size: 20px; border-bottom: 1px solid #444; padding-bottom: 6px; }
+  .sprites-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end; }
+  .sprite-card { display: flex; flex-direction: column; align-items: center; }
+  .sprite-card canvas { border: 1px solid #333; border-radius: 4px; }
+  .sprite-card .label { margin-top: 6px; font-size: 13px; color: #aaa; }
+</style>
+</head>
+<body>
+<h1>ROAD RUSH — Sprite Preview</h1>
+
+<div class="section" id="road-section">
+  <h2>Road Phase</h2>
+  <div class="sprites-row" id="road-sprites"></div>
+</div>
+
+<div class="section" id="sky-section">
+  <h2>Sky Phase</h2>
+  <div class="sprites-row" id="sky-sprites"></div>
+</div>
+
+<div class="section" id="space-section">
+  <h2>Space Phase</h2>
+  <div class="sprites-row" id="space-sprites"></div>
+</div>
+
+<script>
+// --- Sprite definitions ---
+const SPRITES = {
+  road: [
+    { type: 'sedan', width: 40, height: 60, label: 'Sedan' },
+    { type: 'truck', width: 60, height: 72, label: 'Truck' },
+    { type: 'sports', width: 36, height: 58, label: 'Sports' },
+    { type: 'moto', width: 20, height: 48, label: 'Moto' },
+  ],
+  sky: [
+    { type: 'bird', width: 24, height: 20, label: 'Bird' },
+    { type: 'airplane', width: 50, height: 70, label: 'Airplane' },
+    { type: 'helicopter', width: 44, height: 50, label: 'Helicopter' },
+    { type: 'player-sky', width: 40, height: 64, label: 'Player (with wings)' },
+  ],
+  space: [
+    { type: 'spaceship', width: 40, height: 64, label: 'Player Spaceship' },
+    { type: 'asteroid', width: 36, height: 36, label: 'Asteroid' },
+    { type: 'fighter', width: 30, height: 48, label: 'Fighter' },
+    { type: 'cruiser', width: 48, height: 72, label: 'Cruiser' },
+  ],
+};
+
+const BG_COLORS = {
+  road:  { top: '#1A1A2E', bottom: '#16213E' },
+  sky:   { top: '#4A90D9', bottom: '#87CEEB' },
+  space: { top: '#0A0A1A', bottom: '#0D1B2A' },
+};
+
+const PADDING = 30;
+
+// Pre-generate asteroid vertices
+const asteroidVertices = [];
+const asteroidRadius = 18;
+for (let i = 0; i < 7; i++) {
+  const angle = (i / 7) * Math.PI * 2;
+  const r = asteroidRadius + (Math.sin(i * 137.5) * 4);
+  asteroidVertices.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+}
+
+// --- Create canvases ---
+function createSpriteCard(phase, sprite) {
+  const cw = sprite.width + PADDING * 2;
+  const ch = sprite.height + PADDING * 2;
+
+  const card = document.createElement('div');
+  card.className = 'sprite-card';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  canvas.dataset.type = sprite.type;
+  canvas.dataset.phase = phase;
+  canvas.dataset.spriteW = sprite.width;
+  canvas.dataset.spriteH = sprite.height;
+
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = `${sprite.label} (${sprite.width}×${sprite.height})`;
+
+  card.appendChild(canvas);
+  card.appendChild(label);
+  return card;
+}
+
+for (const phase of ['road', 'sky', 'space']) {
+  const container = document.getElementById(`${phase}-sprites`);
+  for (const sprite of SPRITES[phase]) {
+    container.appendChild(createSpriteCard(phase, sprite));
+  }
+}
+
+// --- Draw functions ---
+function drawBackground(ctx, w, h, colors) {
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, colors.top);
+  grad.addColorStop(1, colors.bottom);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function drawSprite(ctx, type, x, y, w, h, elapsedTime) {
+  switch (type) {
+    case 'sedan': drawSedan(ctx, x, y, w, h); break;
+    case 'truck': drawTruck(ctx, x, y, w, h); break;
+    case 'sports': drawSports(ctx, x, y, w, h); break;
+    case 'moto': drawMoto(ctx, x, y, w, h); break;
+    case 'bird': drawBird(ctx, x, y, w, h, elapsedTime); break;
+    case 'airplane': drawAirplane(ctx, x, y, w, h, elapsedTime); break;
+    case 'helicopter': drawHelicopter(ctx, x, y, w, h, elapsedTime); break;
+    case 'player-sky': drawPlayerSky(ctx, x, y, w, h, elapsedTime); break;
+    case 'spaceship': drawSpaceship(ctx, x, y, w, h, elapsedTime); break;
+    case 'asteroid': drawAsteroid(ctx, x, y, w, h, elapsedTime); break;
+    case 'fighter': drawFighter(ctx, x, y, w, h, elapsedTime); break;
+    case 'cruiser': drawCruiser(ctx, x, y, w, h, elapsedTime); break;
+  }
+}
+
+// --- Road sprites ---
+function drawSedan(ctx, x, y, w, h) {
+  ctx.fillStyle = '#1E88E5';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+  ctx.fillRect(x + 5, y + 6, w - 10, 14);
+  ctx.fillRect(x + 5, y + h - 18, w - 10, 10);
+}
+
+function drawTruck(ctx, x, y, w, h) {
+  ctx.fillStyle = '#616161';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+  ctx.fillRect(x + 8, y + 8, w - 16, 18);
+  ctx.fillRect(x + 8, y + h - 22, w - 16, 12);
+}
+
+function drawSports(ctx, x, y, w, h) {
+  ctx.fillStyle = '#B71C1C';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 8);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.5)';
+  ctx.fillRect(x + 4, y + 7, w - 8, 12);
+  ctx.fillRect(x + 4, y + h - 17, w - 8, 10);
+}
+
+function drawMoto(ctx, x, y, w, h) {
+  ctx.fillStyle = '#FFC107';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x + 3, y + 12, w - 6, 20);
+}
+
+// --- Sky sprites ---
+function drawBird(ctx, x, y, w, h, elapsedTime) {
+  const bx = x + w / 2;
+  const by = y + h / 2;
+  const wingAngle = Math.sin(elapsedTime * 8) * (Math.PI / 6);
+  ctx.fillStyle = '#5D4037';
+  ctx.beginPath();
+  ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Left wing
+  ctx.save();
+  ctx.translate(bx - 8, by);
+  ctx.rotate(-wingAngle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-10, -6);
+  ctx.lineTo(-2, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  // Right wing
+  ctx.save();
+  ctx.translate(bx + 8, by);
+  ctx.rotate(wingAngle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(10, -6);
+  ctx.lineTo(2, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawAirplane(ctx, x, y, w, h, elapsedTime) {
+  const acx = x + w / 2;
+  // Fuselage
+  ctx.fillStyle = '#B0BEC5';
+  ctx.beginPath();
+  ctx.roundRect(acx - 8, y, 16, 70, 4);
+  ctx.fill();
+  // Horizontal wings
+  ctx.fillRect(x, y + 25, 50, 10);
+  // Tail triangle
+  ctx.beginPath();
+  ctx.moveTo(acx, y);
+  ctx.lineTo(acx - 10, y + 14);
+  ctx.lineTo(acx + 10, y + 14);
+  ctx.closePath();
+  ctx.fill();
+  // Windows
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+  for (let wi = 0; wi < 4; wi++) {
+    ctx.fillRect(acx - 1, y + 32 + wi * 8, 2, 2);
+  }
+}
+
+function drawHelicopter(ctx, x, y, w, h, elapsedTime) {
+  const hcx = x + w / 2;
+  const hcy = y + h / 2;
+  // Body oval
+  ctx.fillStyle = '#78909C';
+  ctx.beginPath();
+  ctx.ellipse(hcx, hcy, 18, 22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Rotor spinning
+  const rotorAngle = elapsedTime * 15;
+  ctx.save();
+  ctx.translate(hcx, y + 8);
+  ctx.rotate(rotorAngle);
+  ctx.strokeStyle = 'rgba(200, 200, 200, 0.8)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-20, 0);
+  ctx.lineTo(20, 0);
+  ctx.stroke();
+  ctx.restore();
+  // Rotor hub
+  ctx.fillStyle = '#546E7A';
+  ctx.beginPath();
+  ctx.arc(hcx, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  // Skids
+  ctx.strokeStyle = '#455A64';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + 6, y + h - 4);
+  ctx.lineTo(x + w - 6, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 10, y + h - 1);
+  ctx.lineTo(x + w - 10, y + h - 1);
+  ctx.stroke();
+}
+
+function drawPlayerSky(ctx, x, y, w, h, elapsedTime) {
+  // Wind trail lines
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 1.5;
+  const scrollAnim = (elapsedTime * 100) % 20;
+  for (let i = 0; i < 3; i++) {
+    const trailX = x + 8 + i * 12;
+    const trailY = y + h + 2 + i * 3 + scrollAnim;
+    ctx.beginPath();
+    ctx.moveTo(trailX, trailY);
+    ctx.lineTo(trailX, trailY + 20);
+    ctx.stroke();
+  }
+
+  // Car body
+  ctx.fillStyle = '#E53935';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+
+  // Wings
+  const wingW = 12;
+  const wingH = 20;
+  const wingY = y + (h - wingH) / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = '#FFFFFF';
+  // Left wing
+  ctx.beginPath();
+  ctx.moveTo(x, wingY);
+  ctx.lineTo(x - wingW, wingY + wingH / 2);
+  ctx.lineTo(x, wingY + wingH);
+  ctx.closePath();
+  ctx.fill();
+  // Right wing
+  ctx.beginPath();
+  ctx.moveTo(x + w, wingY);
+  ctx.lineTo(x + w + wingW, wingY + wingH / 2);
+  ctx.lineTo(x + w, wingY + wingH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // Windshield
+  ctx.fillStyle = 'rgba(100, 180, 255, 0.6)';
+  ctx.fillRect(x + 6, y + 8, w - 12, 16);
+  ctx.fillRect(x + 6, y + h - 22, w - 12, 12);
+
+  // Headlights
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w - 8, y + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// --- Space sprites ---
+function drawSpaceship(ctx, x, y, w, h, elapsedTime) {
+  const cx = x + w / 2;
+
+  // Thruster flames
+  const flameTime = elapsedTime * 10;
+  const flameH1 = 8 + 6 * Math.abs(Math.sin(flameTime));
+  const flameH2 = 8 + 6 * Math.abs(Math.sin(flameTime + 2));
+  const flameLerp = 0.5 + 0.5 * Math.sin(flameTime * 1.3);
+  const flameG = Math.round(102 + (204 - 102) * flameLerp);
+  const flameColor = `rgb(255, ${flameG}, 0)`;
+
+  ctx.fillStyle = flameColor;
+  ctx.fillRect(cx - 10, y + h, 6, flameH1);
+  ctx.fillRect(cx + 4, y + h, 6, flameH2);
+
+  // Main body: triangular (cyan)
+  ctx.fillStyle = '#00E5FF';
+  ctx.beginPath();
+  ctx.moveTo(cx, y);
+  ctx.lineTo(x + w - 4, y + h - 6);
+  ctx.lineTo(x + 4, y + h - 6);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cockpit
+  ctx.fillStyle = '#0A1628';
+  ctx.beginPath();
+  ctx.moveTo(cx, y + 6);
+  ctx.lineTo(cx + 7, y + 22);
+  ctx.lineTo(cx - 7, y + 22);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cockpit glass highlight
+  ctx.fillStyle = 'rgba(100, 200, 255, 0.4)';
+  ctx.beginPath();
+  ctx.moveTo(cx, y + 8);
+  ctx.lineTo(cx + 5, y + 20);
+  ctx.lineTo(cx - 5, y + 20);
+  ctx.closePath();
+  ctx.fill();
+
+  // Thruster housings
+  ctx.fillStyle = '#FF6600';
+  ctx.fillRect(cx - 10, y + h - 10, 6, 10);
+  ctx.fillRect(cx + 4, y + h - 10, 6, 10);
+}
+
+function drawAsteroid(ctx, x, y, w, h, elapsedTime) {
+  const acx = x + w / 2;
+  const acy = y + h / 2;
+  ctx.save();
+  ctx.translate(acx, acy);
+  ctx.rotate(elapsedTime * 0.5);
+  ctx.fillStyle = '#795548';
+  ctx.beginPath();
+  ctx.moveTo(asteroidVertices[0].x, asteroidVertices[0].y);
+  for (let i = 1; i < asteroidVertices.length; i++) {
+    ctx.lineTo(asteroidVertices[i].x, asteroidVertices[i].y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFighter(ctx, x, y, w, h, elapsedTime) {
+  const fcx = x + w / 2;
+  ctx.save();
+  // Main body — inverted triangle
+  ctx.fillStyle = '#F44336';
+  ctx.beginPath();
+  ctx.moveTo(fcx, y + h);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.closePath();
+  ctx.fill();
+  // Darker center stripe
+  ctx.fillStyle = '#C62828';
+  ctx.beginPath();
+  ctx.moveTo(fcx, y + h);
+  ctx.lineTo(fcx - 5, y);
+  ctx.lineTo(fcx + 5, y);
+  ctx.closePath();
+  ctx.fill();
+  // Cannons
+  ctx.fillStyle = '#B71C1C';
+  ctx.fillRect(x - 2, y + 4, 4, 8);
+  ctx.fillRect(x + w - 2, y + 4, 4, 8);
+  // Fire trail
+  const ft = elapsedTime;
+  const flameH1 = 8 + Math.sin(ft * 10) * 3;
+  const flameH2 = 8 + Math.sin(ft * 10 + 2) * 3;
+  const flameLerp1 = (Math.sin(ft * 10) + 1) / 2;
+  const flameLerp2 = (Math.sin(ft * 10 + 2) + 1) / 2;
+  ctx.fillStyle = `rgb(${Math.round(255)}, ${Math.round(102 + flameLerp1 * 102)}, 0)`;
+  ctx.fillRect(fcx - 7, y + h, 5, flameH1);
+  ctx.fillStyle = `rgb(${Math.round(255)}, ${Math.round(102 + flameLerp2 * 102)}, 0)`;
+  ctx.fillRect(fcx + 2, y + h, 5, flameH2);
+  ctx.restore();
+}
+
+function drawCruiser(ctx, x, y, w, h, elapsedTime) {
+  ctx.save();
+  ctx.fillStyle = '#455A64';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.fill();
+  // Panel lines
+  ctx.strokeStyle = '#37474F';
+  ctx.lineWidth = 1;
+  const panelSpacing = h / 5;
+  for (let i = 1; i <= 4; i++) {
+    const py = y + panelSpacing * i;
+    ctx.beginPath();
+    ctx.moveTo(x + 4, py);
+    ctx.lineTo(x + w - 4, py);
+    ctx.stroke();
+  }
+  // Lateral panel lines
+  ctx.beginPath();
+  ctx.moveTo(x + 8, y + 6);
+  ctx.lineTo(x + 8, y + h - 6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + w - 8, y + 6);
+  ctx.lineTo(x + w - 8, y + h - 6);
+  ctx.stroke();
+  // Blinking lights
+  const lightOn = Math.floor(elapsedTime / 0.5) % 2 === 0;
+  ctx.fillStyle = lightOn ? '#42A5F5' : '#1565C0';
+  ctx.globalAlpha = lightOn ? 1.0 : 0.4;
+  ctx.beginPath();
+  ctx.arc(x + w / 2 - 8, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + w / 2 + 8, y + 8, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.restore();
+}
+
+// --- Animation loop ---
+const allCanvases = document.querySelectorAll('canvas');
+
+function animate() {
+  const elapsedTime = performance.now() / 1000;
+
+  for (const canvas of allCanvases) {
+    const ctx = canvas.getContext('2d');
+    const phase = canvas.dataset.phase;
+    const type = canvas.dataset.type;
+    const sw = parseInt(canvas.dataset.spriteW);
+    const sh = parseInt(canvas.dataset.spriteH);
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    // Clear and draw background
+    drawBackground(ctx, cw, ch, BG_COLORS[phase]);
+
+    // Draw sprite centered
+    const sx = (cw - sw) / 2;
+    const sy = (ch - sh) / 2;
+    drawSprite(ctx, type, sx, sy, sw, sh, elapsedTime);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
