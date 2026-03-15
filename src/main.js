@@ -128,6 +128,13 @@ const SHIELD_SPAWN_MAX = 7500;          // px traveled max between spawns
 const SHIELD_COLLECT_ANIM_DURATION = 0.2;
 const SHIELD_BREAK_FLASH_DURATION = 0.3; // bright flash when shield absorbs a hit
 
+// Weapon (shooting) item constants — 2-3x rarer than shield
+const WEAPON_ITEM_RADIUS = 10;           // 20px bounding circle
+const WEAPON_SPAWN_MIN = 12000;          // px traveled min between spawns
+const WEAPON_SPAWN_MAX = 20000;          // px traveled max between spawns
+const WEAPON_COLLECT_ANIM_DURATION = 0.2;
+const WEAPON_DURATION = 3.0;             // seconds of active shooting
+
 // Speed lines: drawn in rumble-strip margins when scrollSpeed > 500
 const SPEED_LINE_PERIOD = CANVAS_HEIGHT + 80; // vertical wrap period
 const speedLineData = (() => {
@@ -851,6 +858,28 @@ const AudioManager = {
         if (endedCount === 2) gain.disconnect();
       };
     }
+  },
+
+  // Weapon pickup: rapid ascending sawtooth sweep with a punchy attack (~0.25s)
+  playWeaponPickup () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.03);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+    gain.gain.linearRampToValueAtTime(0, now + 0.25);
+    gain.connect(this.masterGain);
+
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.25);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   },
 
   // ─── Near Miss, Combo, and Bonus SFX ───
@@ -1848,6 +1877,9 @@ let chromaIntensity = 1.0;  // peak intensity: 1.0 = full (collision), 0.6 = nit
 
 // Shield state
 let shieldBreakFlash = 0; // countdown for bright border flash after shield absorbs a hit
+
+// Weapon (shooting) state
+let shootingTimer = 0; // countdown during active shooting power-up
 
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
@@ -3029,6 +3061,20 @@ function renderBloom () {
     bloomCtx.restore();
   }
 
+  // Weapon halos (red-orange)
+  bloomCtx.fillStyle = '#FF5522';
+  for (const item of gameState.weaponItems) {
+    if (item.collectAnim !== null) continue;
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.6;
+    bloomCtx.translate(item.x, item.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
   // Player headlights (front two white circles) — skip during invulnerability blink frames
   const blinkHidden = invulnTimer > 0 && Math.floor(invulnTimer / BLINK_INTERVAL) % 2 === 1;
   if (!blinkHidden) {
@@ -3357,6 +3403,9 @@ const gameState = {
   // Shield items
   shieldItems: [],
   nextShieldSpawnDistance: SHIELD_SPAWN_MIN,
+  // Weapon items
+  weaponItems: [],
+  nextWeaponSpawnDistance: WEAPON_SPAWN_MIN,
   // Phase system
   phase: 'road',
   phaseTransition: { progress: 0, active: false, from: '', to: '' },
@@ -3443,6 +3492,11 @@ function resetGameState () {
   gameState.shieldItems = [];
   gameState.nextShieldSpawnDistance = SHIELD_SPAWN_MIN + Math.random() * (SHIELD_SPAWN_MAX - SHIELD_SPAWN_MIN);
   shieldBreakFlash = 0;
+  // Reset weapon state
+  gameState.player.shooting = false;
+  shootingTimer = 0;
+  gameState.weaponItems = [];
+  gameState.nextWeaponSpawnDistance = WEAPON_SPAWN_MIN + Math.random() * (WEAPON_SPAWN_MAX - WEAPON_SPAWN_MIN);
   // Reset VFX
   explosions.length = 0;
   shockwaveRings.length = 0;
@@ -5551,6 +5605,143 @@ function renderShieldItems (ctx) {
   }
 }
 
+// --- Weapon Item ---
+
+function spawnWeaponItem () {
+  const lane = Math.floor(Math.random() * LANE_COUNT);
+  const x = ROAD_LEFT + lane * LANE_WIDTH + LANE_WIDTH / 2;
+  gameState.weaponItems.push({ x, y: -WEAPON_ITEM_RADIUS * 2, collectAnim: null });
+  gameState.nextWeaponSpawnDistance =
+    gameState.distanceTraveled + WEAPON_SPAWN_MIN + Math.random() * (WEAPON_SPAWN_MAX - WEAPON_SPAWN_MIN);
+}
+
+function updateWeaponItems (dt) {
+  const effSpeed = getEffectiveScrollSpeed();
+
+  if (gameState.distanceTraveled >= gameState.nextWeaponSpawnDistance) {
+    spawnWeaponItem();
+  }
+
+  const ph = getPlayerHitbox(gameState.player);
+
+  for (let i = gameState.weaponItems.length - 1; i >= 0; i--) {
+    const item = gameState.weaponItems[i];
+
+    if (item.collectAnim !== null) {
+      item.collectAnim.timer -= dt;
+      if (item.collectAnim.timer <= 0) gameState.weaponItems.splice(i, 1);
+      continue;
+    }
+
+    item.y += effSpeed * dt;
+
+    if (item.y > CANVAS_HEIGHT + WEAPON_ITEM_RADIUS * 2) {
+      gameState.weaponItems.splice(i, 1);
+      continue;
+    }
+
+    // Collection: player 80% hitbox vs item full bounding box
+    const itemHb = {
+      x: item.x - WEAPON_ITEM_RADIUS,
+      y: item.y - WEAPON_ITEM_RADIUS,
+      w: WEAPON_ITEM_RADIUS * 2,
+      h: WEAPON_ITEM_RADIUS * 2,
+    };
+    if (aabbOverlap(ph, itemHb)) {
+      // Stack duration: add +3s to remaining time
+      shootingTimer += WEAPON_DURATION;
+      gameState.player.shooting = true;
+      AudioManager.playWeaponPickup();
+      item.collectAnim = { timer: WEAPON_COLLECT_ANIM_DURATION };
+      spawnFloatText(item.x, item.y, '+WEAPON', '#FF6633');
+    }
+  }
+}
+
+function renderWeaponItems (ctx) {
+  // Pulsing scale: 0.9 to 1.1 over a 0.5s cycle
+  const pulseScale = 1.0 + 0.1 * Math.sin(gameState.elapsedTime * 4 * Math.PI);
+
+  for (const item of gameState.weaponItems) {
+    let scale = pulseScale;
+    let alpha = 1;
+    if (item.collectAnim !== null) {
+      const progress = 1 - item.collectAnim.timer / WEAPON_COLLECT_ANIM_DURATION;
+      scale = 1 + 0.2 * progress;
+      alpha = 1 - progress;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(item.x, item.y);
+    ctx.scale(scale, scale);
+
+    // Outer glow (red-orange)
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, WEAPON_ITEM_RADIUS * 1.8);
+    glow.addColorStop(0, 'rgba(255, 100, 50, 0.4)');
+    glow.addColorStop(1, 'rgba(255, 100, 50, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Circular body (red-orange)
+    ctx.fillStyle = '#FF5522';
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, WEAPON_ITEM_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Projectile icon: upward arrow/bullet shape
+    const r = WEAPON_ITEM_RADIUS * 0.55;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.moveTo(0, -r);                     // tip
+    ctx.lineTo(r * 0.4, -r * 0.2);         // right shoulder
+    ctx.lineTo(r * 0.4, r * 0.6);          // right base
+    ctx.lineTo(-r * 0.4, r * 0.6);         // left base
+    ctx.lineTo(-r * 0.4, -r * 0.2);        // left shoulder
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+// --- Weapon Shooting Timer HUD ---
+// Small bar below the nitro bar; visible when weapon is active.
+function renderWeaponHUD (ctx) {
+  if (shootingTimer <= 0) return;
+  const pct = Math.min(shootingTimer / WEAPON_DURATION, 1.0);
+
+  const barW = 80;
+  const barH = 5;
+  const x = CANVAS_WIDTH / 2 - barW / 2;
+  const y = CANVAS_HEIGHT - 8;
+
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  // Background track
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, barW, barH);
+  // Orange fill
+  ctx.fillStyle = '#FF6633';
+  ctx.fillRect(x, y, barW * pct, barH);
+  // Label
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#FF6633';
+  ctx.fillText('WEAPON', CANVAS_WIDTH / 2, y - 1);
+  ctx.restore();
+}
+
 // --- Floating pickup texts (US-009) ---
 // Rendered above world layer, below main HUD panel
 function renderFloatTexts (ctx) {
@@ -6209,6 +6400,16 @@ const playingState = {
     updateCoins(dt);
     updateNitroItems(dt);
     updateShieldItems(dt);
+    updateWeaponItems(dt);
+
+    // Tick weapon shooting timer
+    if (shootingTimer > 0) {
+      shootingTimer = Math.max(0, shootingTimer - dt);
+      if (shootingTimer === 0) {
+        gameState.player.shooting = false;
+      }
+    }
+
     // Tick floating pickup texts (US-009)
     for (let i = floatTexts.length - 1; i >= 0; i--) {
       floatTexts[i].y -= 60 * dt;
@@ -6422,6 +6623,7 @@ const playingState = {
     renderCoins(ctx);
     renderNitroItems(ctx);
     renderShieldItems(ctx);
+    renderWeaponItems(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
     // Capture road/traffic/player/particles layer for motion blur next frame (US-003)
@@ -6477,6 +6679,8 @@ const playingState = {
 
     // Nitro meter (bottom-center, visible during boost; beat-reactive glow) (US-008)
     renderNitroHUD(ctx);
+    // Weapon shooting meter (below nitro bar)
+    renderWeaponHUD(ctx);
 
     // Show elapsed time overlay
     ctx.font = '14px monospace';
