@@ -4538,29 +4538,91 @@ function renderTraffic (ctx) {
       ctx.fill();
       ctx.restore();
     } else if (v.type === 'airplane') {
-      // Airplane: fuselage + horizontal wings + tail + windows
+      // Airplane: fuselage with gradient, wings with engines, tail, windows, nav lights
       const ax = v.x;
       const ay = v.y;
-      const acx = ax + v.width / 2; // center x
-      // Fuselage (narrow roundRect centered)
-      ctx.fillStyle = '#B0BEC5';
+      const acx = ax + v.width / 2;
+
+      // --- Tail (empenagem) - vertical fin + horizontal stabilizer ---
+      // Vertical fin (triangle at top of fuselage)
+      ctx.fillStyle = '#90A4AE';
+      ctx.beginPath();
+      ctx.moveTo(acx, ay - 2);
+      ctx.lineTo(acx - 6, ay + 14);
+      ctx.lineTo(acx + 6, ay + 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Horizontal stabilizer (small rectangle at tail base)
+      ctx.fillStyle = '#90A4AE';
+      ctx.fillRect(acx - 12, ay + 10, 24, 4);
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(acx - 12, ay + 10, 24, 4);
+
+      // --- Fuselage with metallic gradient ---
+      const fuseGrad = ctx.createLinearGradient(acx - 8, ay, acx + 8, ay);
+      fuseGrad.addColorStop(0, '#90A4AE');
+      fuseGrad.addColorStop(0.4, '#CFD8DC');
+      fuseGrad.addColorStop(1, '#90A4AE');
+      ctx.fillStyle = fuseGrad;
       ctx.beginPath();
       ctx.roundRect(acx - 8, ay, 16, 70, 4);
       ctx.fill();
-      // Horizontal wings (centered at ~40% from top)
-      ctx.fillRect(ax, ay + 25, 50, 10);
-      // Tail (triangle at top)
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // --- Horizontal wings with outline ---
+      const wingGrad = ctx.createLinearGradient(ax, ay + 25, ax, ay + 35);
+      wingGrad.addColorStop(0, '#CFD8DC');
+      wingGrad.addColorStop(1, '#90A4AE');
+      ctx.fillStyle = wingGrad;
       ctx.beginPath();
-      ctx.moveTo(acx, ay);
-      ctx.lineTo(acx - 10, ay + 14);
-      ctx.lineTo(acx + 10, ay + 14);
-      ctx.closePath();
+      ctx.rect(ax, ay + 25, 50, 10);
       ctx.fill();
-      // Windows (4 blue dots in a row along fuselage)
-      ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+      ctx.strokeStyle = '#1A1A2E';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // --- Engine/turbine details on wings ---
+      ctx.fillStyle = '#455A64';
+      ctx.beginPath();
+      ctx.arc(ax + 8, ay + 30, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ax + 42, ay + 30, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- Windows (larger, brighter) ---
+      ctx.fillStyle = 'rgba(100, 181, 246, 0.9)';
       for (let wi = 0; wi < 4; wi++) {
-        ctx.fillRect(acx - 1, ay + 32 + wi * 8, 2, 2);
+        ctx.beginPath();
+        ctx.arc(acx, ay + 34 + wi * 8, 1.5, 0, Math.PI * 2);
+        ctx.fill();
       }
+
+      // --- Navigation lights (blinking) ---
+      const blinkOn = Math.floor(gameState.elapsedTime * 4) % 2 === 0;
+      // Red on left wing tip
+      ctx.fillStyle = '#FF1744';
+      ctx.globalAlpha = blinkOn ? 1.0 : 0.2;
+      ctx.beginPath();
+      ctx.arc(ax + 1, ay + 30, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Green on right wing tip
+      ctx.fillStyle = '#00E676';
+      ctx.beginPath();
+      ctx.arc(ax + 49, ay + 30, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // White on tail
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(acx, ay + 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
     } else if (v.type === 'helicopter') {
       // Helicopter: oval body + spinning rotor + skids
       const hcx = v.x + v.width / 2;

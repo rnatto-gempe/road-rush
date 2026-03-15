@@ -203,25 +203,83 @@ function drawBird(ctx, x, y, w, h, elapsedTime) {
 
 function drawAirplane(ctx, x, y, w, h, elapsedTime) {
   const acx = x + w / 2;
-  // Fuselage
-  ctx.fillStyle = '#B0BEC5';
+
+  // Tail - vertical fin
+  ctx.fillStyle = '#90A4AE';
+  ctx.beginPath();
+  ctx.moveTo(acx, y - 2);
+  ctx.lineTo(acx - 6, y + 14);
+  ctx.lineTo(acx + 6, y + 14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Horizontal stabilizer
+  ctx.fillStyle = '#90A4AE';
+  ctx.fillRect(acx - 12, y + 10, 24, 4);
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(acx - 12, y + 10, 24, 4);
+
+  // Fuselage with metallic gradient
+  const fuseGrad = ctx.createLinearGradient(acx - 8, y, acx + 8, y);
+  fuseGrad.addColorStop(0, '#90A4AE');
+  fuseGrad.addColorStop(0.4, '#CFD8DC');
+  fuseGrad.addColorStop(1, '#90A4AE');
+  ctx.fillStyle = fuseGrad;
   ctx.beginPath();
   ctx.roundRect(acx - 8, y, 16, 70, 4);
   ctx.fill();
-  // Horizontal wings
-  ctx.fillRect(x, y + 25, 50, 10);
-  // Tail triangle
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Wings with gradient + outline
+  const wingGrad = ctx.createLinearGradient(x, y + 25, x, y + 35);
+  wingGrad.addColorStop(0, '#CFD8DC');
+  wingGrad.addColorStop(1, '#90A4AE');
+  ctx.fillStyle = wingGrad;
   ctx.beginPath();
-  ctx.moveTo(acx, y);
-  ctx.lineTo(acx - 10, y + 14);
-  ctx.lineTo(acx + 10, y + 14);
-  ctx.closePath();
+  ctx.rect(x, y + 25, 50, 10);
   ctx.fill();
-  // Windows
-  ctx.fillStyle = 'rgba(100, 180, 255, 0.7)';
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Engine/turbine details
+  ctx.fillStyle = '#455A64';
+  ctx.beginPath();
+  ctx.arc(x + 8, y + 30, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + 42, y + 30, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Windows (larger, brighter)
+  ctx.fillStyle = 'rgba(100, 181, 246, 0.9)';
   for (let wi = 0; wi < 4; wi++) {
-    ctx.fillRect(acx - 1, y + 32 + wi * 8, 2, 2);
+    ctx.beginPath();
+    ctx.arc(acx, y + 34 + wi * 8, 1.5, 0, Math.PI * 2);
+    ctx.fill();
   }
+
+  // Navigation lights (blinking)
+  const blinkOn = Math.floor(elapsedTime * 4) % 2 === 0;
+  ctx.fillStyle = '#FF1744';
+  ctx.globalAlpha = blinkOn ? 1.0 : 0.2;
+  ctx.beginPath();
+  ctx.arc(x + 1, y + 30, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#00E676';
+  ctx.beginPath();
+  ctx.arc(x + 49, y + 30, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(acx, y + 2, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
 }
 
 function drawHelicopter(ctx, x, y, w, h, elapsedTime) {
