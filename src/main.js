@@ -5818,14 +5818,28 @@ function renderComboHUD (ctx) {
 }
 
 // --- Title State ---
+const TOAST_NEWS = [
+  { icon: '🎨', text: 'Sprites renovados em todas as fases!' },
+  { icon: '⚡', text: 'Near Miss — passe rente e ganhe pontos!' },
+  { icon: '🎁', text: 'Surpresas esperando nos 25k e 50k...' },
+];
+
 const titleState = {
   pulseTime: 0,
   scrollOffset: 0,
   carFloatTime: 0,
+  toastTimer: 0,
+  toastIndex: 0,
+  toastPhase: 'in', // 'in' | 'show' | 'out' | 'wait'
+  toastPhaseTimer: 0,
 
   onEnter () {
     this.pulseTime = 0;
     this.carFloatTime = 0;
+    this.toastTimer = 0;
+    this.toastIndex = 0;
+    this.toastPhase = 'wait';
+    this.toastPhaseTimer = 0.8; // small delay before first toast
     // Start drone if AudioContext already exists (return visits)
     if (AudioManager.ctx) {
       AudioManager.startTitleDrone();
@@ -5846,6 +5860,26 @@ const titleState = {
     this.pulseTime += dt;
     this.scrollOffset += 260 * dt;
     this.carFloatTime += dt;
+
+    // Toast news cycling
+    this.toastPhaseTimer -= dt;
+    if (this.toastPhaseTimer <= 0) {
+      if (this.toastPhase === 'wait') {
+        this.toastPhase = 'in';
+        this.toastPhaseTimer = 0.4;
+      } else if (this.toastPhase === 'in') {
+        this.toastPhase = 'show';
+        this.toastPhaseTimer = 3.0;
+      } else if (this.toastPhase === 'show') {
+        this.toastPhase = 'out';
+        this.toastPhaseTimer = 0.4;
+      } else if (this.toastPhase === 'out') {
+        this.toastIndex = (this.toastIndex + 1) % TOAST_NEWS.length;
+        this.toastPhase = 'wait';
+        this.toastPhaseTimer = 0.6;
+      }
+    }
+
     if (consumeKey('r') || consumeKey('R')) {
       fsm.transition(titleRankingState);
       return;
@@ -6038,6 +6072,63 @@ const titleState = {
     ctx.fillText(startLabel, CX, 526);
     ctx.restore();
     ctx.globalAlpha = 1;
+
+    // --- News toast ---
+    if (this.toastPhase !== 'wait') {
+      const news = TOAST_NEWS[this.toastIndex];
+      let alpha = 1;
+      let slideX = 0;
+      if (this.toastPhase === 'in') {
+        const t = 1 - this.toastPhaseTimer / 0.4;
+        alpha = t;
+        slideX = (1 - t) * 60;
+      } else if (this.toastPhase === 'out') {
+        const t = this.toastPhaseTimer / 0.4;
+        alpha = t;
+        slideX = -(1 - t) * 60;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.92;
+      const tw = 280, th = 34;
+      const tx = CX - tw / 2 + slideX;
+      const ty = 560;
+
+      // Background pill
+      ctx.fillStyle = 'rgba(20,20,40,0.82)';
+      ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 12); ctx.fill();
+
+      // Border
+      ctx.strokeStyle = 'rgba(255,215,0,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 12); ctx.stroke();
+
+      // "NOVO" badge
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('NOVO', tx + 10, ty + th / 2 - 1);
+
+      // Icon + text
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '11px monospace';
+      ctx.fillText(`${news.icon}  ${news.text}`, tx + 42, ty + th / 2);
+
+      ctx.restore();
+      ctx.textAlign = 'center';
+    }
+
+    // Dots indicator for toast position
+    {
+      const dotY = 600;
+      for (let i = 0; i < TOAST_NEWS.length; i++) {
+        ctx.fillStyle = i === this.toastIndex ? 'rgba(255,215,0,0.7)' : 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.arc(CX - (TOAST_NEWS.length - 1) * 6 + i * 12, dotY, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
     // --- Footer hint ---
     ctx.fillStyle = 'rgba(255,255,255,0.22)';

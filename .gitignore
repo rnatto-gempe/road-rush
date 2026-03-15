@@ -13,6 +13,7 @@ dist-ssr
 ralph
 tasks
 *.local
+.playwright-mcp
 
 # Editor directories and files
 .vscode/*
