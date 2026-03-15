@@ -2118,6 +2118,84 @@ function setupTouchBtn (el, key) {
 setupTouchBtn(touchLeft, 'ArrowLeft');
 setupTouchBtn(touchRight, 'ArrowRight');
 
+// --- Gyroscope Controls (US-004) ---
+let gyroEnabled = false;        // Whether gyroscope control is currently active
+let gyroSupported = false;      // Whether device supports DeviceOrientation
+let gyroPermissionGranted = false; // iOS 13+ permission state
+let gyroGamma = 0;              // Raw gamma reading (left/right tilt, -90 to +90)
+const GYRO_DEAD_ZONE = 5;       // ±5° dead zone
+const GYRO_MAX_ANGLE = 35;      // Max tilt angle for full speed
+const GYRO_SENSITIVITY = 1.0;   // Base sensitivity multiplier (adjustable in US-005)
+
+// Detect gyroscope support
+if (window.DeviceOrientationEvent) {
+  gyroSupported = true;
+}
+
+function onDeviceOrientation (e) {
+  if (e.gamma !== null && e.gamma !== undefined) {
+    gyroGamma = e.gamma; // -90 (left) to +90 (right)
+  }
+}
+
+function startGyroscope () {
+  window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  gyroEnabled = true;
+  // Hide arrow buttons when gyroscope active
+  if (isMobileDevice) {
+    touchLeft.style.display = 'none';
+    touchRight.style.display = 'none';
+    // Clear any stuck key states from touch buttons
+    keys['ArrowLeft'] = false;
+    keys['ArrowRight'] = false;
+  }
+}
+
+function stopGyroscope () {
+  window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+  gyroEnabled = false;
+  gyroGamma = 0;
+  // Restore arrow buttons if in playingState
+  if (isMobileDevice && fsm.currentState === playingState) {
+    touchLeft.style.display = 'flex';
+    touchRight.style.display = 'flex';
+  }
+}
+
+async function requestGyroPermissionAndStart () {
+  // iOS 13+ requires explicit permission request from a user gesture
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === 'granted') {
+        gyroPermissionGranted = true;
+        startGyroscope();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  } else {
+    // Non-iOS or older iOS — no permission needed
+    gyroPermissionGranted = true;
+    startGyroscope();
+    return true;
+  }
+}
+
+function toggleGyroscope () {
+  if (gyroEnabled) {
+    stopGyroscope();
+  } else {
+    if (gyroPermissionGranted) {
+      startGyroscope();
+    } else {
+      requestGyroPermissionAndStart();
+    }
+  }
+}
+
 // Letterbox scaling - preserves aspect ratio
 function resizeCanvas () {
   const windowWidth = window.innerWidth;
@@ -3984,7 +4062,26 @@ function updatePlayer (dt) {
   const left = keys['ArrowLeft'];
   const right = keys['ArrowRight'];
 
-  if (left && !right) {
+  // Gyroscope control (US-004): overrides keyboard/touch left/right
+  if (gyroEnabled) {
+    let gamma = gyroGamma * GYRO_SENSITIVITY;
+    // Apply dead zone
+    if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
+      gamma = 0;
+    } else {
+      // Remove dead zone offset and normalize
+      gamma = gamma > 0 ? gamma - GYRO_DEAD_ZONE : gamma + GYRO_DEAD_ZONE;
+    }
+    // Clamp to max angle (after dead zone removal)
+    const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
+    gamma = Math.max(-effectiveMax, Math.min(effectiveMax, gamma));
+    // Map to target velocity: -1..+1 → -MAX_SPEED..+MAX_SPEED
+    const targetVx = (gamma / effectiveMax) * PLAYER_MAX_SPEED;
+    // Smooth lerp toward target velocity
+    player.vx += (targetVx - player.vx) * 0.15;
+    // Snap to zero if very small
+    if (Math.abs(player.vx) < 2) player.vx = 0;
+  } else if (left && !right) {
     player.vx -= PLAYER_ACCEL * dt;
     if (player.vx < -PLAYER_MAX_SPEED) player.vx = -PLAYER_MAX_SPEED;
   } else if (right && !left) {
@@ -4032,8 +4129,15 @@ function updatePlayer (dt) {
     }
   }
 
-  // Camera roll: ease toward target based on lateral input (US-006)
-  const rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  // Camera roll: ease toward target based on lateral input (US-004/006)
+  let rollTarget;
+  if (gyroEnabled) {
+    // Map gyro gamma to camera roll (-2.5 to +2.5)
+    const clampedGamma = Math.max(-GYRO_MAX_ANGLE, Math.min(GYRO_MAX_ANGLE, gyroGamma));
+    rollTarget = -(clampedGamma / GYRO_MAX_ANGLE) * 2.5;
+  } else {
+    rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
+  }
   cameraRoll += (rollTarget - cameraRoll) * 0.12;
   cameraRoll = Math.max(-3, Math.min(3, cameraRoll));
 }
@@ -6713,8 +6817,14 @@ const playingState = {
     AudioManager.startArp();
     AudioManager.startBass();
     if (isMobileDevice) {
-      touchLeft.style.display = 'flex';
-      touchRight.style.display = 'flex';
+      // Show arrow buttons only if gyroscope is not active (US-004)
+      if (gyroEnabled) {
+        // Re-attach listener (was detached in onExit)
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+      } else {
+        touchLeft.style.display = 'flex';
+        touchRight.style.display = 'flex';
+      }
     }
   },
 
@@ -6725,6 +6835,12 @@ const playingState = {
       if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
         AudioManager.masterGain.gain.setTargetAtTime(1, AudioManager.ctx.currentTime, 0.01);
       }
+    }
+    // Stop gyroscope listener when leaving playing state (US-004)
+    if (gyroEnabled) {
+      window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+      gyroGamma = 0;
+      // Note: we keep gyroEnabled=true so it auto-restarts on next playingState enter
     }
     AudioManager.stopNitro();
     AudioManager.stopBeat();
