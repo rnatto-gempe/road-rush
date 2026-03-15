@@ -6733,6 +6733,9 @@ function renderComboHUD (ctx) {
 
 // --- Title State ---
 const TOAST_NEWS = [
+  { icon: '🎯', text: 'Feature solicitada por S implementada: Power-up de Tiro!' },
+  { icon: '📱', text: 'Feature solicitada por John Snow implementada: Controle por Giroscópio!' },
+  { icon: '⏸️', text: 'Novo: Pause no jogo!' },
   { icon: '🎨', text: 'Sprites renovados em todas as fases!' },
   { icon: '⚡', text: 'Near Miss — passe rente e ganhe pontos!' },
   { icon: '🎁', text: 'Surpresas esperando nos 25k e 50k...' },

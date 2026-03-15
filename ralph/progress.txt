@@ -18,6 +18,9 @@ Started: Sat Mar 14 22:30:07 -03 2026
 - Game loop is the place for global input handling (mute, pause) — runs before fsm.update()
 - HUD icons/buttons: top-right for mute/pause, top-left for gyro toggle. Hit detection in canvas click + touchend handlers
 - localStorage preferences: load on startup, save on change. Wrap in try/catch for private browsing
+- New FSM states: declare DOM button variables early (line ~2406), create elements near other buttons (~2980), define state object before titleRankingState
+- FSM state navigation from DOM buttons: use click handler with `if (fsm.currentState === targetState)` guard
+- Touch scroll for overlay states: add case in touchend handler alongside titleRankingState pattern
 
 ---
 
@@ -106,4 +109,23 @@ Started: Sat Mar 14 22:30:07 -03 2026
   - localStorage: always wrap in try/catch — private browsing mode may throw
   - When restoring preferences from localStorage, validate values are in expected range (e.g., clamp index)
   - iOS gyro permission from localStorage restore: must be re-requested each page load since it's session-scoped
+---
+
+## 2026-03-14 - US-006
+- Implemented communityFeaturesState FSM state with full canvas-rendered feature list
+- 5 community features displayed in styled cards: name, requester, description, status badge
+- Status badges: green "✅ Implementada" for done, yellow "🔜 Em breve" for upcoming
+- Features: Power-up de Tiro (S), Controle por Giroscópio (John Snow), Botão de Pause (Comunidade), Novos Power-ups (soon), Modo Multiplayer (soon)
+- DOM buttons: VOLTAR (returns to title), Sugerir Feature (opens existing feedback modal)
+- Changed feedback button on title screen to navigate to communityFeaturesState instead of opening modal directly
+- Scroll support: arrow keys on desktop, touch swipe on mobile, scroll indicator bar
+- ESC key also returns to title screen
+- Design: dark gradient bg, purple accent colors, grid lines, rounded card borders — consistent with titleRankingState style
+- Files changed: src/main.js (~256 lines added), ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - New FSM overlay states follow pattern: declare DOM vars early → create elements with positioning fn → define state object → wire touch/click handlers
+  - When repurposing an existing button (feedbackBtn), check all states where it's shown — use fsm.currentState guard in handler to differentiate behavior
+  - Canvas clip regions (ctx.save/clip/restore) are essential for scrollable content areas
+  - Rounded rect drawing requires manual quadraticCurveTo path — no built-in Canvas API for it
+  - DOM buttons positioned via canvas.getBoundingClientRect() + logical-to-screen scale factor
 ---
