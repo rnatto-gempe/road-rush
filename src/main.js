@@ -3587,8 +3587,8 @@ function renderRoad (ctx, scrollOffset) {
 
 function renderRoadSky (ctx, scrollOffset) {
   const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, '#4A90D9');
-  gradient.addColorStop(1, '#87CEEB');
+  gradient.addColorStop(0, PHASE_BG_COLORS.sky.top);
+  gradient.addColorStop(1, PHASE_BG_COLORS.sky.bottom);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   renderSkyElements(ctx, scrollOffset);
@@ -3606,7 +3606,7 @@ function renderRoadSpace (ctx, scrollOffset) {
 // Phase background color definitions for transitions
 const PHASE_BG_COLORS = {
   road:  { top: '#1A1A2E', bottom: '#16213E' },
-  sky:   { top: '#4A90D9', bottom: '#87CEEB' },
+  sky:   { top: '#1B3A5C', bottom: '#4A7FB5' },
   space: { top: '#0A0A1A', bottom: '#0D1B2A' }
 };
 
@@ -3723,7 +3723,7 @@ function renderRoadSurface (ctx, scrollOffset) {
 // Extracted: sky phase elements (clouds + corridor + borders + lanes)
 function renderSkyElements (ctx, scrollOffset) {
   const cloudScrollY = (scrollOffset * 0.3) % SKY_CLOUD_PERIOD;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
   for (const cloud of skyCloudData) {
     let cy = (cloud.yPhase + cloudScrollY) % SKY_CLOUD_PERIOD - 20;
     if (cy < -20) cy += SKY_CLOUD_PERIOD;
