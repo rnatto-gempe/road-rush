@@ -130,8 +130,8 @@ const SHIELD_BREAK_FLASH_DURATION = 0.3; // bright flash when shield absorbs a h
 
 // Weapon (shooting) item constants — 2-3x rarer than shield
 const WEAPON_ITEM_RADIUS = 10;           // 20px bounding circle
-const WEAPON_SPAWN_MIN = 12000;          // px traveled min between spawns
-const WEAPON_SPAWN_MAX = 20000;          // px traveled max between spawns
+const WEAPON_SPAWN_MIN = 7000;           // px traveled min between spawns
+const WEAPON_SPAWN_MAX = 13000;          // px traveled max between spawns
 const WEAPON_COLLECT_ANIM_DURATION = 0.2;
 const WEAPON_DURATION = 3.0;             // seconds of active shooting
 
@@ -8090,8 +8090,6 @@ const COMMUNITY_FEATURES = [
   { name: 'Power-up de Tiro', by: 'S', desc: 'Colete e destrua veículos com tiros automáticos!', status: 'done' },
   { name: 'Controle por Giroscópio', by: 'John Snow', desc: 'Controle o carro inclinando o celular!', status: 'done' },
   { name: 'Botão de Pause', by: 'Comunidade', desc: 'Pause o jogo a qualquer momento!', status: 'done' },
-  { name: 'Novos Power-ups', by: 'Comunidade', desc: 'Magnet, slow-motion e mais!', status: 'soon' },
-  { name: 'Modo Multiplayer', by: 'Comunidade', desc: 'Desafie seus amigos em tempo real!', status: 'soon' },
 ];
 
 // --- Community Features State (US-006) ---
