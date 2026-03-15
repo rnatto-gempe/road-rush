@@ -2466,6 +2466,7 @@ function resizeCanvas () {
   positionRankingBackBtn();
   positionFeedbackBtn();
   positionCommunityBtns();
+  positionRoadmapBackBtn();
   positionSettingsBackBtn();
   positionGameOverRanking();
 }
@@ -2499,6 +2500,8 @@ let feedbackBtnEl = null;
 // Declared early so positionCommunityBtns() guard works when resizeCanvas() is called below
 let communityBackBtnEl = null;
 let communitySuggestBtnEl = null;
+// Declared early so positionRoadmapBackBtn guard works when resizeCanvas() is called below
+let roadmapBackBtnEl = null;
 // Declared early so positionSettingsBackBtn guard works when resizeCanvas() is called below
 let settingsBackBtnEl = null;
 // DOM ranking container for game over screen
@@ -3133,6 +3136,41 @@ function positionCommunityBtns () {
   communitySuggestBtnEl.style.transform = 'translateX(-50%)';
 }
 
+// --- Roadmap Back Button ---
+roadmapBackBtnEl = document.createElement('button');
+roadmapBackBtnEl.id = 'roadmap-back-btn';
+roadmapBackBtnEl.textContent = 'VOLTAR';
+roadmapBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(roadmapBackBtnEl);
+
+roadmapBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === roadmapState) {
+    fsm.transition(titleState);
+  }
+});
+
+function positionRoadmapBackBtn () {
+  if (!roadmapBackBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  roadmapBackBtnEl.style.left = `${rect.left + rect.width / 2}px`;
+  roadmapBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  roadmapBackBtnEl.style.transform = 'translateX(-50%)';
+}
+
 // --- Settings Back Button ---
 settingsBackBtnEl = document.createElement('button');
 settingsBackBtnEl.id = 'settings-back-btn';
@@ -3247,6 +3285,14 @@ canvas.addEventListener('touchend', (e) => {
       fsm.transition(settingsState);
       return;
     }
+    // Roadmap flag icon tap (top-left corner)
+    const roadmapX = 30;
+    const roadmapY = 30;
+    if (cx >= roadmapX - 22 && cx <= roadmapX + 22 && cy >= roadmapY - 22 && cy <= roadmapY + 22) {
+      _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400);
+      fsm.transition(roadmapState);
+      return;
+    }
     AudioManager.init();
     AudioManager.resume();
     AudioManager.startTitleDrone();
@@ -3280,6 +3326,13 @@ canvas.addEventListener('touchend', (e) => {
       const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * 110);
       const scrollDelta = delta * 2;
       communityFeaturesState.scrollOffset = Math.max(0, Math.min(communityFeaturesState.scrollOffset + scrollDelta, maxScroll));
+    }
+  } else if (fsm.currentState === roadmapState) {
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      const maxScroll = Math.max(0, (ROADMAP_ITEMS.length - 4) * 130);
+      const scrollDelta = delta * 2;
+      roadmapState.scrollOffset = Math.max(0, Math.min(roadmapState.scrollOffset + scrollDelta, maxScroll));
     }
   }
   // No tap action during playingState
@@ -3353,6 +3406,13 @@ canvas.addEventListener('click', (e) => {
     const gearY = 30;
     if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
       fsm.transition(settingsState);
+      return;
+    }
+    // Roadmap flag icon click (top-left corner)
+    const roadmapX = 30;
+    const roadmapY = 30;
+    if (cx >= roadmapX - 22 && cx <= roadmapX + 22 && cy >= roadmapY - 22 && cy <= roadmapY + 22) {
+      fsm.transition(roadmapState);
       return;
     }
   }
@@ -7457,6 +7517,36 @@ const titleState = {
       ctx.restore();
     }
 
+    // --- Roadmap icon (top-left) ---
+    {
+      const rx = 30;
+      const ry = 30;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.translate(rx, ry);
+      ctx.strokeStyle = '#FFD700';
+      ctx.fillStyle = '#FFD700';
+      ctx.lineWidth = 1.5;
+      // Map/flag icon
+      // Flag pole
+      ctx.beginPath();
+      ctx.moveTo(-6, -12);
+      ctx.lineTo(-6, 12);
+      ctx.stroke();
+      // Flag
+      ctx.beginPath();
+      ctx.moveTo(-6, -12);
+      ctx.lineTo(8, -7);
+      ctx.lineTo(-6, -2);
+      ctx.closePath();
+      ctx.fill();
+      // Base dot
+      ctx.beginPath();
+      ctx.arc(-6, 12, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
     // --- Footer hint ---
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.font = '10px monospace';
@@ -9271,6 +9361,228 @@ const communityFeaturesState = {
     }
 
     // Footer hint
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('ESC ou VOLTAR para sair', CX, CANVAS_HEIGHT - 6);
+  },
+};
+
+// --- Roadmap Data & State ---
+const ROADMAP_ITEMS = [
+  { icon: '📳', name: 'Haptic Feedback', desc: 'Vibração contextual no mobile: pulso em near-miss, impacto em colisão, aceleração no nitro.', tag: 'IMERSÃO', color: '#4CAF50' },
+  { icon: '⏱️', name: 'Bullet Time', desc: 'Câmera lenta cinematográfica em near-misses épicos. Slow-motion com zoom e efeitos visuais.', tag: 'GAMEPLAY', color: '#2196F3' },
+  { icon: '⚡', name: 'Edge Rider', desc: 'Dirija na borda da pista para multiplicar score! Faíscas, glow dourado e risco alto.', tag: 'GAMEPLAY', color: '#FF9800' },
+  { icon: '🧩', name: 'Formações de Obstáculos', desc: 'Padrões táticos: V-Formation, Closing Walls, Snake, Shield Breaker e mais.', tag: 'GAMEPLAY', color: '#FF9800' },
+  { icon: '🎵', name: 'Música Dinâmica', desc: 'Trilha sonora em camadas que cresce com a velocidade e intensidade do jogo.', tag: 'ÁUDIO', color: '#9C27B0' },
+  { icon: '🌧️', name: 'Clima Dinâmico', desc: 'Chuva, neblina e noite que mudam visual e gameplay. Relâmpagos, faróis e tensão.', tag: 'VISUAL', color: '#00BCD4' },
+  { icon: '👾', name: 'Boss Fights', desc: 'Batalhas épicas nas transições de fase! Caminhão blindado, helicóptero e nave mãe.', tag: 'GAMEPLAY', color: '#F44336' },
+  { icon: '🏪', name: 'Upgrades Permanentes', desc: 'Loja com motor, tanque, ímã, escudo+, nitro+ e arsenal. Evolua entre partidas!', tag: 'PROGRESSÃO', color: '#FFD700' },
+  { icon: '💀', name: 'Morte Cinematográfica', desc: 'Slow-motion, fragmentos voando, tela rachando e fade dramático na colisão.', tag: 'VISUAL', color: '#E91E63' },
+  { icon: '🚗', name: 'Skins de Veículos', desc: 'Moto veloz, Monster Truck, Carro de Corrida, Táxi Dourado e Nave Experimental.', tag: 'CONTEÚDO', color: '#FF5722' },
+];
+
+const roadmapState = {
+  scrollOffset: 0,
+  pulseTime: 0,
+
+  onEnter () {
+    this.scrollOffset = 0;
+    this.pulseTime = 0;
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+    roadmapBackBtnEl.style.display = 'block';
+    positionRoadmapBackBtn();
+  },
+
+  onExit () {
+    roadmapBackBtnEl.style.display = 'none';
+  },
+
+  update (dt) {
+    this.pulseTime += dt;
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+    // Keyboard scroll
+    const cardH = 120;
+    const cardGap = 10;
+    const maxScroll = Math.max(0, (ROADMAP_ITEMS.length - 4) * (cardH + cardGap));
+    if (consumeKey('ArrowDown')) this.scrollOffset = Math.min(this.scrollOffset + cardH + cardGap, maxScroll);
+    if (consumeKey('ArrowUp')) this.scrollOffset = Math.max(this.scrollOffset - (cardH + cardGap), 0);
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Background gradient (dark navy with gold tint)
+    const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    bg.addColorStop(0, '#0A0A18');
+    bg.addColorStop(0.5, '#12122A');
+    bg.addColorStop(1, '#0A0A18');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Subtle grid pattern
+    ctx.strokeStyle = 'rgba(255,215,0,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    }
+
+    // Header glow
+    ctx.save();
+    ctx.filter = 'blur(20px)';
+    ctx.fillStyle = 'rgba(255,215,0,0.08)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 80);
+    ctx.restore();
+
+    // Title with glow
+    ctx.save();
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ROADMAP', CX, 28);
+    ctx.restore();
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.40)';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('O que vem por aí no Road Rush', CX, 52);
+
+    // Divider with diamond
+    const divY = 70;
+    ctx.strokeStyle = 'rgba(255,215,0,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(16, divY); ctx.lineTo(CX - 8, divY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(CX + 8, divY); ctx.lineTo(CANVAS_WIDTH - 16, divY); ctx.stroke();
+    ctx.fillStyle = '#FFD700';
+    ctx.save();
+    ctx.translate(CX, divY);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-3, -3, 6, 6);
+    ctx.restore();
+
+    // Clip area for cards (scrollable)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 80, CANVAS_WIDTH, 570);
+    ctx.clip();
+
+    // Feature cards
+    const cardX = 16;
+    const cardW = CANVAS_WIDTH - 32;
+    const cardH = 120;
+    const cardGap = 10;
+
+    for (let i = 0; i < ROADMAP_ITEMS.length; i++) {
+      const item = ROADMAP_ITEMS[i];
+      const cardY = 88 + i * (cardH + cardGap) - this.scrollOffset;
+
+      // Skip rendering cards fully outside clip
+      if (cardY + cardH < 80 || cardY > 660) continue;
+
+      // Card background with subtle gradient
+      const cardBg = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY);
+      cardBg.addColorStop(0, 'rgba(255,255,255,0.04)');
+      cardBg.addColorStop(1, 'rgba(255,255,255,0.01)');
+      ctx.fillStyle = cardBg;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 10); ctx.fill();
+
+      // Card border (left accent)
+      ctx.fillStyle = item.color;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, 4, cardH, [10, 0, 0, 10]); ctx.fill();
+
+      // Subtle border
+      ctx.strokeStyle = `${item.color}33`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 10); ctx.stroke();
+
+      // Number badge
+      ctx.fillStyle = `${item.color}22`;
+      ctx.beginPath(); ctx.roundRect(cardX + 12, cardY + 10, 28, 28, 6); ctx.fill();
+      ctx.fillStyle = item.color;
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(item.icon, cardX + 26, cardY + 24);
+
+      // Tag badge (top-right)
+      const tagW = ctx.measureText(item.tag).width;
+      ctx.font = 'bold 8px monospace';
+      const tw = ctx.measureText(item.tag).width + 12;
+      ctx.fillStyle = `${item.color}22`;
+      ctx.beginPath(); ctx.roundRect(cardX + cardW - tw - 10, cardY + 10, tw, 18, 4); ctx.fill();
+      ctx.fillStyle = item.color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(item.tag, cardX + cardW - tw / 2 - 10, cardY + 19);
+
+      // Feature name
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 13px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(item.name, cardX + 48, cardY + 14);
+
+      // Description (word wrap)
+      ctx.fillStyle = 'rgba(255,255,255,0.50)';
+      ctx.font = '10px monospace';
+      const maxW = cardW - 30;
+      const words = item.desc.split(' ');
+      let line = '';
+      let lineY = cardY + 46;
+      for (const word of words) {
+        const test = line + (line ? ' ' : '') + word;
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line, cardX + 14, lineY);
+          line = word;
+          lineY += 14;
+        } else {
+          line = test;
+        }
+      }
+      if (line) ctx.fillText(line, cardX + 14, lineY);
+
+      // Status indicator (pulsing dot)
+      const pulse = 0.4 + 0.6 * Math.sin(this.pulseTime * 2 + i * 0.5);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = item.color;
+      ctx.beginPath();
+      ctx.arc(cardX + cardW - 16, cardY + cardH - 16, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Status text
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('EM BREVE', cardX + cardW - 26, cardY + cardH - 16);
+    }
+
+    ctx.restore();
+
+    // Scroll indicator
+    const maxScroll = Math.max(0, (ROADMAP_ITEMS.length - 4) * (cardH + cardGap));
+    if (maxScroll > 0) {
+      const trackH = 560;
+      const thumbH = Math.max(40, trackH * (4 / ROADMAP_ITEMS.length));
+      const thumbY = 85 + (this.scrollOffset / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(CANVAS_WIDTH - 5, 85, 3, trackH);
+      ctx.fillStyle = 'rgba(255,215,0,0.35)';
+      ctx.beginPath(); ctx.roundRect(CANVAS_WIDTH - 5, thumbY, 3, thumbH, 2); ctx.fill();
+    }
+
+    // Footer
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.font = '10px monospace';
     ctx.textAlign = 'center';
