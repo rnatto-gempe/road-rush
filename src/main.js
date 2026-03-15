@@ -2118,14 +2118,43 @@ function setupTouchBtn (el, key) {
 setupTouchBtn(touchLeft, 'ArrowLeft');
 setupTouchBtn(touchRight, 'ArrowRight');
 
-// --- Gyroscope Controls (US-004) ---
+// --- Gyroscope Controls (US-004 / US-005) ---
 let gyroEnabled = false;        // Whether gyroscope control is currently active
 let gyroSupported = false;      // Whether device supports DeviceOrientation
 let gyroPermissionGranted = false; // iOS 13+ permission state
 let gyroGamma = 0;              // Raw gamma reading (left/right tilt, -90 to +90)
 const GYRO_DEAD_ZONE = 5;       // ±5° dead zone
 const GYRO_MAX_ANGLE = 35;      // Max tilt angle for full speed
-const GYRO_SENSITIVITY = 1.0;   // Base sensitivity multiplier (adjustable in US-005)
+const GYRO_SENSITIVITY_LEVELS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+let gyroSensitivityIndex = 2;   // Default index → 1.0x
+let gyroSensitivity = 1.0;      // Current sensitivity multiplier (US-005)
+
+// Load gyroscope preferences from localStorage (US-005)
+function loadGyroPrefs () {
+  try {
+    const saved = localStorage.getItem('roadrush_gyro');
+    if (saved) {
+      const prefs = JSON.parse(saved);
+      if (typeof prefs.enabled === 'boolean') gyroEnabled = prefs.enabled;
+      if (typeof prefs.sensitivityIndex === 'number') {
+        gyroSensitivityIndex = Math.max(0, Math.min(GYRO_SENSITIVITY_LEVELS.length - 1, prefs.sensitivityIndex));
+        gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      }
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function saveGyroPrefs () {
+  try {
+    localStorage.setItem('roadrush_gyro', JSON.stringify({
+      enabled: gyroEnabled,
+      sensitivityIndex: gyroSensitivityIndex
+    }));
+  } catch (_) { /* ignore */ }
+}
+
+// Load prefs on startup
+loadGyroPrefs();
 
 // Detect gyroscope support
 if (window.DeviceOrientationEvent) {
@@ -2141,6 +2170,7 @@ function onDeviceOrientation (e) {
 function startGyroscope () {
   window.addEventListener('deviceorientation', onDeviceOrientation, true);
   gyroEnabled = true;
+  saveGyroPrefs();
   // Hide arrow buttons when gyroscope active
   if (isMobileDevice) {
     touchLeft.style.display = 'none';
@@ -2155,6 +2185,7 @@ function stopGyroscope () {
   window.removeEventListener('deviceorientation', onDeviceOrientation, true);
   gyroEnabled = false;
   gyroGamma = 0;
+  saveGyroPrefs();
   // Restore arrow buttons if in playingState
   if (isMobileDevice && fsm.currentState === playingState) {
     touchLeft.style.display = 'flex';
@@ -2194,6 +2225,133 @@ function toggleGyroscope () {
       requestGyroPermissionAndStart();
     }
   }
+}
+
+// Change gyro sensitivity by delta steps (US-005)
+function changeGyroSensitivity (delta) {
+  gyroSensitivityIndex = Math.max(0, Math.min(GYRO_SENSITIVITY_LEVELS.length - 1, gyroSensitivityIndex + delta));
+  gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+  saveGyroPrefs();
+}
+
+// --- Gyroscope Toggle Button + Sensitivity Slider HUD (US-005) ---
+// Positioned at top-left of canvas, only visible on mobile during playingState
+const GYRO_BTN_X = 28;       // Center X of gyro toggle icon
+const GYRO_BTN_Y = 20;       // Center Y of gyro toggle icon
+const GYRO_SLIDER_Y = 46;    // Y position of sensitivity slider
+const GYRO_SLIDER_W = 90;    // Total slider width
+const GYRO_SLIDER_X = 10;    // Left edge of slider
+
+function renderGyroToggle (ctx) {
+  if (!isMobileDevice) return;
+  if (fsm.currentState !== playingState || gamePaused) return;
+  if (!gyroSupported) return;
+
+  ctx.save();
+
+  // Toggle button: tilted phone icon
+  const x = GYRO_BTN_X;
+  const y = GYRO_BTN_Y;
+  ctx.globalAlpha = gyroEnabled ? 0.85 : 0.4;
+
+  // Phone body (rotated rectangle)
+  ctx.translate(x, y);
+  ctx.rotate(gyroEnabled ? 0.3 : 0); // Tilt when active
+  ctx.strokeStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-7, -10, 14, 20);
+  // Screen area
+  ctx.fillStyle = gyroEnabled ? 'rgba(0, 255, 136, 0.25)' : 'rgba(255, 255, 255, 0.1)';
+  ctx.fillRect(-5, -7, 10, 14);
+  // Home button dot
+  ctx.beginPath();
+  ctx.arc(0, 8, 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.fill();
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+
+  // Status label
+  ctx.globalAlpha = gyroEnabled ? 0.7 : 0.35;
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = gyroEnabled ? '#00FF88' : '#FFFFFF';
+  ctx.fillText(gyroEnabled ? 'GYRO' : 'GYRO', x, y + 18);
+
+  // Sensitivity slider (only when gyro is active)
+  if (gyroEnabled) {
+    const sliderX = GYRO_SLIDER_X;
+    const sliderY = GYRO_SLIDER_Y;
+    const sliderW = GYRO_SLIDER_W;
+    const levels = GYRO_SENSITIVITY_LEVELS.length;
+
+    // Slider track background
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(sliderX, sliderY, sliderW, 3);
+
+    // Filled portion
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#00FF88';
+    const fillW = (gyroSensitivityIndex / (levels - 1)) * sliderW;
+    ctx.fillRect(sliderX, sliderY, fillW, 3);
+
+    // Tick marks
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < levels; i++) {
+      const tx = sliderX + (i / (levels - 1)) * sliderW;
+      ctx.fillStyle = i <= gyroSensitivityIndex ? '#00FF88' : '#FFFFFF';
+      ctx.fillRect(tx - 1, sliderY - 2, 2, 7);
+    }
+
+    // Slider handle (current position)
+    ctx.globalAlpha = 0.9;
+    const handleX = sliderX + (gyroSensitivityIndex / (levels - 1)) * sliderW;
+    ctx.beginPath();
+    ctx.arc(handleX, sliderY + 1.5, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#00FF88';
+    ctx.fill();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Sensitivity label
+    ctx.globalAlpha = 0.6;
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#00FF88';
+    ctx.fillText(gyroSensitivity.toFixed(2) + 'x', sliderX + sliderW / 2, sliderY + 16);
+  }
+
+  ctx.restore();
+}
+
+// Hit detection for gyro toggle button (US-005)
+function handleGyroToggleTap (cx, cy) {
+  if (!isMobileDevice || !gyroSupported) return false;
+  if (fsm.currentState !== playingState || gamePaused) return false;
+
+  // Toggle button hit area: 44x44 centered on icon
+  if (cx >= GYRO_BTN_X - 22 && cx <= GYRO_BTN_X + 22 && cy >= GYRO_BTN_Y - 16 && cy <= GYRO_BTN_Y + 24) {
+    toggleGyroscope();
+    return true;
+  }
+
+  // Sensitivity slider hit area (only when gyro active)
+  if (gyroEnabled) {
+    const sliderY = GYRO_SLIDER_Y;
+    if (cy >= sliderY - 10 && cy <= sliderY + 20 && cx >= GYRO_SLIDER_X - 5 && cx <= GYRO_SLIDER_X + GYRO_SLIDER_W + 5) {
+      // Map tap position to nearest sensitivity level
+      const ratio = Math.max(0, Math.min(1, (cx - GYRO_SLIDER_X) / GYRO_SLIDER_W));
+      const newIndex = Math.round(ratio * (GYRO_SENSITIVITY_LEVELS.length - 1));
+      gyroSensitivityIndex = newIndex;
+      gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      saveGyroPrefs();
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // Letterbox scaling - preserves aspect ratio
@@ -2833,6 +2991,9 @@ canvas.addEventListener('touchend', (e) => {
   const cx = (touch.clientX - rect.left) * scaleX;
   const cy = (touch.clientY - rect.top) * scaleY;
 
+  // Gyroscope toggle + sensitivity slider (US-005)
+  if (handleGyroToggleTap(cx, cy)) return;
+
   // Check mute icon tap first (44×44 area centered on CANVAS_WIDTH-28, 54)
   const muteX = CANVAS_WIDTH - 28;
   const muteY = 54;
@@ -2911,7 +3072,11 @@ canvas.addEventListener('click', (e) => {
   // Mute icon area: top-right corner, 32x32 region
   if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
     AudioManager.toggleMute();
+    return;
   }
+
+  // Gyroscope toggle + sensitivity slider (US-005) — click handler for desktop testing
+  if (handleGyroToggleTap(cx, cy)) return;
 });
 
 // --- Input tracking ---
@@ -4064,7 +4229,7 @@ function updatePlayer (dt) {
 
   // Gyroscope control (US-004): overrides keyboard/touch left/right
   if (gyroEnabled) {
-    let gamma = gyroGamma * GYRO_SENSITIVITY;
+    let gamma = gyroGamma * gyroSensitivity;
     // Apply dead zone
     if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
       gamma = 0;
@@ -6819,8 +6984,13 @@ const playingState = {
     if (isMobileDevice) {
       // Show arrow buttons only if gyroscope is not active (US-004)
       if (gyroEnabled) {
-        // Re-attach listener (was detached in onExit)
-        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        if (gyroPermissionGranted) {
+          // Re-attach listener (was detached in onExit)
+          window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        } else {
+          // Restored from localStorage but no permission yet — request it (user gesture context from tap to start)
+          requestGyroPermissionAndStart();
+        }
       } else {
         touchLeft.style.display = 'flex';
         touchRight.style.display = 'flex';
@@ -8036,6 +8206,8 @@ function gameLoop (timestamp) {
   ctx.restore();
   // Mute icon rendered outside shake transform, visible in all states
   renderMuteIcon(ctx);
+  // Gyroscope toggle + sensitivity slider (US-005) — mobile only
+  renderGyroToggle(ctx);
   // Pause button + overlay rendered on top of everything (US-003)
   renderPauseButton(ctx);
   renderPauseOverlay(ctx);

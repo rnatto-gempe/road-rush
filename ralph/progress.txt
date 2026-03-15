@@ -16,6 +16,8 @@ Started: Sat Mar 14 22:30:07 -03 2026
 - Debug shortcuts in playingState: D=toggle debug, P=25k score, O=50k score, W=activate weapon
 - Pause system: gamePaused flag in game loop skips fsm.update(); overlay renders on top of frozen frame
 - Game loop is the place for global input handling (mute, pause) — runs before fsm.update()
+- HUD icons/buttons: top-right for mute/pause, top-left for gyro toggle. Hit detection in canvas click + touchend handlers
+- localStorage preferences: load on startup, save on change. Wrap in try/catch for private browsing
 
 ---
 
@@ -67,4 +69,41 @@ Started: Sat Mar 14 22:30:07 -03 2026
   - AudioManager.masterGain.gain.setTargetAtTime() is the correct way to fade audio without clicks
   - Canvas click detection pattern: convert client coords to logical coords via getBoundingClientRect + scale factors
   - playingState.onExit() must clean up any global flags (gamePaused) to prevent stale state
+- Gyroscope: DeviceOrientationEvent.requestPermission() needed for iOS 13+, must be called from user gesture
+- Gyroscope: detach listener in onExit() but keep gyroEnabled=true so it auto-restarts in next onEnter()
+---
+
+## 2026-03-14 - US-004
+- Implemented gyroscope base control system for mobile devices
+- DeviceOrientationEvent with iOS 13+ requestPermission() support
+- Dead zone of ±5°, max tilt angle 35°, smooth lerp interpolation (0.15 factor)
+- Gyroscope off by default — activated via toggleGyroscope() function
+- Arrow touch buttons hidden when gyro active, restored when deactivated
+- Gyro listener detached in playingState.onExit(), re-attached in onEnter() to ensure no processing during menus/game over
+- Camera roll maps from gyro gamma for visual tilt feedback
+- Files changed: src/main.js (~120 lines added), ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - iOS 13+ requires DeviceOrientationEvent.requestPermission() called from a user gesture (tap) — async
+  - Gyro gamma range is -90 to +90 degrees; effective range for game is much smaller (~35°)
+  - Lerp factor of 0.15 provides smooth movement without feeling sluggish
+  - When detaching listener in onExit, keep the enabled flag so state can auto-restore on re-enter
+  - toggleGyroscope() is the public API — US-005 will wire this to a UI button and sensitivity slider
+---
+
+## 2026-03-14 - US-005
+- Implemented gyroscope toggle button + sensitivity slider HUD on canvas (mobile only)
+- Toggle button: tilted phone icon at top-left, green when active, white/dim when inactive
+- Sensitivity slider: horizontal track with 7 levels (0.5x to 2.0x), appears when gyro is on
+- Slider uses tap-to-select: user taps on slider position to change sensitivity level
+- Preferences saved/restored via localStorage with key 'roadrush_gyro' (enabled + sensitivityIndex)
+- On fresh load with saved prefs, auto-requests iOS permission in playingState.onEnter (user gesture context)
+- Changed GYRO_SENSITIVITY from const to mutable gyroSensitivity, wired to slider
+- Hit detection added to both canvas click and touchend handlers
+- Files changed: src/main.js (~120 lines added), ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - Canvas HUD buttons: render in gameLoop after fsm.render(), hit-test in both click and touchend handlers
+  - For mobile-only UI, guard with `if (!isMobileDevice) return` in render and `if (!isMobileDevice) return false` in hit detection
+  - localStorage: always wrap in try/catch — private browsing mode may throw
+  - When restoring preferences from localStorage, validate values are in expected range (e.g., clamp index)
+  - iOS gyro permission from localStorage restore: must be re-requested each page load since it's session-scoped
 ---
