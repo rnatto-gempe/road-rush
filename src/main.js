@@ -7438,23 +7438,27 @@ const COUNTDOWN_DURATION = 3.0; // seconds
 const countdownState = {
   timer: 0,
   scrollOffset: 0,
+  calibrationSamples: [],
+  calibrationWarning: false,
+  calibrationDone: false,
+  warningTimer: 0,
 
   onEnter () {
     this.timer = COUNTDOWN_DURATION;
     this.scrollOffset = 0;
+    this.calibrationSamples = [];
+    this.calibrationWarning = false;
+    this.calibrationDone = false;
+    this.warningTimer = 0;
     rankingBtnEl.style.display = 'none';
     feedbackBtnEl.style.display = 'none';
 
-    // Start gyroscope and calibrate
+    // Start gyroscope listener (calibration happens via sample averaging during last 1s)
     if (gyroEnabled && isMobileDevice) {
       if (gyroPermissionGranted) {
         window.addEventListener('deviceorientation', onDeviceOrientation, true);
-        // Calibrate after a small delay to let sensor settle
-        setTimeout(() => calibrateGyroscope(), 200);
       } else {
-        requestGyroPermissionAndStart().then(() => {
-          setTimeout(() => calibrateGyroscope(), 200);
-        });
+        requestGyroPermissionAndStart();
       }
     }
   },
@@ -7470,12 +7474,40 @@ const countdownState = {
     this.timer -= dt;
     this.scrollOffset += 150 * dt; // Slow road scroll for visual effect
 
-    // Allow sensitivity adjustments during countdown via gyro slider
-    if (gyroEnabled && isMobileDevice) {
-      // handleGyroToggleTap handles slider taps in click/touch events
+    // Collect gyro samples during last 1s of countdown for robust calibration
+    if (gyroEnabled && isMobileDevice && this.timer <= 1.0 && this.timer > 0) {
+      this.calibrationSamples.push(gyroSmoothedGamma);
     }
 
-    if (this.timer <= 0) {
+    // At countdown end, compute calibration from averaged samples
+    if (this.timer <= 0 && !this.calibrationDone) {
+      if (gyroEnabled && isMobileDevice && this.calibrationSamples.length >= 20) {
+        const sum = this.calibrationSamples.reduce((a, b) => a + b, 0);
+        const mean = sum / this.calibrationSamples.length;
+        // Check standard deviation — warn if too shaky
+        const variance = this.calibrationSamples.reduce((a, v) => a + (v - mean) ** 2, 0) / this.calibrationSamples.length;
+        const stddev = Math.sqrt(variance);
+        if (stddev > 8) {
+          this.calibrationWarning = true;
+          this.warningTimer = 1.5; // Show warning for 1.5s before starting
+        }
+        gyroBaselineGamma = mean;
+        this.calibrationDone = true;
+      } else if (gyroEnabled && isMobileDevice) {
+        // Fallback: not enough samples, use current smoothed value
+        calibrateGyroscope();
+        this.calibrationDone = true;
+      }
+    }
+
+    // Handle warning delay or transition to playing
+    if (this.timer <= 0 && this.calibrationDone) {
+      if (this.calibrationWarning && this.warningTimer > 0) {
+        this.warningTimer -= dt;
+        return; // Stay in countdown to show warning
+      }
+      fsm.transition(playingState);
+    } else if (this.timer <= 0 && !gyroEnabled) {
       fsm.transition(playingState);
     }
   },
@@ -7530,19 +7562,38 @@ const countdownState = {
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.beginPath(); ctx.roundRect(CX - 170, 380, 340, 110, 14); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,255,136,0.4)';
+      ctx.strokeStyle = this.calibrationWarning ? 'rgba(255,68,68,0.6)' : 'rgba(0,255,136,0.4)';
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.roundRect(CX - 170, 380, 340, 110, 14); ctx.stroke();
 
-      ctx.fillStyle = '#00FF88';
       ctx.font = 'bold 13px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('📱 GIROSCÓPIO CALIBRADO', CX, 405);
 
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.font = '11px monospace';
-      ctx.fillText('Segure na posição de jogo', CX, 425);
+      const collecting = this.timer <= 1.0 && this.timer > 0;
+
+      if (this.calibrationWarning) {
+        // Warning: too much movement during calibration
+        ctx.fillStyle = '#FF4444';
+        ctx.fillText('⚠️ MANTENHA O CELULAR PARADO', CX, 405);
+        ctx.fillStyle = 'rgba(255,100,100,0.8)';
+        ctx.font = '11px monospace';
+        ctx.fillText('Tente não mover durante a contagem', CX, 425);
+      } else if (collecting) {
+        // Collecting samples — show hold message
+        ctx.fillStyle = '#FFD600';
+        ctx.fillText('📱 CALIBRANDO...', CX, 405);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '11px monospace';
+        ctx.fillText('Segure na posição de jogo', CX, 425);
+      } else {
+        // Before collection starts — instruct player
+        ctx.fillStyle = '#00FF88';
+        ctx.fillText('📱 GIROSCÓPIO ATIVO', CX, 405);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '11px monospace';
+        ctx.fillText('Segure na posição de jogo', CX, 425);
+      }
 
       // Sensitivity slider inline
       const sliderX = CX - 110;
