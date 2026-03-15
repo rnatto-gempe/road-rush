@@ -14,6 +14,8 @@ Started: Sat Mar 14 22:30:07 -03 2026
 - Vehicle destruction uses spawnVehicleDestroyParticles() for fire+debris particle burst
 - Bullet-vehicle collision uses same aabbOverlap() + getVehicleHitbox() as player collision
 - Debug shortcuts in playingState: D=toggle debug, P=25k score, O=50k score, W=activate weapon
+- Pause system: gamePaused flag in game loop skips fsm.update(); overlay renders on top of frozen frame
+- Game loop is the place for global input handling (mute, pause) — runs before fsm.update()
 
 ---
 
@@ -46,4 +48,23 @@ Started: Sat Mar 14 22:30:07 -03 2026
   - When adding new update functions, wire into playingState update() after item updates
   - When adding new render functions, wire into playingState render() between items and player layers
   - Debug shortcuts are gated behind `debugMode &&` check — safe to add for testing
+---
+
+## 2026-03-14 - US-003
+- Implemented pause button system: ❚❚ icon in top-right, dark overlay with "PAUSADO" text and "Continuar" button
+- P or Escape keys toggle pause on desktop; canvas tap on pause button icon or overlay for mobile
+- Game loop skips fsm.update() when paused — all timers (shooting, nitro, shield, chromatic aberration) frozen
+- Audio master gain reduced to 0.05 during pause, restored on resume (respects existing mute state)
+- gamePaused reset in playingState.onExit() to prevent stale pause on game over transition
+- Accumulator drained while paused to prevent burst of updates on resume
+- Pause only available during playingState (not explosion/gameOver)
+- P key coexists with debug shortcut (P=25k score in debugMode): non-debug P pauses, debug P passes through
+- Canvas click handler: pause button area detection + overlay "Continuar" button + any-click-to-unpause
+- Files changed: src/main.js (~100 lines added), ralph/prd.json, ralph/progress.txt
+- **Learnings for future iterations:**
+  - Game loop (gameLoop function) is the right place for global input that should work across states or override state behavior
+  - When pausing, drain the accumulator (set to 0) to prevent time-burst on resume
+  - AudioManager.masterGain.gain.setTargetAtTime() is the correct way to fade audio without clicks
+  - Canvas click detection pattern: convert client coords to logical coords via getBoundingClientRect + scale factors
+  - playingState.onExit() must clean up any global flags (gamePaused) to prevent stale state
 ---

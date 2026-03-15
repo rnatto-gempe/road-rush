@@ -1948,6 +1948,10 @@ let shieldBreakFlash = 0; // countdown for bright border flash after shield abso
 let shootingTimer = 0; // countdown during active shooting power-up
 let bulletFireTimer = 0; // cooldown between automatic shots (US-002)
 
+// Pause state (US-003)
+let gamePaused = false;
+let pauseAudioWasMuted = false; // track if audio was already muted before pause
+
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
 
@@ -2798,14 +2802,35 @@ document.body.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 
-// --- Mute icon click detection ---
+// --- Mute icon + Pause button click detection ---
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
   const scaleX = CANVAS_WIDTH / rect.width;
   const scaleY = CANVAS_HEIGHT / rect.height;
   const cx = (e.clientX - rect.left) * scaleX;
   const cy = (e.clientY - rect.top) * scaleY;
-  // Icon area: top-right corner, 32x32 region
+
+  // Pause overlay "Continuar" button (US-003): centered at (200, CANVAS_HEIGHT/2+40), 180x44
+  if (gamePaused) {
+    const btnX = CANVAS_WIDTH / 2;
+    const btnY = CANVAS_HEIGHT / 2 + 40;
+    if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= btnY - 22 && cy <= btnY + 22) {
+      togglePause();
+      return;
+    }
+    // Any click while paused that's not the button — also unpause
+    togglePause();
+    return;
+  }
+
+  // Pause button area: top-right, near mute but above it (US-003)
+  // Icon centered at (CANVAS_WIDTH - 28, 20), hit area ~32x24
+  if (cx >= CANVAS_WIDTH - 44 && cx <= CANVAS_WIDTH - 12 && cy >= 4 && cy <= 36) {
+    togglePause();
+    return;
+  }
+
+  // Mute icon area: top-right corner, 32x32 region
   if (cx >= CANVAS_WIDTH - 40 && cx <= CANVAS_WIDTH - 4 && cy >= 36 && cy <= 72) {
     AudioManager.toggleMute();
   }
@@ -6186,6 +6211,98 @@ function renderMuteIcon (ctx) {
   ctx.restore();
 }
 
+// --- Pause Button HUD (US-003) ---
+function renderPauseButton (ctx) {
+  // Only show during playingState and not paused
+  if (fsm.currentState !== playingState || gamePaused) return;
+  const x = CANVAS_WIDTH - 28;
+  const y = 20;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#FFFFFF';
+  // Two vertical bars ❚❚
+  ctx.fillRect(x - 6, y - 8, 4, 16);
+  ctx.fillRect(x + 2, y - 8, 4, 16);
+  ctx.restore();
+}
+
+// --- Pause Overlay (US-003) ---
+function renderPauseOverlay (ctx) {
+  if (!gamePaused) return;
+
+  // Dark semi-transparent overlay
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // "PAUSADO" text
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Glow effect
+  ctx.shadowColor = '#00FFFF';
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText('PAUSADO', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 40);
+  ctx.shadowBlur = 0;
+
+  // "Continuar" button
+  const btnX = CANVAS_WIDTH / 2;
+  const btnY = CANVAS_HEIGHT / 2 + 40;
+  const btnW = 180;
+  const btnH = 44;
+
+  // Button background
+  ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
+  ctx.strokeStyle = '#00FFFF';
+  ctx.lineWidth = 2;
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(btnX - btnW / 2 + r, btnY - btnH / 2);
+  ctx.lineTo(btnX + btnW / 2 - r, btnY - btnH / 2);
+  ctx.arcTo(btnX + btnW / 2, btnY - btnH / 2, btnX + btnW / 2, btnY - btnH / 2 + r, r);
+  ctx.lineTo(btnX + btnW / 2, btnY + btnH / 2 - r);
+  ctx.arcTo(btnX + btnW / 2, btnY + btnH / 2, btnX + btnW / 2 - r, btnY + btnH / 2, r);
+  ctx.lineTo(btnX - btnW / 2 + r, btnY + btnH / 2);
+  ctx.arcTo(btnX - btnW / 2, btnY + btnH / 2, btnX - btnW / 2, btnY + btnH / 2 - r, r);
+  ctx.lineTo(btnX - btnW / 2, btnY - btnH / 2 + r);
+  ctx.arcTo(btnX - btnW / 2, btnY - btnH / 2, btnX - btnW / 2 + r, btnY - btnH / 2, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Button text
+  ctx.fillStyle = '#00FFFF';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText('Continuar', btnX, btnY);
+
+  // Hint text
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.font = '12px monospace';
+  ctx.fillText('P / Esc para continuar', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 90);
+
+  ctx.restore();
+}
+
+// Helper to toggle pause state (US-003)
+function togglePause () {
+  if (fsm.currentState !== playingState) return;
+  gamePaused = !gamePaused;
+  if (gamePaused) {
+    // Reduce audio volume during pause
+    pauseAudioWasMuted = AudioManager.muted;
+    if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+      AudioManager.masterGain.gain.setTargetAtTime(0.05, AudioManager.ctx.currentTime, 0.01);
+    }
+  } else {
+    // Restore audio volume
+    if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+      AudioManager.masterGain.gain.setTargetAtTime(1, AudioManager.ctx.currentTime, 0.01);
+    }
+  }
+}
+
 // --- Combo HUD ---
 function renderComboHUD (ctx) {
   // Show during active combo OR during expire fade-out
@@ -6602,6 +6719,13 @@ const playingState = {
   },
 
   onExit () {
+    // Restore audio if paused when exiting (US-003)
+    if (gamePaused) {
+      gamePaused = false;
+      if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
+        AudioManager.masterGain.gain.setTargetAtTime(1, AudioManager.ctx.currentTime, 0.01);
+      }
+    }
     AudioManager.stopNitro();
     AudioManager.stopBeat();
     AudioManager.stopArp();
@@ -7753,14 +7877,34 @@ function gameLoop (timestamp) {
     AudioManager.toggleMute();
   }
 
-  while (accumulator >= FIXED_DT) {
-    if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
-    if (hitStopFrames > 0) {
-      hitStopFrames--;
-    } else {
-      fsm.update(FIXED_DT);
+  // Pause toggle: P or Escape during playingState (US-003)
+  // P is also a debug shortcut (score=24500) but only when debugMode is on,
+  // so we only use P for pause when NOT in debugMode
+  if (fsm.currentState === playingState) {
+    const pPressed = consumeKey('p') || consumeKey('P');
+    const escPressed = consumeKey('Escape');
+    if (escPressed || (pPressed && !debugMode)) {
+      togglePause();
+    } else if (pPressed && debugMode && !gamePaused) {
+      // Re-inject the P press so playingState.update() debug shortcut can consume it
+      justPressed['P'] = true;
     }
-    accumulator -= FIXED_DT;
+  }
+
+  // Skip updates when paused — timers frozen, game world frozen
+  if (!gamePaused) {
+    while (accumulator >= FIXED_DT) {
+      if (shake.time > 0) shake.time = Math.max(0, shake.time - FIXED_DT);
+      if (hitStopFrames > 0) {
+        hitStopFrames--;
+      } else {
+        fsm.update(FIXED_DT);
+      }
+      accumulator -= FIXED_DT;
+    }
+  } else {
+    // Drain accumulator so we don't get a burst of updates on resume
+    accumulator = 0;
   }
 
   ctx.save();
@@ -7776,6 +7920,9 @@ function gameLoop (timestamp) {
   ctx.restore();
   // Mute icon rendered outside shake transform, visible in all states
   renderMuteIcon(ctx);
+  // Pause button + overlay rendered on top of everything (US-003)
+  renderPauseButton(ctx);
+  renderPauseOverlay(ctx);
   requestAnimationFrame(gameLoop);
 }
 
