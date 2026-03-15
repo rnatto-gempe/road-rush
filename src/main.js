@@ -3087,6 +3087,7 @@ let titleRankingAbortController = null;
 
 // --- Tap to Start / Tap to Retry / Tap Mute Icon / Swipe Ranking ---
 let touchStartY = 0; // canvas coords at touchstart
+let _touchHandled = false; // flag to prevent click after touchend
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
@@ -3117,13 +3118,14 @@ canvas.addEventListener('touchend', (e) => {
   }
 
   // Settings screen tap handling
-  if (handleSettingsTap(cx, cy)) return;
+  if (handleSettingsTap(cx, cy)) { _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400); return; }
 
   if (fsm.currentState === titleState) {
     // Settings gear icon tap (top-right corner)
     const gearX = CANVAS_WIDTH - 30;
     const gearY = 30;
     if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400);
       fsm.transition(settingsState);
       return;
     }
@@ -3174,6 +3176,9 @@ document.body.addEventListener('touchmove', (e) => {
 
 // --- Mute icon + Pause button click detection ---
 canvas.addEventListener('click', (e) => {
+  // Skip click if touchend already handled this interaction
+  if (_touchHandled) return;
+
   const rect = canvas.getBoundingClientRect();
   const scaleX = CANVAS_WIDTH / rect.width;
   const scaleY = CANVAS_HEIGHT / rect.height;
@@ -8290,10 +8295,6 @@ const settingsState = {
 
     // --- Card 2: Giroscópio ---
     {
-      const gyroAvailable = gyroSupported || !isMobileDevice;
-      const dimAlpha = gyroAvailable ? 1 : 0.4;
-      ctx.globalAlpha = dimAlpha;
-
       ctx.fillStyle = 'rgba(255,255,255,0.06)';
       ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
@@ -8312,8 +8313,6 @@ const settingsState = {
       ctx.font = '10px monospace';
       if (!isMobileDevice) {
         ctx.fillText('Disponível apenas no celular', cardX + 16, cardY + 50);
-      } else if (!gyroSupported) {
-        ctx.fillText('Seu dispositivo não suporta giroscópio', cardX + 16, cardY + 50);
       } else {
         ctx.fillText('Controle inclinando o celular', cardX + 16, cardY + 50);
       }
@@ -8408,7 +8407,7 @@ function handleSettingsTap (cx, cy) {
 
   // Toggle area (top part of card)
   if (cx >= cardX && cx <= cardX + cardW && cy >= card2Y && cy <= card2Y + 60) {
-    if (isMobileDevice && gyroSupported) {
+    if (isMobileDevice) {
       toggleGyroscope();
     }
     return true;
