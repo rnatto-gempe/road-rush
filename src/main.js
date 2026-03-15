@@ -1951,6 +1951,7 @@ let bulletFireTimer = 0; // cooldown between automatic shots (US-002)
 // Pause state (US-003)
 let gamePaused = false;
 let pauseAudioWasMuted = false; // track if audio was already muted before pause
+let pauseRecalFeedbackTimer = 0; // "Calibrado!" feedback timer (US-005)
 
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
@@ -3203,14 +3204,25 @@ canvas.addEventListener('touchend', (e) => {
   // Pause overlay buttons (touch)
   if (gamePaused) {
     const btnX = CANVAS_WIDTH / 2;
+    const recalShown = gyroEnabled;
+    const recalOff = recalShown ? 60 : 0;
     // Sound toggle
     const soundBtnY = CANVAS_HEIGHT / 2 + 20;
     if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= soundBtnY - 22 && cy <= soundBtnY + 22) {
       AudioManager.toggleMute();
       return;
     }
+    // Recalibrate button (US-005)
+    if (recalShown) {
+      const recalBtnY = CANVAS_HEIGHT / 2 + 80;
+      if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= recalBtnY - 22 && cy <= recalBtnY + 22) {
+        calibrateGyroscope();
+        pauseRecalFeedbackTimer = 1.0;
+        return;
+      }
+    }
     // Continuar button
-    const continueBtnY = CANVAS_HEIGHT / 2 + 80;
+    const continueBtnY = CANVAS_HEIGHT / 2 + 80 + recalOff;
     if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= continueBtnY - 22 && cy <= continueBtnY + 22) {
       togglePause();
       return;
@@ -3297,14 +3309,25 @@ canvas.addEventListener('click', (e) => {
   // Pause overlay buttons (US-003)
   if (gamePaused) {
     const btnX = CANVAS_WIDTH / 2;
-    // Sound toggle area: centered at (CX, CX/2+100), 180x44
+    const recalShown = gyroEnabled;
+    const recalOff = recalShown ? 60 : 0;
+    // Sound toggle area
     const soundBtnY = CANVAS_HEIGHT / 2 + 20;
     if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= soundBtnY - 22 && cy <= soundBtnY + 22) {
       AudioManager.toggleMute();
       return;
     }
-    // "Continuar" button: centered at (CX, CX/2+80), 180x44
-    const continueBtnY = CANVAS_HEIGHT / 2 + 80;
+    // Recalibrate button (US-005)
+    if (recalShown) {
+      const recalBtnY = CANVAS_HEIGHT / 2 + 80;
+      if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= recalBtnY - 22 && cy <= recalBtnY + 22) {
+        calibrateGyroscope();
+        pauseRecalFeedbackTimer = 1.0;
+        return;
+      }
+    }
+    // "Continuar" button
+    const continueBtnY = CANVAS_HEIGHT / 2 + 80 + recalOff;
     if (cx >= btnX - 90 && cx <= btnX + 90 && cy >= continueBtnY - 22 && cy <= continueBtnY + 22) {
       togglePause();
       return;
@@ -6931,6 +6954,8 @@ function renderPauseOverlay (ctx) {
 
   const btnW = 180;
   const btnH = 44;
+  const showRecal = gyroEnabled;
+  const recalOffset = showRecal ? 60 : 0; // shift Continuar down when recal button is shown
 
   // --- Sound toggle button ---
   {
@@ -6947,9 +6972,24 @@ function renderPauseOverlay (ctx) {
     ctx.fillText(isOn ? '🔊 Som: ON' : '🔇 Som: OFF', CX, btnY);
   }
 
+  // --- Recalibrate button (US-005) — only when gyro is enabled ---
+  if (showRecal) {
+    const btnY = CANVAS_HEIGHT / 2 + 80;
+    const showingFeedback = pauseRecalFeedbackTimer > 0;
+    ctx.fillStyle = showingFeedback ? 'rgba(0, 255, 136, 0.25)' : 'rgba(255, 165, 0, 0.15)';
+    ctx.strokeStyle = showingFeedback ? '#00FF88' : 'rgba(255, 165, 0, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(CX - btnW / 2, btnY - btnH / 2, btnW, btnH, 8); ctx.stroke();
+
+    ctx.fillStyle = showingFeedback ? '#00FF88' : '#FFA500';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText(showingFeedback ? '✓ Calibrado!' : '📐 Recalibrar', CX, btnY);
+  }
+
   // --- "Continuar" button ---
   {
-    const btnY = CANVAS_HEIGHT / 2 + 80;
+    const btnY = CANVAS_HEIGHT / 2 + 80 + recalOffset;
     ctx.fillStyle = 'rgba(0, 255, 255, 0.15)';
     ctx.strokeStyle = '#00FFFF';
     ctx.lineWidth = 2;
@@ -6964,7 +7004,7 @@ function renderPauseOverlay (ctx) {
   // Hint text
   ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
   ctx.font = '12px monospace';
-  ctx.fillText('P / Esc para continuar', CX, CANVAS_HEIGHT / 2 + 130);
+  ctx.fillText('P / Esc para continuar', CX, CANVAS_HEIGHT / 2 + 130 + recalOffset);
 
   ctx.restore();
 }
@@ -6974,6 +7014,7 @@ function togglePause () {
   if (fsm.currentState !== playingState) return;
   gamePaused = !gamePaused;
   if (gamePaused) {
+    pauseRecalFeedbackTimer = 0; // Reset recalibrate feedback (US-005)
     // Reduce audio volume during pause
     pauseAudioWasMuted = AudioManager.muted;
     if (!pauseAudioWasMuted && AudioManager.ctx && AudioManager.masterGain) {
@@ -9429,6 +9470,8 @@ function gameLoop (timestamp) {
   } else {
     // Drain accumulator so we don't get a burst of updates on resume
     accumulator = 0;
+    // Tick recalibrate feedback timer even while paused (US-005)
+    if (pauseRecalFeedbackTimer > 0) pauseRecalFeedbackTimer = Math.max(0, pauseRecalFeedbackTimer - frameTime);
   }
 
   ctx.save();
