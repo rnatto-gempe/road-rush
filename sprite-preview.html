@@ -172,33 +172,73 @@ function drawMoto(ctx, x, y, w, h) {
 function drawBird(ctx, x, y, w, h, elapsedTime) {
   const bx = x + w / 2;
   const by = y + h / 2;
-  const wingAngle = Math.sin(elapsedTime * 8) * (Math.PI / 6);
-  ctx.fillStyle = '#5D4037';
+  const wingAngleL = Math.sin(elapsedTime * 8) * (Math.PI / 6);
+  const wingAngleR = Math.sin(elapsedTime * 8 + 0.3) * (Math.PI / 6);
+
+  // Tail: small triangle behind body
+  ctx.fillStyle = '#4E342E';
+  ctx.beginPath();
+  ctx.moveTo(bx, by + 6);
+  ctx.lineTo(bx - 4, by + 10);
+  ctx.lineTo(bx + 4, by + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Body oval with darker color + outline
+  ctx.fillStyle = '#3E2723';
   ctx.beginPath();
   ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
   // Left wing
   ctx.save();
   ctx.translate(bx - 8, by);
-  ctx.rotate(-wingAngle);
+  ctx.rotate(-wingAngleL);
+  ctx.fillStyle = '#3E2723';
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(-10, -6);
   ctx.lineTo(-2, 4);
   ctx.closePath();
   ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.restore();
+
   // Right wing
   ctx.save();
   ctx.translate(bx + 8, by);
-  ctx.rotate(wingAngle);
+  ctx.rotate(wingAngleR);
+  ctx.fillStyle = '#3E2723';
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(10, -6);
   ctx.lineTo(2, 4);
   ctx.closePath();
   ctx.fill();
+  ctx.strokeStyle = '#1A1010';
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.restore();
+
+  // Beak: small orange triangle at front
+  ctx.fillStyle = '#FF8F00';
+  ctx.beginPath();
+  ctx.moveTo(bx, by - 7);
+  ctx.lineTo(bx - 1.5, by - 4);
+  ctx.lineTo(bx + 1.5, by - 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Eye: small yellow arc
+  ctx.fillStyle = '#FFD600';
+  ctx.beginPath();
+  ctx.arc(bx + 2, by - 3, 1.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawAirplane(ctx, x, y, w, h, elapsedTime) {

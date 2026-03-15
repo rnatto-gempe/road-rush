@@ -4506,37 +4506,76 @@ function renderTraffic (ctx) {
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(v.x + 3, v.y + 12, v.width - 6, 20);
     } else if (v.type === 'bird') {
-      // Bird: oval body + oscillating wings
+      // Bird: oval body + oscillating wings with offset, tail, eye, beak
       const bx = v.x + v.width / 2;
       const by = v.y + v.height / 2;
-      const wingAngle = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6); // ±30 degrees
-      ctx.fillStyle = '#5D4037';
-      // Body oval
+      const wingAngleL = Math.sin(gameState.elapsedTime * 8) * (Math.PI / 6);
+      const wingAngleR = Math.sin(gameState.elapsedTime * 8 + 0.3) * (Math.PI / 6);
+
+      // Tail: small triangle behind body
+      ctx.fillStyle = '#4E342E';
+      ctx.beginPath();
+      ctx.moveTo(bx, by + 6);
+      ctx.lineTo(bx - 4, by + 10);
+      ctx.lineTo(bx + 4, by + 10);
+      ctx.closePath();
+      ctx.fill();
+
+      // Body oval with darker color + outline
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.ellipse(bx, by, 12, 8, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
       // Left wing
       ctx.save();
       ctx.translate(bx - 8, by);
-      ctx.rotate(-wingAngle);
+      ctx.rotate(-wingAngleL);
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(-10, -6);
       ctx.lineTo(-2, 4);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
+
       // Right wing
       ctx.save();
       ctx.translate(bx + 8, by);
-      ctx.rotate(wingAngle);
+      ctx.rotate(wingAngleR);
+      ctx.fillStyle = '#3E2723';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(10, -6);
       ctx.lineTo(2, 4);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#1A1010';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
+
+      // Beak: small orange triangle at front
+      ctx.fillStyle = '#FF8F00';
+      ctx.beginPath();
+      ctx.moveTo(bx, by - 7);
+      ctx.lineTo(bx - 1.5, by - 4);
+      ctx.lineTo(bx + 1.5, by - 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Eye: small yellow arc
+      ctx.fillStyle = '#FFD600';
+      ctx.beginPath();
+      ctx.arc(bx + 2, by - 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (v.type === 'airplane') {
       // Airplane: fuselage with gradient, wings with engines, tail, windows, nav lights
       const ax = v.x;
