@@ -2084,6 +2084,7 @@ nameFormEl.style.cssText = [
   'gap:6px',
   'width:260px',
   'transform:translateX(-50%)',
+  'z-index:30',
 ].join(';') + ';';
 
 const nameInputEl = document.createElement('input');
