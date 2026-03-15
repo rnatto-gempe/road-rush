@@ -1984,6 +1984,55 @@ const DASH_PERIOD = DASH_LENGTH + DASH_GAP;
 const RUMBLE_SEGMENT = 20; // each color block height
 const RUMBLE_PERIOD = RUMBLE_SEGMENT * 2; // red + white
 
+// Road scenery: pre-generated trees/barriers along the margins
+const SCENERY_PERIOD = CANVAS_HEIGHT + 200;
+const sceneryData = (() => {
+  const data = [];
+  // Trees on left side
+  for (let i = 0; i < 8; i++) {
+    data.push({
+      side: 'left',
+      yPhase: (i / 8) * SCENERY_PERIOD,
+      type: Math.random() < 0.7 ? 'tree' : 'bush',
+      size: 0.7 + Math.random() * 0.6,
+      hue: 100 + Math.random() * 40, // green variation
+    });
+  }
+  // Trees on right side
+  for (let i = 0; i < 8; i++) {
+    data.push({
+      side: 'right',
+      yPhase: (i / 8) * SCENERY_PERIOD + SCENERY_PERIOD * 0.06,
+      type: Math.random() < 0.7 ? 'tree' : 'bush',
+      size: 0.7 + Math.random() * 0.6,
+      hue: 100 + Math.random() * 40,
+    });
+  }
+  return data;
+})();
+
+// Road surface details: pre-generated cracks/marks
+const ROAD_DETAIL_PERIOD = CANVAS_HEIGHT * 3;
+const roadDetailData = (() => {
+  const data = [];
+  for (let i = 0; i < 12; i++) {
+    data.push({
+      x: ROAD_LEFT + 15 + Math.random() * (ROAD_WIDTH - 30),
+      yPhase: Math.random() * ROAD_DETAIL_PERIOD,
+      type: Math.random() < 0.5 ? 'crack' : 'patch',
+      width: 10 + Math.random() * 30,
+      height: 3 + Math.random() * 8,
+      angle: (Math.random() - 0.5) * 0.4,
+      alpha: 0.03 + Math.random() * 0.05,
+    });
+  }
+  return data;
+})();
+
+// Cat-eye reflector dots on lane dividers
+const CATEYE_SPACING = 100; // px between reflectors
+const CATEYE_PERIOD = CATEYE_SPACING * 8;
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
@@ -2123,7 +2172,9 @@ let gyroEnabled = false;        // Whether gyroscope control is currently active
 let gyroSupported = false;      // Whether device supports DeviceOrientation
 let gyroPermissionGranted = false; // iOS 13+ permission state
 let gyroGamma = 0;              // Raw gamma reading (left/right tilt, -90 to +90)
+let gyroSmoothedGamma = 0;      // EMA-filtered gamma value
 let gyroBaselineGamma = 0;      // Calibration offset — device tilt at game start
+const GYRO_EMA_ALPHA = 0.6;     // EMA filter smoothing factor
 const GYRO_DEAD_ZONE = 5;       // ±5° dead zone
 const GYRO_MAX_ANGLE = 35;      // Max tilt angle for full speed
 const GYRO_SENSITIVITY_LEVELS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
@@ -2164,14 +2215,40 @@ if (window.DeviceOrientationEvent) {
 
 function onDeviceOrientation (e) {
   if (e.gamma !== null && e.gamma !== undefined) {
-    gyroGamma = e.gamma - gyroBaselineGamma; // Calibrated: subtract baseline offset
+    gyroGamma = e.gamma; // Store raw gamma
+    // Apply EMA filter: smoothed = alpha * raw + (1 - alpha) * previousSmoothed
+    gyroSmoothedGamma = GYRO_EMA_ALPHA * e.gamma + (1 - GYRO_EMA_ALPHA) * gyroSmoothedGamma;
   }
 }
 
+// Unified gyro input processing pipeline:
+// EMA filter (done in onDeviceOrientation) → subtract baseline → dead zone → power curve → sensitivity → target velocity
+function processGyroInput () {
+  // 1. Subtract calibration baseline from smoothed value
+  const calibrated = gyroSmoothedGamma - gyroBaselineGamma;
+  const absGamma = Math.abs(calibrated);
+
+  // 2. Dead zone with scaled remap (smooth transition, no jump)
+  if (absGamma <= GYRO_DEAD_ZONE) {
+    return 0;
+  }
+  const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
+  const remapped = (absGamma - GYRO_DEAD_ZONE) / effectiveMax;
+
+  // 3. Clamp normalized value to 0..1
+  const normalizedGamma = Math.min(1, remapped);
+
+  // 4. Power curve for exponential sensitivity (fine control at small tilts, fast at large)
+  const curved = Math.pow(normalizedGamma, 1.5);
+
+  // 5. Apply sign, sensitivity multiplier, and convert to target velocity
+  const sign = calibrated > 0 ? 1 : -1;
+  return sign * curved * PLAYER_MAX_SPEED * gyroSensitivity;
+}
+
 function calibrateGyroscope () {
-  // Set current tilt as the new "zero" position
-  gyroBaselineGamma = gyroGamma + gyroBaselineGamma; // Use raw gamma
-  gyroGamma = 0;
+  // Set current smoothed tilt as the new "zero" position
+  gyroBaselineGamma = gyroSmoothedGamma;
 }
 
 function startGyroscope () {
@@ -2192,6 +2269,7 @@ function stopGyroscope () {
   window.removeEventListener('deviceorientation', onDeviceOrientation, true);
   gyroEnabled = false;
   gyroGamma = 0;
+  gyroSmoothedGamma = 0;
   gyroBaselineGamma = 0;
   saveGyroPrefs();
   // Restore arrow buttons if in playingState
@@ -4093,41 +4171,114 @@ function renderRoad (ctx, scrollOffset) {
     return;
   }
 
-  // Asphalt background with vertical gradient
-  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  gradient.addColorStop(0, '#1A1A2E');
-  gradient.addColorStop(1, '#16213E');
-  ctx.fillStyle = gradient;
+  // Dynamic FOV
+  const fovFactor = getRoadFovFactor();
+  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2;
+  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
+  const fovTopLeft = roadCenter - topHalfWidth;
+  const fovTopRight = roadCenter + topHalfWidth;
+
+  // === GRASS / TERRAIN BACKGROUND ===
+  const grassGrad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+  grassGrad.addColorStop(0, '#1B4D2E');
+  grassGrad.addColorStop(0.5, '#1A5C30');
+  grassGrad.addColorStop(1, '#145226');
+  ctx.fillStyle = grassGrad;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  // Rumble strips (left and right margins)
+  // Grass texture stripes (scrolling)
+  const grassStripeH = 14;
+  const grassPeriod = grassStripeH * 2;
+  const grassOff = scrollOffset % grassPeriod;
+  ctx.globalAlpha = 0.08;
+  for (let y = grassOff - grassPeriod; y < CANVAS_HEIGHT; y += grassPeriod) {
+    ctx.fillStyle = '#0A3318';
+    ctx.fillRect(0, y, ROAD_LEFT - 2, grassStripeH);
+    ctx.fillRect(ROAD_RIGHT + 2, y, CANVAS_WIDTH - ROAD_RIGHT - 2, grassStripeH);
+  }
+  ctx.globalAlpha = 1.0;
+
+  // === SCENERY (trees/bushes along margins) ===
+  const sceneryOffset = scrollOffset % SCENERY_PERIOD;
+  for (const item of sceneryData) {
+    let y = ((item.yPhase + sceneryOffset) % SCENERY_PERIOD) - 40;
+    const x = item.side === 'left' ? 20 : CANVAS_WIDTH - 20;
+    const s = item.size;
+
+    if (item.type === 'tree') {
+      // Tree trunk
+      ctx.fillStyle = '#3E2723';
+      ctx.fillRect(x - 2 * s, y, 4 * s, 14 * s);
+      // Canopy (layered circles)
+      const canopyY = y - 4 * s;
+      ctx.fillStyle = `hsl(${item.hue}, 55%, 28%)`;
+      ctx.beginPath();
+      ctx.arc(x, canopyY, 10 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `hsl(${item.hue}, 60%, 33%)`;
+      ctx.beginPath();
+      ctx.arc(x - 3 * s, canopyY + 3 * s, 7 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + 4 * s, canopyY + 2 * s, 6 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Bush — rounded cluster
+      ctx.fillStyle = `hsl(${item.hue}, 50%, 25%)`;
+      ctx.beginPath();
+      ctx.arc(x, y, 8 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `hsl(${item.hue}, 55%, 30%)`;
+      ctx.beginPath();
+      ctx.arc(x - 4 * s, y + 2 * s, 6 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + 5 * s, y + 1 * s, 5 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // === GRAVEL SHOULDER ===
+  // Left shoulder
+  const shoulderW = 6;
+  ctx.fillStyle = '#4A4A3A';
+  ctx.fillRect(ROAD_LEFT - shoulderW, 0, shoulderW, CANVAS_HEIGHT);
+  ctx.fillRect(ROAD_RIGHT, 0, shoulderW, CANVAS_HEIGHT);
+  // Shoulder inner edge highlight
+  ctx.fillStyle = 'rgba(255,255,200,0.08)';
+  ctx.fillRect(ROAD_LEFT - 1, 0, 1, CANVAS_HEIGHT);
+  ctx.fillRect(ROAD_RIGHT, 0, 1, CANVAS_HEIGHT);
+
+  // === CURBING (rumble strips with 3D effect) ===
   const rumbleOffset = scrollOffset % RUMBLE_PERIOD;
   for (let side = 0; side < 2; side++) {
-    const stripX = side === 0 ? 0 : ROAD_RIGHT;
-    const stripW = ROAD_LEFT; // 40px
+    const stripX = side === 0 ? ROAD_LEFT - shoulderW - 8 : ROAD_RIGHT + shoulderW;
+    const stripW = 8;
 
-    // Draw segments from above screen to below (top→bottom scroll)
     let y = rumbleOffset - RUMBLE_PERIOD;
     let colorIndex = 0;
     while (y < CANVAS_HEIGHT) {
-      ctx.fillStyle = colorIndex % 2 === 0 ? '#E53935' : '#FFFFFF';
+      const isRed = colorIndex % 2 === 0;
+      // Main color
+      ctx.fillStyle = isRed ? '#D32F2F' : '#EEEEEE';
       ctx.fillRect(stripX, y, stripW, RUMBLE_SEGMENT);
+      // 3D highlight on top edge
+      ctx.fillStyle = isRed ? '#EF5350' : '#FFFFFF';
+      ctx.fillRect(stripX, y, stripW, 3);
+      // 3D shadow on bottom edge
+      ctx.fillStyle = isRed ? '#8B1A1A' : '#999999';
+      ctx.fillRect(stripX, y + RUMBLE_SEGMENT - 2, stripW, 2);
       y += RUMBLE_SEGMENT;
       colorIndex++;
     }
   }
 
-  // Dynamic FOV: road top edge narrows at high speed (US-005)
-  const fovFactor = getRoadFovFactor();
-  const roadCenter = (ROAD_LEFT + ROAD_RIGHT) / 2; // 200
-  const topHalfWidth = (ROAD_WIDTH / 2) * (1 - fovFactor);
-  const fovTopLeft = roadCenter - topHalfWidth;  // > ROAD_LEFT at speed
-  const fovTopRight = roadCenter + topHalfWidth; // < ROAD_RIGHT at speed
-
-  // Road surface (asphalt) as perspective trapezoid
+  // === ROAD SURFACE (asphalt trapezoid) ===
   const roadGradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  roadGradient.addColorStop(0, '#2A2A3E');
-  roadGradient.addColorStop(1, '#26314E');
+  roadGradient.addColorStop(0, '#2C2C3A');
+  roadGradient.addColorStop(0.3, '#333346');
+  roadGradient.addColorStop(0.7, '#2E3448');
+  roadGradient.addColorStop(1, '#28304A');
   ctx.fillStyle = roadGradient;
   ctx.beginPath();
   ctx.moveTo(fovTopLeft, 0);
@@ -4137,9 +4288,57 @@ function renderRoad (ctx, scrollOffset) {
   ctx.closePath();
   ctx.fill();
 
-  // White border lines — converging edges of the trapezoid
+  // === ASPHALT TEXTURE (subtle scrolling grain) ===
+  const grainH = 6;
+  const grainPeriod = grainH * 4;
+  const grainOff = scrollOffset % grainPeriod;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(fovTopLeft, 0);
+  ctx.lineTo(fovTopRight, 0);
+  ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
+  ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
+  ctx.closePath();
+  ctx.clip();
+  for (let y = grainOff - grainPeriod; y < CANVAS_HEIGHT; y += grainPeriod) {
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(ROAD_LEFT, y, ROAD_WIDTH, grainH);
+    ctx.fillStyle = 'rgba(255,255,255,0.015)';
+    ctx.fillRect(ROAD_LEFT, y + grainH * 2, ROAD_WIDTH, grainH);
+  }
+
+  // === ROAD SURFACE DETAILS (cracks, patches) ===
+  const detailOffset = scrollOffset % ROAD_DETAIL_PERIOD;
+  for (const detail of roadDetailData) {
+    const dy = ((detail.yPhase + detailOffset) % ROAD_DETAIL_PERIOD) - 20;
+    if (dy < -20 || dy > CANVAS_HEIGHT + 20) continue;
+    ctx.save();
+    ctx.translate(detail.x, dy);
+    ctx.rotate(detail.angle);
+    if (detail.type === 'crack') {
+      ctx.strokeStyle = `rgba(0,0,0,${detail.alpha + 0.02})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-detail.width / 2, 0);
+      ctx.lineTo(0, detail.height);
+      ctx.lineTo(detail.width / 2, -detail.height * 0.5);
+      ctx.stroke();
+    } else {
+      // Dark asphalt patch
+      ctx.fillStyle = `rgba(20,20,30,${detail.alpha})`;
+      ctx.fillRect(-detail.width / 2, -detail.height / 2, detail.width, detail.height);
+    }
+    ctx.restore();
+  }
+  ctx.restore(); // end road clip
+
+  // === ROAD EDGE LINES (solid white with glow) ===
+  // Glow
+  ctx.save();
+  ctx.shadowColor = 'rgba(255,255,255,0.3)';
+  ctx.shadowBlur = 6;
   ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(fovTopLeft, 0);
   ctx.lineTo(ROAD_LEFT, CANVAS_HEIGHT);
@@ -4148,26 +4347,67 @@ function renderRoad (ctx, scrollOffset) {
   ctx.moveTo(fovTopRight, 0);
   ctx.lineTo(ROAD_RIGHT, CANVAS_HEIGHT);
   ctx.stroke();
+  ctx.restore();
 
-  // Dashed lane markers — converge toward vanishing point at top
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  // === LANE DIVIDERS (dashed lines with cat-eye reflectors) ===
   const dashScrollOffset = scrollOffset % DASH_PERIOD;
 
   for (let i = 1; i < LANE_COUNT; i++) {
     const laneXBottom = ROAD_LEFT + i * LANE_WIDTH;
-    // Converge toward road center at the top of screen
     const laneXTop = roadCenter + (laneXBottom - roadCenter) * (1 - fovFactor);
-    // Extend the line beyond canvas for smooth dash scrolling (mirrors original approach)
-    const dx = laneXBottom - laneXTop; // horizontal shift per CANVAS_HEIGHT of vertical travel
+    const dx = laneXBottom - laneXTop;
     const xAtY = (y) => laneXTop + dx * (y / CANVAS_HEIGHT);
+
+    // Dashed lane line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
     ctx.beginPath();
     ctx.moveTo(xAtY(dashScrollOffset - DASH_PERIOD), dashScrollOffset - DASH_PERIOD);
     ctx.lineTo(xAtY(CANVAS_HEIGHT + DASH_PERIOD), CANVAS_HEIGHT + DASH_PERIOD);
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Cat-eye reflector dots
+    const cateyeOff = scrollOffset % CATEYE_SPACING;
+    for (let cy = cateyeOff - CATEYE_SPACING; cy < CANVAS_HEIGHT + CATEYE_SPACING; cy += CATEYE_SPACING) {
+      const cx = xAtY(cy);
+      // Perspective scale: smaller near top
+      const perspScale = 0.4 + 0.6 * (cy / CANVAS_HEIGHT);
+      if (perspScale < 0.2) continue;
+      const dotR = 2.5 * perspScale;
+
+      // Reflector glow
+      ctx.fillStyle = `rgba(255, 220, 100, ${0.15 * perspScale})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, dotR * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Reflector dot
+      ctx.fillStyle = `rgba(255, 240, 180, ${0.7 * perspScale})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
+  // === CENTER LINE (double yellow) ===
+  const centerLaneBottom = ROAD_LEFT + 2 * LANE_WIDTH;
+  const centerLaneTop = roadCenter + (centerLaneBottom - roadCenter) * (1 - fovFactor);
+  const centerDx = centerLaneBottom - centerLaneTop;
+  const centerXAtY = (y) => centerLaneTop + centerDx * (y / CANVAS_HEIGHT);
+
+  ctx.strokeStyle = 'rgba(255, 200, 50, 0.25)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([DASH_LENGTH, DASH_GAP]);
+  ctx.beginPath();
+  ctx.moveTo(centerXAtY(dashScrollOffset - DASH_PERIOD) - 3, dashScrollOffset - DASH_PERIOD);
+  ctx.lineTo(centerXAtY(CANVAS_HEIGHT + DASH_PERIOD) - 3, CANVAS_HEIGHT + DASH_PERIOD);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(centerXAtY(dashScrollOffset - DASH_PERIOD) + 3, dashScrollOffset - DASH_PERIOD);
+  ctx.lineTo(centerXAtY(CANVAS_HEIGHT + DASH_PERIOD) + 3, CANVAS_HEIGHT + DASH_PERIOD);
+  ctx.stroke();
   ctx.setLineDash([]);
 }
 
@@ -4405,21 +4645,9 @@ function updatePlayer (dt) {
   const left = keys['ArrowLeft'];
   const right = keys['ArrowRight'];
 
-  // Gyroscope control (US-004): overrides keyboard/touch left/right
+  // Gyroscope control: unified processGyroInput pipeline
   if (gyroEnabled) {
-    let gamma = gyroGamma * gyroSensitivity;
-    // Apply dead zone
-    if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
-      gamma = 0;
-    } else {
-      // Remove dead zone offset and normalize
-      gamma = gamma > 0 ? gamma - GYRO_DEAD_ZONE : gamma + GYRO_DEAD_ZONE;
-    }
-    // Clamp to max angle (after dead zone removal)
-    const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
-    gamma = Math.max(-effectiveMax, Math.min(effectiveMax, gamma));
-    // Map to target velocity: -1..+1 → -MAX_SPEED..+MAX_SPEED
-    const targetVx = (gamma / effectiveMax) * PLAYER_MAX_SPEED;
+    const targetVx = processGyroInput();
     // Smooth lerp toward target velocity
     player.vx += (targetVx - player.vx) * 0.15;
     // Snap to zero if very small
@@ -4475,8 +4703,9 @@ function updatePlayer (dt) {
   // Camera roll: ease toward target based on lateral input (US-004/006)
   let rollTarget;
   if (gyroEnabled) {
-    // Map gyro gamma to camera roll (-2.5 to +2.5)
-    const clampedGamma = Math.max(-GYRO_MAX_ANGLE, Math.min(GYRO_MAX_ANGLE, gyroGamma));
+    // Map calibrated gyro gamma to camera roll (-2.5 to +2.5)
+    const calibratedGamma = gyroSmoothedGamma - gyroBaselineGamma;
+    const clampedGamma = Math.max(-GYRO_MAX_ANGLE, Math.min(GYRO_MAX_ANGLE, calibratedGamma));
     rollTarget = -(clampedGamma / GYRO_MAX_ANGLE) * 2.5;
   } else {
     rollTarget = (left && !right) ? 2.5 : ((right && !left) ? -2.5 : 0);
@@ -7417,6 +7646,7 @@ const playingState = {
     if (gyroEnabled) {
       window.removeEventListener('deviceorientation', onDeviceOrientation, true);
       gyroGamma = 0;
+      gyroSmoothedGamma = 0;
       // Note: we keep gyroEnabled=true so it auto-restarts on next playingState enter
     }
     AudioManager.stopNitro();
@@ -8438,6 +8668,7 @@ const settingsState = {
     if (gyroEnabled) {
       window.removeEventListener('deviceorientation', onDeviceOrientation, true);
       gyroGamma = 0;
+      gyroSmoothedGamma = 0;
     }
   },
 
@@ -8447,19 +8678,11 @@ const settingsState = {
       return;
     }
 
-    // Update test car with gyro (same physics as game)
+    // Update test car with gyro (uses unified processGyroInput pipeline)
     if (gyroEnabled) {
       this.testRoadScroll += 200 * dt;
 
-      let gamma = gyroGamma * gyroSensitivity;
-      if (Math.abs(gamma) < GYRO_DEAD_ZONE) {
-        gamma = 0;
-      } else {
-        gamma = gamma > 0 ? gamma - GYRO_DEAD_ZONE : gamma + GYRO_DEAD_ZONE;
-      }
-      const effectiveMax = GYRO_MAX_ANGLE - GYRO_DEAD_ZONE;
-      gamma = Math.max(-effectiveMax, Math.min(effectiveMax, gamma));
-      const targetVx = (gamma / effectiveMax) * PLAYER_MAX_SPEED;
+      const targetVx = processGyroInput();
       this.testCarVx += (targetVx - this.testCarVx) * 0.15;
       if (Math.abs(this.testCarVx) < 2) this.testCarVx = 0;
 
