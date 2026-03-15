@@ -135,6 +135,14 @@ const WEAPON_SPAWN_MAX = 20000;          // px traveled max between spawns
 const WEAPON_COLLECT_ANIM_DURATION = 0.2;
 const WEAPON_DURATION = 3.0;             // seconds of active shooting
 
+// Bullet (projectile) constants — US-002
+const BULLET_FIRE_INTERVAL = 0.2;        // seconds between automatic shots
+const BULLET_SPEED = 600;                // px/s upward
+const BULLET_WIDTH = 4;                  // px
+const BULLET_HEIGHT = 12;                // px
+const BULLET_MAX = 10;                   // max simultaneous bullets on screen
+const BULLET_KILL_POINTS = 50;           // bonus points per vehicle destroyed
+
 // Speed lines: drawn in rumble-strip margins when scrollSpeed > 500
 const SPEED_LINE_PERIOD = CANVAS_HEIGHT + 80; // vertical wrap period
 const speedLineData = (() => {
@@ -880,6 +888,64 @@ const AudioManager = {
     osc.start(now);
     osc.stop(now + 0.25);
     osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Short percussive bullet shot SFX — high-freq click (US-002)
+  playBulletShoot () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1200, now);
+    osc.frequency.exponentialRampToValueAtTime(300, now + 0.06);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.06);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+  },
+
+  // Vehicle destruction boom — mid-range noise burst + low thump (US-002)
+  playVehicleDestroy () {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Noise burst
+    const sampleRate = this.ctx.sampleRate;
+    const noiseLen = Math.floor(sampleRate * 0.12);
+    const noiseBuf = this.ctx.createBuffer(1, noiseLen, sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) noiseData[i] = Math.random() * 2 - 1;
+    const noiseSrc = this.ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const bpFilter = this.ctx.createBiquadFilter();
+    bpFilter.type = 'bandpass';
+    bpFilter.frequency.setValueAtTime(800, now);
+    bpFilter.Q.setValueAtTime(1.5, now);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.3, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    noiseSrc.connect(bpFilter);
+    bpFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+    noiseSrc.start(now);
+    noiseSrc.stop(now + 0.12);
+    noiseSrc.onended = () => { noiseSrc.disconnect(); bpFilter.disconnect(); noiseGain.disconnect(); };
+    // Low thump
+    const thump = this.ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(80, now);
+    thump.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+    const thumpGain = this.ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.25, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.masterGain);
+    thump.start(now);
+    thump.stop(now + 0.1);
+    thump.onended = () => { thump.disconnect(); thumpGain.disconnect(); };
   },
 
   // ─── Near Miss, Combo, and Bonus SFX ───
@@ -1880,6 +1946,7 @@ let shieldBreakFlash = 0; // countdown for bright border flash after shield abso
 
 // Weapon (shooting) state
 let shootingTimer = 0; // countdown during active shooting power-up
+let bulletFireTimer = 0; // cooldown between automatic shots (US-002)
 
 // Camera roll state (US-006)
 let cameraRoll = 0; // current roll in degrees; positive = tilt left, negative = tilt right
@@ -3075,6 +3142,20 @@ function renderBloom () {
     bloomCtx.restore();
   }
 
+  // Bullet halos (phase-dependent color) — US-002
+  for (const b of gameState.bullets) {
+    const phase = b.phase || gameState.phase;
+    bloomCtx.fillStyle = phase === 'space' ? '#00FF66' : phase === 'sky' ? '#42A5F5' : '#FFCC00';
+    bloomCtx.save();
+    bloomCtx.globalAlpha = 0.5;
+    bloomCtx.translate(b.x, b.y);
+    bloomCtx.scale(2, 2);
+    bloomCtx.beginPath();
+    bloomCtx.arc(0, 0, BULLET_WIDTH, 0, Math.PI * 2);
+    bloomCtx.fill();
+    bloomCtx.restore();
+  }
+
   // Player headlights (front two white circles) — skip during invulnerability blink frames
   const blinkHidden = invulnTimer > 0 && Math.floor(invulnTimer / BLINK_INTERVAL) % 2 === 1;
   if (!blinkHidden) {
@@ -3406,6 +3487,8 @@ const gameState = {
   // Weapon items
   weaponItems: [],
   nextWeaponSpawnDistance: WEAPON_SPAWN_MIN,
+  // Bullets (projectiles from weapon power-up) — US-002
+  bullets: [],
   // Phase system
   phase: 'road',
   phaseTransition: { progress: 0, active: false, from: '', to: '' },
@@ -3495,6 +3578,8 @@ function resetGameState () {
   // Reset weapon state
   gameState.player.shooting = false;
   shootingTimer = 0;
+  bulletFireTimer = 0;
+  gameState.bullets = [];
   gameState.weaponItems = [];
   gameState.nextWeaponSpawnDistance = WEAPON_SPAWN_MIN + Math.random() * (WEAPON_SPAWN_MAX - WEAPON_SPAWN_MIN);
   // Reset VFX
@@ -5742,6 +5827,175 @@ function renderWeaponHUD (ctx) {
   ctx.restore();
 }
 
+// --- Bullet (Projectile) System — US-002 ---
+// Automatic shooting while weapon power-up is active
+
+function updateBullets (dt) {
+  // Spawn bullets while weapon is active
+  if (gameState.player.shooting) {
+    bulletFireTimer -= dt;
+    if (bulletFireTimer <= 0 && gameState.bullets.length < BULLET_MAX) {
+      const player = gameState.player;
+      gameState.bullets.push({
+        x: player.x + PLAYER_WIDTH / 2,
+        y: player.y,
+        phase: gameState.phase, // track phase at spawn for visual
+      });
+      bulletFireTimer = BULLET_FIRE_INTERVAL;
+      AudioManager.playBulletShoot();
+    }
+  } else {
+    bulletFireTimer = 0; // reset cooldown when weapon not active
+  }
+
+  // Update bullet positions + check collision with traffic
+  for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+    const b = gameState.bullets[i];
+    b.y -= BULLET_SPEED * dt;
+
+    // Remove if off screen
+    if (b.y + BULLET_HEIGHT < 0) {
+      gameState.bullets.splice(i, 1);
+      continue;
+    }
+
+    // Bullet hitbox (centered on x)
+    const bHb = {
+      x: b.x - BULLET_WIDTH / 2,
+      y: b.y - BULLET_HEIGHT / 2,
+      w: BULLET_WIDTH,
+      h: BULLET_HEIGHT,
+    };
+
+    // Check collision with traffic vehicles
+    for (let j = gameState.traffic.length - 1; j >= 0; j--) {
+      const v = gameState.traffic[j];
+      if (v.destroyed) continue; // skip already destroyed
+      const vHb = getVehicleHitbox(v);
+      if (aabbOverlap(bHb, vHb)) {
+        // Destroy vehicle
+        spawnVehicleDestroyParticles(v);
+        AudioManager.playVehicleDestroy();
+
+        // Score bonus + combo
+        const pts = BULLET_KILL_POINTS * (comboMultiplier >= 2 ? comboMultiplier : 1);
+        gameState.score += pts;
+        comboMultiplier += 1;
+        comboResetTimer = COMBO_RESET_TIME;
+        comboScaleTimer = COMBO_SCALE_DURATION;
+        bestCombo = Math.max(bestCombo, comboMultiplier);
+        scorePunchScale = Math.min(0.4, 0.15 + comboMultiplier * 0.05);
+        scorePunchColor = getComboColor(comboMultiplier);
+
+        // Float text
+        const comboColor = getComboColor(comboMultiplier - 1);
+        const label = comboMultiplier > 2
+          ? 'x' + (comboMultiplier - 1) + ' +' + pts + '!'
+          : '+' + pts;
+        spawnFloatText(v.x + v.width / 2, v.y + v.height / 2, label, comboColor);
+
+        // Screen shake (light)
+        triggerShake(0.08, 2);
+
+        // Remove vehicle and bullet
+        gameState.traffic.splice(j, 1);
+        gameState.bullets.splice(i, 1);
+        break; // bullet consumed
+      }
+    }
+  }
+}
+
+// Explosion particles when a vehicle is destroyed by bullet (US-002)
+function spawnVehicleDestroyParticles (v) {
+  const cx = v.x + v.width / 2;
+  const cy = v.y + v.height / 2;
+  const fireColors = ['#FFF176', '#FFB74D', '#FF7043', '#E53935'];
+  const debrisColors = ['#757575', '#4E342E', '#424242'];
+  // Fire particles
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 160;
+    particles.push({
+      x: cx + (Math.random() - 0.5) * v.width * 0.4,
+      y: cy + (Math.random() - 0.5) * v.height * 0.4,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.3 + Math.random() * 0.3,
+      maxLife: 0.6,
+      color: fireColors[Math.floor(Math.random() * fireColors.length)],
+      size: 2 + Math.random() * 3,
+    });
+  }
+  // Debris particles
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 100;
+    particles.push({
+      x: cx + (Math.random() - 0.5) * v.width * 0.3,
+      y: cy + (Math.random() - 0.5) * v.height * 0.3,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed + 30,
+      life: 0.4 + Math.random() * 0.3,
+      maxLife: 0.7,
+      color: debrisColors[Math.floor(Math.random() * debrisColors.length)],
+      size: 1.5 + Math.random() * 2,
+    });
+  }
+}
+
+function renderBullets (ctx) {
+  if (gameState.bullets.length === 0) return;
+  const phase = gameState.phase;
+
+  for (const b of gameState.bullets) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    if (phase === 'space' || b.phase === 'space') {
+      // Space: green laser bolt
+      ctx.shadowColor = '#00FF66';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = '#00FF66';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright core
+      ctx.fillStyle = '#AAFFAA';
+      ctx.fillRect(-1, -BULLET_HEIGHT / 2, 2, BULLET_HEIGHT);
+    } else if (phase === 'sky' || b.phase === 'sky') {
+      // Sky: blue missile/laser
+      ctx.shadowColor = '#42A5F5';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = '#42A5F5';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright core
+      ctx.fillStyle = '#BBDEFB';
+      ctx.fillRect(-1, -BULLET_HEIGHT / 2, 2, BULLET_HEIGHT);
+      // Pointed tip
+      ctx.fillStyle = '#42A5F5';
+      ctx.beginPath();
+      ctx.moveTo(0, -BULLET_HEIGHT / 2 - 3);
+      ctx.lineTo(BULLET_WIDTH / 2, -BULLET_HEIGHT / 2);
+      ctx.lineTo(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Road: metallic bullet
+      ctx.shadowColor = '#FFCC00';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
+      // Bright tip
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(-BULLET_WIDTH / 2, -BULLET_HEIGHT / 2, BULLET_WIDTH, 3);
+      // Trail glow
+      ctx.fillStyle = '#FFCC00';
+      ctx.fillRect(-1, BULLET_HEIGHT / 2 - 2, 2, 4);
+    }
+
+    ctx.restore();
+  }
+}
+
 // --- Floating pickup texts (US-009) ---
 // Rendered above world layer, below main HUD panel
 function renderFloatTexts (ctx) {
@@ -6393,6 +6647,7 @@ const playingState = {
     // Debug shortcuts: P = jump near 25k (sky), O = jump near 50k (space)
     if (debugMode && (consumeKey('p') || consumeKey('P'))) gameState.score = 24500;
     if (debugMode && (consumeKey('o') || consumeKey('O'))) gameState.score = 49500;
+    if (debugMode && (consumeKey('w') || consumeKey('W'))) { shootingTimer += WEAPON_DURATION; gameState.player.shooting = true; }
 
     updatePlayer(dt);
     updateTraffic(dt);
@@ -6401,6 +6656,7 @@ const playingState = {
     updateNitroItems(dt);
     updateShieldItems(dt);
     updateWeaponItems(dt);
+    updateBullets(dt);
 
     // Tick weapon shooting timer
     if (shootingTimer > 0) {
@@ -6624,6 +6880,7 @@ const playingState = {
     renderNitroItems(ctx);
     renderShieldItems(ctx);
     renderWeaponItems(ctx);
+    renderBullets(ctx);
     renderPlayer(ctx, gameState.player);
     renderParticles(ctx);
     // Capture road/traffic/player/particles layer for motion blur next frame (US-003)

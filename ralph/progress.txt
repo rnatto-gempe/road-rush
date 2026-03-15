@@ -1,212 +1,49 @@
 # Ralph Progress Log
-Started: Sat Mar 14 19:39:09 -03 2026
+Started: Sat Mar 14 22:30:07 -03 2026
 ---
 
 ## Codebase Patterns
-- The game is ~5900 lines in a single file: `src/main.js`
-- Module-level `let` variables (e.g. `spawnPauseTimer`, `comboMultiplier`) hold state that `resetGameState()` must reset
-- `resetGameState()` resets ALL game state — always add new state resets there
-- Easing/utility functions go near top of file after constants section
-- Phase transition update goes in `playingState.update()` after the score update block
-- Build: `node_modules/.bin/vite build` (vite not in PATH; use local binary)
-- Pre-generated data arrays (speedLineData, skyCloudData, spaceStarData) go near top of file after constants, use IIFE pattern
-- Phase-specific rendering uses extracted helper functions: `renderSkyElements()`, `renderSpaceElements()`, `renderRoadRumbleStrips()`, `renderRoadSurface()` — reused by both static and transition renderers
-- `PHASE_BG_COLORS` maps phase names to `{top, bottom}` hex colors for gradient interpolation
-- `lerpColor(hex1, hex2, t)` utility near top of file for RGB interpolation between hex colors
-- Transition rendering uses `ctx.globalAlpha` to fade elements in/out — always save/restore `globalAlpha`
-- `renderPlayer()` uses early-return per phase — add new phases as `if (phase === 'X' || transitioning to/from X) { ... return; }` before default road car code. Order matters: space block before sky block (sky→space transition has `from === 'sky'`)
-- `chooseVehicleType()` filters by `t.phase === gameState.phase` — new vehicle types MUST have a `phase` property to appear in the correct phase
-- When a phase has only aggressive vehicle types (no passive), `chooseVehicleType` falls back to all available types to avoid empty pool crash
-- Vehicle sprites are rendered in `renderTraffic()` with `else if (v.type === 'typeName')` chain — add new types there
-- Rotating vehicle sprites: add `rotation` property in `spawnVehicle()`, increment in `updateTraffic()` via `if (v.rotation !== undefined)`, render with `ctx.save/translate/rotate/restore`
-- Per-vehicle spawn-time data (e.g. `vertices`, `rotation`): add in `spawnVehicle()` with a `if (candidate.typeName === 'X')` block after base object creation
+- Item system follows a consistent pattern: constants → gameState array + nextSpawnDistance → spawn/update/render functions → bloom entry → update/render calls in playingState
+- Spawn rarity is controlled by SPAWN_MIN/SPAWN_MAX constants (px traveled between spawns). Shield: 5000-7500px, Nitro: 2500-4000px
+- All SFX use Web Audio API procedural synthesis in the AudioManager object — no audio files
+- Collection uses AABB overlap between getPlayerHitbox() and item bounding box
+- Float text feedback via spawnFloatText(x, y, text, color) on collection
+- Bloom/glow added in renderBloom() function for each collectible type
+- HUD bars (nitro, weapon) rendered at bottom-center of screen
+- Bullet system: bullets[] array in gameState, updateBullets() handles spawn+move+collision, renderBullets() has phase-aware visuals
+- Vehicle destruction uses spawnVehicleDestroyParticles() for fire+debris particle burst
+- Bullet-vehicle collision uses same aabbOverlap() + getVehicleHitbox() as player collision
+- Debug shortcuts in playingState: D=toggle debug, P=25k score, O=50k score, W=activate weapon
 
----
-
-## 2026-03-14 - US-003
-- Implemented static space scenario rendering
-- Added `spaceStarData` pre-generated array (40 stars with x, yPhase, size, brightness, layer) near `skyCloudData`
-- Added `SPACE_STAR_PERIOD = CANVAS_HEIGHT + 100` wrap constant
-- Added `renderRoadSpace()` function: space gradient (#0A0A1A → #0D1B2A), 2-layer parallax starfield (0.1× and 0.2× speed), rgba(13,27,42,0.3) corridor overlay, cyan border lines (rgba(0,229,255,0.6)), dotted cyan lane markers (rgba(0,229,255,0.1))
-- Added space phase dispatch in `renderRoad()`: `if (phase === 'space') { renderRoadSpace(ctx, scrollOffset); return; }`
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Star scroll formula mirrors cloud formula: `sy = (star.yPhase + scrollOffset * speed) % PERIOD` with visibility check before drawing
-  - Stars use `fillRect` instead of `arc` for performance (1-2px squares are visually identical to circles at this size)
-  - Cyan color `#00E5FF` as rgba: `rgba(0, 229, 255, alpha)` — used for space borders and lanes
----
-
-## 2026-03-14 - US-002
-- Implemented static sky scenario rendering
-- Added `skyCloudData` pre-generated array (6 clouds, x within road area, random yPhase) near `speedLineData`
-- Added `SKY_CLOUD_PERIOD = CANVAS_HEIGHT + 100` wrap constant
-- Modified `renderRoad()` to delegate to `renderRoadSky()` when `phase === 'sky'`
-- `renderRoadSky()` renders: sky gradient (#4A90D9 → #87CEEB), parallax clouds (0.3× speed), rgba(107,179,224,0.15) corridor overlay, wind border lines (rgba(255,255,255,0.3)), dotted lane markers (rgba(255,255,255,0.15))
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - `renderRoad()` uses early-return pattern per phase — add new phases as `if (phase === 'X') { renderRoadX(ctx, scrollOffset); return; }` before existing code
-  - `gameState` is module-scoped; cannot be accessed from browser console — use score threshold to test phase triggers in-game
-  - Cloud scroll formula: `cy = (cloud.yPhase + (scrollOffset * 0.3) % SKY_CLOUD_PERIOD) % SKY_CLOUD_PERIOD - cloudHeight` gives correct downward parallax scrolling
-  - `roundRect()` available in Canvas2D API — use for cloud/UI shapes
 ---
 
 ## 2026-03-14 - US-001
-- Implemented phase system foundation (no visuals, only state/logic)
-- Added `phase: 'road'` to all 4 VEHICLE_TYPES entries (sedan, truck, sports, moto)
-- Added `gameState.phase = 'road'` and `gameState.phaseTransition = { progress, active, from, to }` to gameState object
-- Added module-level `phaseTriggered = { sky: false, space: false }` variable
-- Added `easeInOutCubic(t)` utility function after debugMode declaration
-- Added phase trigger checks in `playingState.update()`: sky at 25000 pts, space at 50000 pts
-- phaseTransition stores `_timer` (linear elapsed) and derives eased `progress` from it
-- `resetGameState()` resets phase to 'road', resets phaseTriggered, resets phaseTransition
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+- Implemented weapon power-up item: spawn, collect, HUD bar, SFX, bloom
+- Added constants: WEAPON_ITEM_RADIUS, WEAPON_SPAWN_MIN/MAX (12000-20000px, 2-3x rarer than shield), WEAPON_DURATION (3s)
+- Added shootingTimer state variable, player.shooting flag
+- Timer stacks on re-collect (+3s added to remaining time)
+- Files changed: src/main.js (+204 lines)
 - **Learnings for future iterations:**
-  - `_timer` pattern: store raw linear time in `phaseTransition._timer`, compute eased `progress` from it each frame — avoids compounding easing errors
-  - The score trigger logic must fire even when phaseTriggered.sky is already set (space check is independent), so both checks run every frame
-  - Build runs as `node_modules/.bin/vite build` since `vite` is not in PATH
+  - Follow the shield item as the closest pattern for new collectibles
+  - gameState reset in resetGameState() must include new arrays, spawn distances, and player flags
+  - Bloom entries go before "Player headlights" comment in renderBloom()
+  - HUD bars go after renderNitroHUD(ctx) call in the render section
 ---
 
-## 2026-03-14 - US-004
-- Implemented animated transition between phase scenarios
-- Added `lerpColor(hex1, hex2, t)` utility for RGB hex color interpolation
-- Added `PHASE_BG_COLORS` constant mapping phases to gradient top/bottom colors
-- Added `renderRoadTransition(ctx, scrollOffset, pt)` — blends background gradient via lerp, fades out "from" elements with `globalAlpha = 1 - progress`, fades in "to" elements with `globalAlpha = progress`
-- Extracted reusable rendering helpers: `renderSkyElements()`, `renderSpaceElements()`, `renderRoadRumbleStrips()`, `renderRoadSurface()`
-- Refactored `renderRoadSky()` and `renderRoadSpace()` to reuse extracted helpers (DRY)
-- `renderRoad()` now dispatches to `renderRoadTransition()` when `phaseTransition.active`
-- Vehicles rendered separately in `renderTraffic()` — unaffected by transition, continue scrolling normally
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
+## 2026-03-14 - US-002
+- Implemented automatic bullet firing system while weapon power-up is active
+- Bullets fire every 200ms, move upward at 600px/s, max 10 on screen
+- Phase-aware bullet visuals: metallic (road), blue missile (sky), green laser (space)
+- AABB collision between bullets and traffic — 1 hit = 1 kill, vehicle removed + explosion particles
+- +50 points per kill (× combo multiplier), increments combo counter
+- Added AudioManager.playBulletShoot() (short square wave click) and AudioManager.playVehicleDestroy() (noise burst + low thump)
+- Bloom entries for bullets (phase-dependent color glow)
+- Added debug shortcut W to activate weapon in debug mode
+- Files changed: src/main.js (~200 lines added), ralph/prd.json, ralph/progress.txt
 - **Learnings for future iterations:**
-  - `ctx.globalAlpha` multiplies with all subsequent draw operations — save/restore it to avoid leaking state
-  - Extracting phase-specific elements into reusable helpers (e.g. `renderSkyElements`) makes transition blending trivial via globalAlpha
-  - Background gradients must be interpolated per-channel (RGB lerp) — can't just alpha-blend two gradients on top of each other
-  - The `renderRoadTransition` dispatches both "from" and "to" element renderers, so each phase's elements are drawn independently
----
-
-## 2026-03-14 - US-005
-- Implemented sky phase player sprite: car with triangular white wings
-- `renderPlayer()` now checks `gameState.phase` and `phaseTransition` to render phase-specific sprites
-- Wings grow from 0→full size during road→sky transition (scale = progress), shrink during sky→space transition (scale = 1-progress)
-- Added 3 white semi-transparent wind trail lines behind the car in sky phase, animated with scrollOffset
-- Hitbox unchanged — wings are purely decorative, drawn outside the car body bounds
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - `renderPlayer()` uses early-return pattern per phase — sky sprite block returns early after drawing, default road car is at the bottom
-  - Wing scale tied to `phaseTransition.progress` — for "to" transitions it grows, for "from" transitions it shrinks (1-progress)
-  - Wind trail uses `gameState.scrollOffset * 0.5 % 20` for subtle scroll animation — same pattern can be used for other trail effects
-  - Phase-specific sprite rendering must handle both static phase AND active transitions (check `pt.to` and `pt.from`)
----
-
-## 2026-03-14 - US-006
-- Implemented space phase player sprite: triangular cyan spaceship with animated thrusters
-- Ship has aerodynamic triangular body (#00E5FF), dark cockpit at top, 2 orange thruster housings (6×10px) at rear
-- Thruster flames oscillate height 8-14px using sin(elapsedTime*10), color interpolates between #FF6600 and #FFCC00
-- Crossfade transition sky→space: sky car+wings drawn with alpha (1-progress), space ship drawn with alpha (progress)
-- Space block placed BEFORE sky block in renderPlayer() — since space phase also involves sky transitions (sky→space), it must be checked first
-- Hitbox unchanged
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Space sprite block must come before sky block because sky→space transition has `from === 'sky'` which would match the sky condition — order matters for early-return pattern
-  - Crossfade between two sprite styles requires drawing BOTH sprites with complementary globalAlpha values (1-progress and progress)
-  - Flame animation uses `gameState.elapsedTime * 10` for fast oscillation — multiply by higher values for faster animation
-  - Two flames offset by constant (sin(t) and sin(t+2)) create natural asymmetric flicker
----
-
-## 2026-03-14 - US-007
-- Added `bird` vehicle type to `VEHICLE_TYPES` with phase 'sky', behavior 'weave', 24×20 bounding box
-- Modified `chooseVehicleType()` to filter vehicle types by `t.phase === gameState.phase` — this is the foundation for all phase-specific obstacles
-- Added fallback in `chooseVehicleType()` when passive pool is empty (sky phase only has aggressive bird type)
-- Added bird sprite in `renderTraffic()`: brown oval body (ellipse 12×8) + 2 triangular wings oscillating at sin(elapsedTime*8) × 30°
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Phase filtering in `chooseVehicleType` applies to ALL types — existing road types already have `phase: 'road'` so they naturally stop spawning in sky/space
-  - When adding a phase with only aggressive types (like sky with only bird initially), need fallback `passive.length > 0 ? passive : available` to avoid crash
-  - Bird wing oscillation uses `sin(elapsedTime * 8)` — frequency 8 gives fast flapping look
-  - Bird sprite uses save/restore for wing rotation transforms
----
-
-## 2026-03-14 - US-008
-- Added `airplane` vehicle type: `{ width: 50, height: 70, speedRatio: 0.35, behavior: 'none', phase: 'sky' }`
-- Added `helicopter` vehicle type: `{ width: 44, height: 50, speedRatio: 0.5, behavior: 'laneChange', laneChangeMin: 2.5, laneChangeMax: 5, phase: 'sky' }`
-- Airplane sprite: roundRect fuselage 16×70, horizontal wings 50×10, triangular tail, 4 blue window dots
-- Helicopter sprite: oval body (ellipse 18×22), spinning rotor line (angle = elapsedTime × 15), hub dot, 2 skid lines at base
-- Both types added to `VEHICLE_TYPES` after bird, and sprite rendering added to `renderTraffic()` after bird block
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Airplane is `behavior: 'none'` (passive/slow), helicopter is `behavior: 'laneChange'` (aggressive) — sky phase now has a good mix of passive and aggressive types, removing the need for the fallback pool logic
-  - Helicopter rotor uses `elapsedTime * 15` for fast spinning — higher multiplier than bird wings (8) since rotor should be fast
-  - Airplane sprite is centered using `acx = v.x + v.width / 2` then drawing fuselage offset from center — pattern for centered sprites
----
-
-## 2026-03-14 - US-009
-- Added `asteroid` vehicle type to `VEHICLE_TYPES`: `{ width: 36, height: 36, speedRatio: 0.3, behavior: 'none', phase: 'space' }`
-- Pre-generates 7 irregular polygon vertices in `spawnVehicle()` when type is asteroid (radius 18px ± 4px random), stored in `v.vertices`
-- Added `v.rotation` property initialized to 0, incremented by `dt * 0.5` in `updateTraffic()`
-- Asteroid sprite rendered with `ctx.rotate(v.rotation)` for visual spin, does not affect AABB hitbox
-- Sprite uses fill `#795548` with border `#5D4037`, lineWidth 2
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Rotation update uses generic check `if (v.rotation !== undefined)` — any future rotating type just needs `rotation` property
-  - Vertices pre-generated once at spawn and stored on the vehicle object — avoids per-frame allocation
-  - `ctx.save/translate/rotate/restore` pattern for rotating sprites — translate to center, rotate, draw relative to origin
-  - Asteroid is `behavior: 'none'` (passive) — space phase will need aggressive types too (fighter in US-010)
----
-
-## 2026-03-14 - US-010
-- Added `fighter` vehicle type: `{ width: 30, height: 48, speedRatio: 0.8, behavior: 'laneChange', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'space' }`
-- Added `cruiser` vehicle type: `{ width: 48, height: 72, speedRatio: 0.25, behavior: 'none', phase: 'space' }`
-- Fighter sprite: inverted red triangle (#F44336), darker center stripe, 2 lateral cannons (4×8 rectangles), 2 oscillating fire trail rectangles at rear (color interpolates orange→yellow)
-- Cruiser sprite: large dark roundRect (#455A64) with rounded corners, 4 horizontal panel lines + 2 vertical panel lines, 2 blinking blue lights at top (toggle every 0.5s between bright #42A5F5 and dim #1565C0)
-- Both types added to `VEHICLE_TYPES` after asteroid, sprites rendered in `renderTraffic()` after asteroid block
-- No special spawn data needed — fighter/cruiser use standard vehicle object properties
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Space phase now has good mix: asteroid (passive/slow), cruiser (passive/very slow/large), fighter (aggressive/fast) — similar balance to sky phase
-  - Cruiser width 48px (not 55) is critical for fairness system — 2 cruisers in adjacent lanes leave 80-48=32px gap matching player hitbox width
-  - Blinking lights use `Math.floor(elapsedTime / 0.5) % 2` for 0.5s toggle — simple pattern for any blinking effect
-  - Fire trail flame interpolation: use sin() for height oscillation and lerp factor between two colors simultaneously
----
-
-## 2026-03-14 - US-011
-- Added `playPhaseTransition(fromPhase, toPhase)` method to AudioManager
-- road→sky: ascending sawtooth sweep 200Hz→600Hz over 2s, gain 0.15 with fade out
-- sky→space: bass drop sine 120Hz→40Hz over 1.5s (gain 0.2) + ethereal sine 800Hz (gain 0.05, 1.5s, starts at 0.5s offset)
-- Modified `updateEngine()` to be phase-aware: sky phase applies +50% frequency boost, space phase switches to sine wave 80Hz at gain 0.05
-- `updateEngine()` restores sawtooth waveform when not in space phase (handles reset back to road)
-- Called `AudioManager.playPhaseTransition()` from phase trigger blocks in `playingState.update()`
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - `updateEngine()` accesses `gameState.phase` directly — phase-aware audio modifications go here for persistent drone changes
-  - `osc.type` can be changed on a live oscillator without stopping it — useful for smooth waveform transitions
-  - Phase transition SFX are fire-and-forget: create osc+gain, schedule start/stop, cleanup in onended — same pattern as `playRiser()`
-  - `exponentialRampToValueAtTime` is better than `linearRamp` for frequency sweeps (perceptually linear pitch change)
----
-
-## 2026-03-14 - US-012
-- Added `spawnTransitionParticles(fromPhase, toPhase)` function before `renderParticles()`
-- road→sky: spawns 20 white particles with negative vy (rising), vx ±50, life 2s
-- sky→space: spawns 30 cyan (#00E5FF) particles with vy=0, vx ±200 (horizontal streaking), life 1.5s
-- All transition particles have `isTransition: true` flag
-- Modified `renderParticles()` to render `isTransition` particles as velocity-oriented lines (lineWidth 2, length proportional to speed, max 20px)
-- Called `spawnTransitionParticles()` from phase trigger blocks in `playingState.update()`, right after `AudioManager.playPhaseTransition()`
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Transition particles reuse the existing `particles[]` array and `updateParticles()` — no new update logic needed, just spawn and render differently
-  - Line rendering for streaking particles: normalize velocity vector, draw line from position backward along velocity direction with length proportional to speed
-  - `isTransition` flag check goes before the default `else` branch in `renderParticles()` — same pattern as `isNitro`
-  - Particle count capped at 20 (sky) and 30 (space) per the AC — spawned once at transition start, not per-frame
----
-
-## 2026-03-14 - US-013
-- Added `spawnPauseTimer = 1.0` in both phase transition trigger blocks (road→sky and sky→space) to give player a brief breather during transitions
-- Verified existing behavior already handles all other ACs:
-  - `chooseVehicleType()` already filters by `gameState.phase` — no old-phase vehicles spawn after transition
-  - Existing vehicles in `traffic[]` continue scrolling normally via `updateTraffic()` — no abrupt removal
-  - `resetGameState()` already resets phase, phaseTriggered, phaseTransition, and clears traffic array
-- Browser smoke test confirmed: road→sky at 25k (airplane obstacles appear), sky→space at 50k, game over, restart resets to road with no ghost vehicles
-- Files changed: `src/main.js`, `ralph/prd.json`, `ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Most integration US stories may already be handled by prior implementations — verify before adding code
-  - Debug mode keys 'D' (toggle), 'P' (score→24500), 'O' (score→49500) are essential for testing phase transitions
-  - `spawnPauseTimer` is the existing mechanism for briefly suppressing vehicle spawns — reuse it for any spawn-pause needs
+  - Bullet system pattern: constants → gameState.bullets[] → updateBullets(dt) → renderBullets(ctx) → bloom entry
+  - Vehicle destruction particles follow same pattern as explosion particles (fire + debris colors)
+  - When adding new update functions, wire into playingState update() after item updates
+  - When adding new render functions, wire into playingState render() between items and player layers
+  - Debug shortcuts are gated behind `debugMode &&` check — safe to add for testing
 ---

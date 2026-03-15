@@ -1,233 +1,149 @@
 {
   "project": "Road Rush",
-  "branchName": "ralph/space-transition",
-  "description": "Transição Progressiva — Estrada → Céu → Espaço ao atingir 25k/50k pontos, com cenários procedurais, obstáculos temáticos e sprites evolutivos, sem alterar gameplay core.",
+  "branchName": "ralph/community-features",
+  "description": "Features solicitadas pela comunidade: power-up de tiro, controle por giroscópio, botão de pause e tela de features da comunidade com toast de novidades.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Sistema de fases e estado de transição",
-      "description": "Como desenvolvedor, preciso de um sistema que gerencie as fases do jogo e a progressão entre elas, para que todos os outros sistemas possam reagir à fase atual.",
+      "title": "Power-up de Tiro — Spawn e Coleta",
+      "description": "As a player, I want a new shooting power-up to appear on the road so that I can collect it and gain a temporary weapon.",
       "acceptanceCriteria": [
-        "Nova propriedade `gameState.phase` com valores: 'road', 'sky', 'space' (inicializa como 'road')",
-        "Nova propriedade `gameState.phaseTransition` com `{ progress: 0-1, active: false, from: '', to: '' }`",
-        "Fase 'sky' inicia quando `gameState.score >= 25000`; fase 'space' quando `>= 50000`",
-        "Transição dura 3 segundos — `progress` vai de 0→1 com easing `easeInOutCubic`",
-        "Durante transição, `gameState.phase` já é o novo valor, mas `phaseTransition.active === true` permite interpolar visual",
-        "Flags `phaseTriggered.sky` e `phaseTriggered.space` garantem que cada transição é trigada uma única vez",
-        "`resetGameState()` reseta phase para 'road', zera `phaseTriggered`, zera `phaseTransition`",
-        "Todos os tipos em `VEHICLE_TYPES` recebem `phase: 'road'` sem alterar nenhum outro comportamento",
-        "Build passa sem erros (npm run build)"
+        "Novo item type 'weapon' adicionado ao sistema de spawn de items, seguindo o mesmo padrão de fuel/coin/nitro/shield",
+        "Frequência de spawn do weapon é 2-3x mais rara que shield — configurável no objeto DIFFICULTY",
+        "O item tem sprite visual distinto desenhado via Canvas: ícone de projétil/arma com cor vermelho/laranja marcante",
+        "Ao coletar, ativa flag player.shooting = true com timer de 3 segundos",
+        "Se coletar outro weapon enquanto já ativo, o timer SOMA +3 segundos ao tempo restante (não reseta)",
+        "Power-ups funcionam em conjunto sem conflito: tiro pode estar ativo ao mesmo tempo que shield, nitro, etc.",
+        "HUD mostra barra de duração do power-up de tiro (similar à barra de nitro) enquanto ativo",
+        "SFX procedural ao coletar via Web Audio API (estilo power-up)",
+        "Item spawna em todas as fases (road, sky, space)",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Fundação de todo o feature. Não introduz nada visual — apenas estado e lógica de trigger."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Cenário do céu (fase sky estática)",
-      "description": "Como jogador, quero ver um cenário de céu quando estou na fase sky, para sentir que estou voando.",
+      "title": "Power-up de Tiro — Disparo Automático e Destruição de Veículos",
+      "description": "As a player, I want my car to automatically shoot forward while the power-up is active so that I can destroy enemy vehicles in my path.",
       "acceptanceCriteria": [
-        "`renderRoad()` verifica `gameState.phase` e renderiza cenário sky quando `phase === 'sky'`",
-        "Fundo: gradiente linear top `#4A90D9` → bottom `#87CEEB`",
-        "Sem rumble strips — substituídas por bordas de vento: 2 linhas brancas semi-transparentes (alpha 0.3) em `ROAD_LEFT` e `ROAD_RIGHT`",
-        "Sem faixas tracejadas de lane — substituídas por linhas pontilhadas brancas (alpha 0.15) nas posições de lane com mesmo scroll",
-        "Nuvens decorativas: array pré-gerado de 6 nuvens (x aleatório na área do road, yPhase aleatório). Cada nuvem é um roundRect branco alpha 0.25 (~40×15px), scrolla a 0.3× da scroll speed",
-        "Corredor usa gradiente azul-claro sutil (`#6BB3E0` alpha 0.15) em vez de asfalto",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — cenário sky visível, lanes reconhecíveis"
+        "Projéteis disparam automaticamente para frente a cada ~200ms enquanto player.shooting === true",
+        "Array bullets[] gerencia projéteis ativos (máximo ~10 simultâneos na tela)",
+        "Projéteis têm visual claro desenhado no Canvas, adaptado por fase: bala metálica (road), míssil/laser azul (sky), laser verde (space)",
+        "Projéteis se movem para cima na tela e são removidos ao sair da viewport",
+        "Colisão AABB entre projéteis e veículos do tráfego — 1 hit = 1 kill independente do tamanho do veículo",
+        "Veículo atingido explode com efeito visual de partículas e é removido do array de tráfego",
+        "SFX procedural para disparo (curto, repetitivo) e para explosão de veículo (boom) via Web Audio API",
+        "Destruir veículo dá +50 pontos bônus e incrementa o combo counter existente",
+        "Power-up NÃO torna o player invencível — colisão lateral/traseira com veículos ainda causa dano normal",
+        "Funciona corretamente em road, sky e space phases",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Apenas visual estático — sem lógica de transição ainda (isso vem no US-004)."
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Cenário do espaço (fase space estática)",
-      "description": "Como jogador, quero ver um cenário espacial quando estou na fase space.",
+      "title": "Botão de Pause",
+      "description": "As a player, I want to pause the game at any time during gameplay so that I can take a break without losing progress.",
       "acceptanceCriteria": [
-        "`renderRoad()` renderiza cenário space quando `phase === 'space'`",
-        "Fundo: gradiente top `#0A0A1A` → bottom `#0D1B2A`",
-        "Starfield: array pré-gerado de 40 estrelas com `{x, y, size: 1-2px, brightness: 0.3-1.0, layer: 1|2}`. Layer 1 scrolla a 0.1× speed, layer 2 a 0.2× speed. Wrap vertical ao sair da tela",
-        "Bordas do corredor: linhas ciano `#00E5FF` alpha 0.6, lineWidth 2, em `ROAD_LEFT` e `ROAD_RIGHT`",
-        "Lanes: linhas pontilhadas ciano alpha 0.1",
-        "Corredor: gradiente sutil `#0D1B2A` alpha 0.3",
-        "Sem nebulosas (performance)",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — cenário space visível, lanes reconhecíveis"
+        "Botão de pause visível durante gameplay: ícone '❚❚' no canto superior da tela, desenhado no Canvas",
+        "No desktop, tecla P ou Escape também pausa/despausa o jogo",
+        "No mobile, tap no botão de pause pausa o jogo",
+        "Ao pausar: game loop para de chamar update(dt), mas o último frame continua renderizado",
+        "Overlay semi-transparente escuro (~70% opacidade) com texto 'PAUSADO' centralizado grande",
+        "Botão 'Continuar' no overlay de pause para retomar o jogo",
+        "Todos os timers de power-ups (tiro, nitro, shield) ficam congelados durante a pausa — não expiram",
+        "Áudio (engine drone, road noise) fica em mute ou volume bem reduzido durante pause",
+        "Não é possível pausar durante explosionState ou gameOverState — apenas durante playingState",
+        "Funciona tanto em desktop quanto mobile",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Starfield deve usar array fixo pré-gerado (como speedLineData) para evitar alocação no game loop."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Transição animada entre cenários",
-      "description": "Como jogador, quero ver o cenário mudar gradualmente durante a transição de fase, sem corte abrupto.",
+      "title": "Controle por Giroscópio — Implementação Base",
+      "description": "As a mobile player, I want to control my car by tilting my phone so that I have an alternative, immersive control method.",
       "acceptanceCriteria": [
-        "Quando `phaseTransition.active === true`, `renderRoad()` interpola entre cenário anterior e novo usando `phaseTransition.progress` como fator de lerp",
-        "Cores de fundo interpolam via lerp por canal RGB entre as duas fases",
-        "Elementos do cenário anterior fazem fade out: alpha × (1 - progress)",
-        "Elementos do novo cenário fazem fade in: alpha × progress",
-        "Nuvens (sky) e estrelas (space) aparecem gradualmente com alpha proporcional ao progress",
-        "Veículos já na tela continuam scrollando normalmente durante a transição (não somem abruptamente)",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — transição suave road→sky e sky→space, sem flicker"
+        "Detectar suporte a DeviceOrientationEvent no dispositivo",
+        "Em dispositivos iOS 13+, solicitar permissão via DeviceOrientationEvent.requestPermission() em resposta a user gesture (tap)",
+        "Inclinação do device para esquerda/direita (eixo gamma) move o carro proporcionalmente",
+        "Zona morta (dead zone) de ±5° no centro para evitar drift com o telefone parado",
+        "Movimentação suave com interpolação (lerp) — não brusca/travada",
+        "Giroscópio desligado por padrão — player precisa ativar manualmente via toggle",
+        "Giroscópio funciona APENAS durante o playingState — inativo em menus, game over, explosão, pause",
+        "Sem recalibração ao voltar para o app — mantém referência original",
+        "Quando giroscópio está ativo, botões de seta esquerda/direita ficam ocultos",
+        "Botão de nitro continua funcionando via touch mesmo com giroscópio ativo (apenas setas são substituídas)",
+        "Quando giroscópio é desativado, botões touch de seta voltam ao normal",
+        "Clamp do movimento nos limites da estrada/corredor",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Depende de US-002 e US-003 estarem implementados. Apenas modifica renderRoad() para usar o progress do phaseTransition."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Sprite do jogador — fase sky (carro com asas)",
-      "description": "Como jogador, quero ver meu carro ganhar asas na fase sky.",
+      "title": "Giroscópio — Toggle e Slider de Sensibilidade",
+      "description": "As a mobile player, I want to toggle gyroscope on/off and adjust sensitivity so that I can customize the control to my preference.",
       "acceptanceCriteria": [
-        "`renderPlayer()` verifica `gameState.phase` e desenha sprite diferente para 'sky'",
-        "Sprite sky: corpo do carro atual (vermelho, 40×64) + 2 asas triangulares brancas (alpha 0.8, 12×20px cada) nas laterais, centralizadas verticalmente no corpo",
-        "Quando `phaseTransition.active && phaseTransition.to === 'sky'`: asas crescem de 0 até tamanho final (scale = progress)",
-        "Trilha de vento: 3 linhas brancas semi-transparentes (alpha 0.15, comprimento 20px) saindo da traseira, animadas com scroll",
-        "Hitbox permanece inalterada: `{x: player.x + 4, y: player.y + 6.5, w: 32, h: 51}`",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — carro com asas visível, crescimento suave durante transição"
+        "Botão toggle de giroscópio visível na tela de jogo (ícone de celular inclinado no canto)",
+        "Toggle mostra estado atual (ligado/desligado) com visual claro (cor diferente ou ícone diferente)",
+        "Slider de sensibilidade aparece quando giroscópio está ligado (range 0.5x a 2.0x, pelo menos 5 níveis)",
+        "Sensibilidade multiplica o fator de conversão gamma→pixels no movimento do carro",
+        "Preferências de giroscópio (on/off e sensibilidade) são salvas em localStorage com chave 'roadrush_gyro'",
+        "Preferências são restauradas ao recarregar o jogo",
+        "Toggle e slider são visíveis somente em dispositivos mobile (ocultos no desktop)",
+        "Ao ativar pela primeira vez em iOS, dispara o requestPermission antes de ativar",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Asas são puramente decorativas — fora do hitbox."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Sprite do jogador — fase space (nave)",
-      "description": "Como jogador, quero ver meu carro virar uma nave espacial na fase space.",
+      "title": "Tela de Features da Comunidade",
+      "description": "As a player, I want to see a screen showing community-requested features so that I know my feedback matters and see what's coming.",
       "acceptanceCriteria": [
-        "`renderPlayer()` desenha sprite diferente para 'space'",
-        "Sprite space: forma triangular aerodinâmica (bounding box 40×64) — triângulo principal ciano `#00E5FF`, cockpit escuro no topo, 2 propulsores traseiros (retângulos 6×10 laranja)",
-        "Propulsores com chama animada: height oscila 8-14px por frame, cor interpola entre `#FF6600` e `#FFCC00`",
-        "Quando `phaseTransition.active && phaseTransition.to === 'space'`: crossfade alpha — sky com alpha (1-progress), space com alpha progress",
-        "Hitbox permanece inalterada: `{x: player.x + 4, y: player.y + 6.5, w: 32, h: 51}`",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — nave visível, propulsores animados, transição suave"
+        "Novo state FSM: communityFeaturesState com enter(), update(dt), render(ctx)",
+        "Botão de feedback existente na title screen agora abre a tela communityFeaturesState",
+        "Tela mostra lista de features com: nome da feature, quem solicitou (nome real), descrição curta e status",
+        "Status: '✅ Implementada' ou '🔜 Em breve' com cores distintas (verde e amarelo)",
+        "Lista inicial hardcoded com pelo menos: 'Power-up de Tiro' solicitada por S, 'Controle por Giroscópio' solicitada por John Snow — ambas com status Implementada",
+        "Design visual coerente com estilo do jogo: fundo escuro, texto claro, estilo arcade, dentro do canvas lógico 400×700",
+        "Tela tem botão 'Voltar' que retorna à title screen",
+        "Tela tem botão 'Sugerir Feature' que abre o modal de feedback existente",
+        "Tela tem scroll se houver muitas features (mínimo 4-5 features visíveis)",
+        "Funciona tanto em desktop (mouse/teclado) quanto mobile (touch)",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Obstáculos do céu — pássaro",
-      "description": "Como jogador, quero enfrentar pássaros como obstáculos na fase sky.",
+      "title": "Toast de Novidades — Anúncio de Features da Comunidade",
+      "description": "As a player, I want to see toast notifications about community features on the title screen so that I know new features were added based on player requests.",
       "acceptanceCriteria": [
-        "Novo tipo em `VEHICLE_TYPES`: `bird` com `{ color: '#5D4037', width: 24, height: 20, speedRatio: 0.75, minTime: 0, behavior: 'weave', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'sky' }`",
-        "Sprite em `renderTraffic`: corpo oval (ellipse 12×8), 2 asas triangulares que oscilam. Oscilação: ângulo = sin(elapsedTime × 8) × 30 graus. Cor: `#5D4037`",
-        "`chooseVehicleType` filtra candidatos por `phase === gameState.phase` (aplica a todos os tipos, road e sky)",
-        "Colisão AABB funciona com a bounding box do tipo",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — pássaro aparece, asas batem, colisão funciona"
+        "Toast de novidades existente na title screen é atualizado com novos itens no array de novidades",
+        "Primeiro item (mais recente): '🎯 Feature solicitada por S implementada: Power-up de Tiro!'",
+        "Segundo item: '📱 Feature solicitada por John Snow implementada: Controle por Giroscópio!'",
+        "Terceiro item: '⏸️ Novo: Pause no jogo!'",
+        "Novos toasts aparecem ANTES dos toasts antigos existentes (mais recentes primeiro)",
+        "Estilo visual consistente com o toast de novidades já implementado (mesma animação, cores, posição)",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Este US instala o filtro de fase em chooseVehicleType — os próximos US de obstáculos dependem disso estar pronto."
-    },
-    {
-      "id": "US-008",
-      "title": "Obstáculos do céu — avião e helicóptero",
-      "description": "Como jogador, quero enfrentar aviões e helicópteros na fase sky.",
-      "acceptanceCriteria": [
-        "Novo tipo `airplane`: `{ color: '#B0BEC5', width: 50, height: 70, speedRatio: 0.35, minTime: 0, behavior: 'none', phase: 'sky' }`",
-        "Sprite avião: fuselagem roundRect 16×70 cinza `#B0BEC5`, 2 asas horizontais 50×10 centralizadas, cauda triangular no topo, 4 janelas (pontos azuis 2×2 em fila no corpo)",
-        "Novo tipo `helicopter`: `{ color: '#78909C', width: 44, height: 50, speedRatio: 0.5, minTime: 0, behavior: 'laneChange', laneChangeMin: 2.5, laneChangeMax: 5, phase: 'sky' }`",
-        "Sprite helicóptero: corpo oval cinza-escuro `#78909C`, hélice = linha 40px que rotaciona (ângulo += dt × 15), patins na base (2 linhas horizontais)",
-        "Ambos colidem normalmente via AABB",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — avião e helicóptero aparecem, hélice gira, colisão ok"
-      ],
-      "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
-    },
-    {
-      "id": "US-009",
-      "title": "Obstáculos do espaço — asteroide",
-      "description": "Como jogador, quero enfrentar asteroides na fase space.",
-      "acceptanceCriteria": [
-        "Novo tipo `asteroid`: `{ color: '#795548', width: 36, height: 36, speedRatio: 0.3, minTime: 0, behavior: 'none', phase: 'space' }`",
-        "Sprite asteroide: polígono irregular de 7 vértices pré-gerado no spawn (raio base 18px ± 4px random), armazenado em `v.vertices`. Cor `#795548` com borda `#5D4037`",
-        "Rotação visual: `v.rotation` incrementa `dt × 0.5` por frame. Renderiza com `ctx.rotate(v.rotation)`. Não afeta hitbox AABB",
-        "`spawnVehicle()` gera `vertices` e `rotation: 0` para tipo asteroid",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — asteroide aparece, gira lentamente, colisão funciona"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "vertices gerados uma vez no spawn e armazenados no objeto do veículo."
-    },
-    {
-      "id": "US-010",
-      "title": "Obstáculos do espaço — naves inimigas",
-      "description": "Como jogador, quero enfrentar naves inimigas na fase space.",
-      "acceptanceCriteria": [
-        "Novo tipo `fighter`: `{ color: '#F44336', width: 30, height: 48, speedRatio: 0.8, minTime: 0, behavior: 'laneChange', laneChangeMin: 1.5, laneChangeMax: 3, phase: 'space' }`",
-        "Sprite fighter: triângulo vermelho invertido, 2 canhões laterais (retângulos 4×8), trail de fogo: 2 retângulos laranja na traseira que oscilam em height",
-        "Novo tipo `cruiser`: `{ color: '#455A64', width: 48, height: 72, speedRatio: 0.25, minTime: 0, behavior: 'none', phase: 'space' }` — width 48px (não 55) para caber no fairness system",
-        "Sprite cruiser: roundRect cinza-escuro, 4 painéis laterais (linhas internas), 2 luzes azuis piscantes no topo (toggle a cada 0.5s)",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — fighter e cruiser aparecem, animações funcionam, colisão ok"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "cruiser.width = 48px (não 55) para que 2 cruisers em lanes adjacentes deixem gap suficiente (80-48=32px, igual ao hitbox width do jogador)."
-    },
-    {
-      "id": "US-011",
-      "title": "Efeitos sonoros das transições de fase",
-      "description": "Como jogador, quero ouvir sons que acompanham a mudança de fase.",
-      "acceptanceCriteria": [
-        "Novo método `AudioManager.playPhaseTransition(fromPhase, toPhase)` chamado quando transição inicia",
-        "road→sky: sweep ascendente — oscilador 'sawtooth', frequency ramp 200Hz→600Hz em 2s, gain 0.15, fade out no final",
-        "sky→space: bass drop — oscilador 'sine', frequency ramp 120Hz→40Hz em 1.5s, gain 0.2; seguido de tom etéreo (sine 800Hz, gain 0.05, duration 1.5s)",
-        "Fase sky: engine drone muda frequency para +50% do valor atual",
-        "Fase space: engine drone muda para sine wave 80Hz, gain 0.05 (hum eletrônico)",
-        "Sons procedurais via Web Audio API, sem arquivos externos",
-        "Build passa sem erros (npm run build)"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "AudioManager pattern: check this.ctx, create osc+gain, connect to masterGain, schedule, cleanup onended."
-    },
-    {
-      "id": "US-012",
-      "title": "Partículas de transição de fase",
-      "description": "Como jogador, quero ver efeitos de partículas durante a mudança de fase para reforçar o momento.",
-      "acceptanceCriteria": [
-        "Transição road→sky: spawna 20 partículas brancas com vy negativo (sobem), vx aleatório ±50, life 2s. Chamado uma vez no início da transição",
-        "Transição sky→space: spawna 30 partículas ciano com vy=0, vx aleatório ±200 (streaking), life 1.5s. Chamado uma vez no início da transição",
-        "Partículas usam o array `particles[]` existente, renderizadas por `renderParticles()` sem mudanças nessa função",
-        "Partículas de transição têm `isTransition: true` — renderizadas como linha (lineWidth 2, comprimento proporcional à velocidade) em vez de quadrado",
-        "Sem slow-motion durante transição (risco de morte injusta)",
-        "Máximo 30 partículas de transição por evento (cap para performance)",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — partículas visíveis durante transição"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "Usa particle shape existente: { x, y, vx, vy, life, maxLife, color, size } + isTransition."
-    },
-    {
-      "id": "US-013",
-      "title": "Limpeza de veículos na transição e smoke test completo",
-      "description": "Como desenvolvedor, preciso garantir que veículos da fase anterior são removidos corretamente e que o fluxo completo funciona.",
-      "acceptanceCriteria": [
-        "Veículos da fase anterior que já estão na tela continuam descendo normalmente até saírem — não somem abruptamente",
-        "Nenhum novo veículo da fase anterior é spawnado após início da transição",
-        "Novos veículos da fase atual começam a spawnar imediatamente durante a transição",
-        "Se `phaseTransition.active`, `spawnPauseTimer` recebe 1.0s (pausa breve para não sobrecarregar o jogador)",
-        "Smoke test: jogar → atingir 25k → transição road→sky → obstáculos sky aparecem → atingir 50k → transição sky→space → obstáculos space aparecem → morrer → game over → reiniciar → volta para fase road com tudo resetado",
-        "Sem crash, NaN, ou veículo 'fantasma' (tipo de fase errada) em nenhum momento do fluxo",
-        "Build passa sem erros (npm run build)",
-        "Verificar no browser usando dev-browser skill — fluxo completo funciona"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "US final de integração. Confirmar que resetGameState() limpa tudo: phase, phaseTriggered, phaseTransition, e que veículos antigos não ficam 'presos'."
     }
   ]
 }
