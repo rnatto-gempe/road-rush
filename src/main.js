@@ -4072,14 +4072,14 @@ function renderPlayer (ctx, player) {
     if (pt.active && pt.to === 'sky') wingScale = pt.progress;
     else if (pt.active && pt.from === 'sky') wingScale = 1 - pt.progress;
 
-    // Wind trail lines (behind car, drawn first)
-    const trailAlpha = 0.15 * wingScale;
+    // Wind trail lines (behind car, drawn first) — sinusoidal undulation, higher alpha
+    const trailAlpha = 0.25 * wingScale;
     if (trailAlpha > 0.01) {
       const scrollAnim = (gameState.scrollOffset * 0.5) % 20;
       ctx.strokeStyle = `rgba(255, 255, 255, ${trailAlpha})`;
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 3; i++) {
-        const trailX = x + 8 + i * 12;
+        const trailX = x + 8 + i * 12 + Math.sin(gameState.elapsedTime * 3 + i) * 2;
         const trailY = y + height + 2 + i * 3 + scrollAnim;
         ctx.beginPath();
         ctx.moveTo(trailX, trailY);
@@ -4088,34 +4088,71 @@ function renderPlayer (ctx, player) {
       }
     }
 
-    // Car body (same red car)
+    // Car body (same red car) with outline
     ctx.fillStyle = '#E53935';
     ctx.beginPath();
     ctx.roundRect(x, y, width, height, 6);
     ctx.fill();
+    ctx.strokeStyle = '#B71C1C';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
-    // Wings (triangular, white, alpha 0.8, 12×20px each, centered vertically on body)
+    // Wings (triangular, gradient, alpha 0.8, 12×20px each, centered vertically on body)
     if (wingScale > 0.01) {
       const wingW = 12 * wingScale;
       const wingH = 20 * wingScale;
       const wingY = y + (height - wingH) / 2;
       ctx.save();
       ctx.globalAlpha = 0.8;
-      ctx.fillStyle = '#FFFFFF';
-      // Left wing
+
+      // Left wing with gradient
+      const leftGrad = ctx.createLinearGradient(x - wingW, wingY, x, wingY);
+      leftGrad.addColorStop(0, '#CFD8DC');
+      leftGrad.addColorStop(1, '#FFFFFF');
+      ctx.fillStyle = leftGrad;
       ctx.beginPath();
       ctx.moveTo(x, wingY);
       ctx.lineTo(x - wingW, wingY + wingH / 2);
       ctx.lineTo(x, wingY + wingH);
       ctx.closePath();
       ctx.fill();
-      // Right wing
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Right wing with gradient
+      const rightGrad = ctx.createLinearGradient(x + width, wingY, x + width + wingW, wingY);
+      rightGrad.addColorStop(0, '#FFFFFF');
+      rightGrad.addColorStop(1, '#CFD8DC');
+      ctx.fillStyle = rightGrad;
       ctx.beginPath();
       ctx.moveTo(x + width, wingY);
       ctx.lineTo(x + width + wingW, wingY + wingH / 2);
       ctx.lineTo(x + width, wingY + wingH);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = '#37474F';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Ailerons/flaps at wing tips
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#B0BEC5';
+      // Left aileron
+      ctx.beginPath();
+      ctx.moveTo(x - wingW, wingY + wingH / 2);
+      ctx.lineTo(x - wingW - 4 * wingScale, wingY + wingH / 2 - 3 * wingScale);
+      ctx.lineTo(x - wingW - 4 * wingScale, wingY + wingH / 2 + 3 * wingScale);
+      ctx.closePath();
+      ctx.fill();
+      // Right aileron
+      ctx.beginPath();
+      ctx.moveTo(x + width + wingW, wingY + wingH / 2);
+      ctx.lineTo(x + width + wingW + 4 * wingScale, wingY + wingH / 2 - 3 * wingScale);
+      ctx.lineTo(x + width + wingW + 4 * wingScale, wingY + wingH / 2 + 3 * wingScale);
+      ctx.closePath();
+      ctx.fill();
+
       ctx.restore();
     }
 
