@@ -3087,6 +3087,7 @@ let titleRankingAbortController = null;
 
 // --- Tap to Start / Tap to Retry / Tap Mute Icon / Swipe Ranking ---
 let touchStartY = 0; // canvas coords at touchstart
+let _touchHandled = false; // flag to prevent click after touchend
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
@@ -3117,13 +3118,14 @@ canvas.addEventListener('touchend', (e) => {
   }
 
   // Settings screen tap handling
-  if (handleSettingsTap(cx, cy)) return;
+  if (handleSettingsTap(cx, cy)) { _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400); return; }
 
   if (fsm.currentState === titleState) {
     // Settings gear icon tap (top-right corner)
     const gearX = CANVAS_WIDTH - 30;
     const gearY = 30;
     if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400);
       fsm.transition(settingsState);
       return;
     }
@@ -3174,6 +3176,9 @@ document.body.addEventListener('touchmove', (e) => {
 
 // --- Mute icon + Pause button click detection ---
 canvas.addEventListener('click', (e) => {
+  // Skip click if touchend already handled this interaction
+  if (_touchHandled) return;
+
   const rect = canvas.getBoundingClientRect();
   const scaleX = CANVAS_WIDTH / rect.width;
   const scaleY = CANVAS_HEIGHT / rect.height;
@@ -8381,13 +8386,8 @@ const settingsState = {
 };
 
 // --- Settings State click/tap handler ---
-let _settingsLastTap = 0;
 function handleSettingsTap (cx, cy) {
   if (fsm.currentState !== settingsState) return false;
-  // Debounce: prevent touch + click double-fire on mobile
-  const now = performance.now();
-  if (now - _settingsLastTap < 300) return true;
-  _settingsLastTap = now;
 
   const cardX = 24;
   const cardW = CANVAS_WIDTH - 48;
