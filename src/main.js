@@ -2379,6 +2379,7 @@ function resizeCanvas () {
   positionRankingBackBtn();
   positionFeedbackBtn();
   positionCommunityBtns();
+  positionSettingsBackBtn();
   positionGameOverRanking();
 }
 
@@ -2411,6 +2412,8 @@ let feedbackBtnEl = null;
 // Declared early so positionCommunityBtns() guard works when resizeCanvas() is called below
 let communityBackBtnEl = null;
 let communitySuggestBtnEl = null;
+// Declared early so positionSettingsBackBtn guard works when resizeCanvas() is called below
+let settingsBackBtnEl = null;
 // DOM ranking container for game over screen
 let gameOverRankingEl = null;
 
@@ -3043,6 +3046,42 @@ function positionCommunityBtns () {
   communitySuggestBtnEl.style.transform = 'translateX(-50%)';
 }
 
+// --- Settings Back Button ---
+settingsBackBtnEl = document.createElement('button');
+settingsBackBtnEl.id = 'settings-back-btn';
+settingsBackBtnEl.textContent = 'VOLTAR';
+settingsBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+  'transform:translateX(-50%)',
+].join(';') + ';';
+document.body.appendChild(settingsBackBtnEl);
+
+settingsBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === settingsState) {
+    fsm.transition(titleState);
+  }
+});
+
+function positionSettingsBackBtn () {
+  if (!settingsBackBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  settingsBackBtnEl.style.left = `${rect.left + rect.width / 2}px`;
+  settingsBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  settingsBackBtnEl.style.transform = 'translateX(-50%)';
+}
+
 // Abort controller for title ranking fetch
 let titleRankingAbortController = null;
 
@@ -3077,7 +3116,17 @@ canvas.addEventListener('touchend', (e) => {
     return;
   }
 
+  // Settings screen tap handling
+  if (handleSettingsTap(cx, cy)) return;
+
   if (fsm.currentState === titleState) {
+    // Settings gear icon tap (top-right corner)
+    const gearX = CANVAS_WIDTH - 30;
+    const gearY = 30;
+    if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      fsm.transition(settingsState);
+      return;
+    }
     AudioManager.init();
     AudioManager.resume();
     AudioManager.startTitleDrone();
@@ -3159,6 +3208,19 @@ canvas.addEventListener('click', (e) => {
 
   // Gyroscope toggle + sensitivity slider (US-005) — click handler for desktop testing
   if (handleGyroToggleTap(cx, cy)) return;
+
+  // Settings screen click handling
+  if (handleSettingsTap(cx, cy)) return;
+
+  // Settings gear icon click on title screen
+  if (fsm.currentState === titleState) {
+    const gearX = CANVAS_WIDTH - 30;
+    const gearY = 30;
+    if (cx >= gearX - 22 && cx <= gearX + 22 && cy >= gearY - 22 && cy <= gearY + 22) {
+      fsm.transition(settingsState);
+      return;
+    }
+  }
 });
 
 // --- Input tracking ---
@@ -7047,6 +7109,42 @@ const titleState = {
       }
     }
 
+    // --- Settings gear icon (top-right) ---
+    {
+      const gx = CANVAS_WIDTH - 30;
+      const gy = 30;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.translate(gx, gy);
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      // Gear teeth
+      const teeth = 8;
+      const outerR = 12;
+      const innerR = 8;
+      ctx.beginPath();
+      for (let i = 0; i < teeth; i++) {
+        const a1 = (i / teeth) * Math.PI * 2;
+        const a2 = ((i + 0.35) / teeth) * Math.PI * 2;
+        const a3 = ((i + 0.5) / teeth) * Math.PI * 2;
+        const a4 = ((i + 0.85) / teeth) * Math.PI * 2;
+        if (i === 0) ctx.moveTo(Math.cos(a1) * outerR, Math.sin(a1) * outerR);
+        ctx.lineTo(Math.cos(a2) * outerR, Math.sin(a2) * outerR);
+        ctx.lineTo(Math.cos(a3) * innerR, Math.sin(a3) * innerR);
+        ctx.lineTo(Math.cos(a4) * innerR, Math.sin(a4) * innerR);
+        const aNext = ((i + 1) / teeth) * Math.PI * 2;
+        ctx.lineTo(Math.cos(aNext) * outerR, Math.sin(aNext) * outerR);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      // Center hole
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // --- Footer hint ---
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     ctx.font = '10px monospace';
@@ -8084,6 +8182,254 @@ const gameOverState = {
     ctx.globalAlpha = 1;
   },
 };
+
+// --- Settings State ---
+const settingsState = {
+  onEnter () {
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+    settingsBtnEl.style.display = 'none';
+    settingsBackBtnEl.style.display = 'block';
+    positionSettingsBackBtn();
+  },
+
+  onExit () {
+    settingsBackBtnEl.style.display = 'none';
+  },
+
+  update (dt) {
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    bg.addColorStop(0, '#0D0D1A');
+    bg.addColorStop(1, '#1A1A2E');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    }
+
+    // Header background bar
+    ctx.fillStyle = 'rgba(138,43,226,0.10)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 75);
+
+    // Title
+    ctx.fillStyle = '#BB86FC';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CONFIGURAÇÕES', CX, 30);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '11px monospace';
+    ctx.fillText('Ajuste o jogo do seu jeito', CX, 55);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(187,134,252,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(16, 75); ctx.lineTo(CANVAS_WIDTH - 16, 75); ctx.stroke();
+
+    // Settings cards
+    const cardX = 24;
+    const cardW = CANVAS_WIDTH - 48;
+    const cardH = 80;
+    const cardGap = 16;
+    let cardY = 100;
+
+    // --- Card 1: Som ---
+    {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 12); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, cardH / 2); ctx.stroke();
+
+      // Icon + Label
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(AudioManager.muted ? '🔇  SOM' : '🔊  SOM', cardX + 16, cardY + cardH / 2 - 10);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '10px monospace';
+      ctx.fillText('Música e efeitos sonoros', cardX + 16, cardY + cardH / 2 + 10);
+
+      // Toggle switch
+      const toggleX = cardX + cardW - 60;
+      const toggleY = cardY + cardH / 2;
+      const isOn = !AudioManager.muted;
+      // Track
+      ctx.fillStyle = isOn ? 'rgba(0,255,136,0.35)' : 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.fill();
+      ctx.strokeStyle = isOn ? 'rgba(0,255,136,0.6)' : 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.stroke();
+      // Knob
+      ctx.fillStyle = isOn ? '#00FF88' : '#888888';
+      ctx.beginPath();
+      ctx.arc(isOn ? toggleX + 32 : toggleX + 12, toggleY, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    cardY += cardH + cardGap;
+
+    // --- Card 2: Giroscópio ---
+    {
+      const gyroAvailable = gyroSupported || !isMobileDevice;
+      const dimAlpha = gyroAvailable ? 1 : 0.4;
+      ctx.globalAlpha = dimAlpha;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, gyroEnabled ? cardH + 50 : cardH, 12); ctx.stroke();
+
+      // Icon + Label
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('📱  GIROSCÓPIO', cardX + 16, cardY + 30);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '10px monospace';
+      if (!isMobileDevice) {
+        ctx.fillText('Disponível apenas no celular', cardX + 16, cardY + 50);
+      } else if (!gyroSupported) {
+        ctx.fillText('Seu dispositivo não suporta giroscópio', cardX + 16, cardY + 50);
+      } else {
+        ctx.fillText('Controle inclinando o celular', cardX + 16, cardY + 50);
+      }
+
+      // Toggle switch
+      const toggleX = cardX + cardW - 60;
+      const toggleY = cardY + 30;
+      const isOn = gyroEnabled;
+      ctx.fillStyle = isOn ? 'rgba(0,255,136,0.35)' : 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.fill();
+      ctx.strokeStyle = isOn ? 'rgba(0,255,136,0.6)' : 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(toggleX, toggleY - 10, 44, 20, 10); ctx.stroke();
+      ctx.fillStyle = isOn ? '#00FF88' : '#888888';
+      ctx.beginPath();
+      ctx.arc(isOn ? toggleX + 32 : toggleX + 12, toggleY, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sensitivity slider (when gyro enabled)
+      if (gyroEnabled) {
+        const sliderY = cardY + 80;
+        const sliderX = cardX + 24;
+        const sliderW = cardW - 48;
+
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('Sensibilidade', sliderX, sliderY);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#00FF88';
+        ctx.fillText(gyroSensitivity.toFixed(2) + 'x', sliderX + sliderW, sliderY);
+
+        const trackY = sliderY + 16;
+        // Slider track
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath(); ctx.roundRect(sliderX, trackY, sliderW, 6, 3); ctx.fill();
+
+        // Filled portion
+        const levels = GYRO_SENSITIVITY_LEVELS.length;
+        const fillW = (gyroSensitivityIndex / (levels - 1)) * sliderW;
+        ctx.fillStyle = 'rgba(0,255,136,0.5)';
+        ctx.beginPath(); ctx.roundRect(sliderX, trackY, fillW, 6, 3); ctx.fill();
+
+        // Tick marks
+        for (let i = 0; i < levels; i++) {
+          const tx = sliderX + (i / (levels - 1)) * sliderW;
+          ctx.fillStyle = i <= gyroSensitivityIndex ? '#00FF88' : 'rgba(255,255,255,0.3)';
+          ctx.beginPath(); ctx.arc(tx, trackY + 3, 3, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Slider handle
+        const handleX = sliderX + (gyroSensitivityIndex / (levels - 1)) * sliderW;
+        ctx.fillStyle = '#00FF88';
+        ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('ESC ou VOLTAR para sair', CX, CANVAS_HEIGHT - 6);
+  },
+};
+
+// --- Settings State click/tap handler ---
+function handleSettingsTap (cx, cy) {
+  if (fsm.currentState !== settingsState) return false;
+
+  const cardX = 24;
+  const cardW = CANVAS_WIDTH - 48;
+  const cardH = 80;
+  const cardGap = 16;
+
+  // Card 1: Som toggle — toggle area is the whole card
+  const card1Y = 100;
+  if (cx >= cardX && cx <= cardX + cardW && cy >= card1Y && cy <= card1Y + cardH) {
+    AudioManager.toggleMute();
+    return true;
+  }
+
+  // Card 2: Giroscópio
+  const card2Y = card1Y + cardH + cardGap;
+  const card2H = gyroEnabled ? cardH + 50 : cardH;
+
+  // Toggle area (top part of card)
+  if (cx >= cardX && cx <= cardX + cardW && cy >= card2Y && cy <= card2Y + 60) {
+    if (isMobileDevice && gyroSupported) {
+      toggleGyroscope();
+    }
+    return true;
+  }
+
+  // Sensitivity slider (when gyro enabled)
+  if (gyroEnabled && cy >= card2Y + 70 && cy <= card2Y + card2H) {
+    const sliderX = cardX + 24;
+    const sliderW = cardW - 48;
+    if (cx >= sliderX - 10 && cx <= sliderX + sliderW + 10) {
+      const ratio = Math.max(0, Math.min(1, (cx - sliderX) / sliderW));
+      const newIndex = Math.round(ratio * (GYRO_SENSITIVITY_LEVELS.length - 1));
+      gyroSensitivityIndex = newIndex;
+      gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+      saveGyroPrefs();
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // --- Community Features Data (US-006) ---
 const COMMUNITY_FEATURES = [
