@@ -2123,6 +2123,7 @@ let gyroEnabled = false;        // Whether gyroscope control is currently active
 let gyroSupported = false;      // Whether device supports DeviceOrientation
 let gyroPermissionGranted = false; // iOS 13+ permission state
 let gyroGamma = 0;              // Raw gamma reading (left/right tilt, -90 to +90)
+let gyroBaselineGamma = 0;      // Calibration offset — device tilt at game start
 const GYRO_DEAD_ZONE = 5;       // ±5° dead zone
 const GYRO_MAX_ANGLE = 35;      // Max tilt angle for full speed
 const GYRO_SENSITIVITY_LEVELS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
@@ -2163,8 +2164,14 @@ if (window.DeviceOrientationEvent) {
 
 function onDeviceOrientation (e) {
   if (e.gamma !== null && e.gamma !== undefined) {
-    gyroGamma = e.gamma; // -90 (left) to +90 (right)
+    gyroGamma = e.gamma - gyroBaselineGamma; // Calibrated: subtract baseline offset
   }
+}
+
+function calibrateGyroscope () {
+  // Set current tilt as the new "zero" position
+  gyroBaselineGamma = gyroGamma + gyroBaselineGamma; // Use raw gamma
+  gyroGamma = 0;
 }
 
 function startGyroscope () {
@@ -2185,6 +2192,7 @@ function stopGyroscope () {
   window.removeEventListener('deviceorientation', onDeviceOrientation, true);
   gyroEnabled = false;
   gyroGamma = 0;
+  gyroBaselineGamma = 0;
   saveGyroPrefs();
   // Restore arrow buttons if in playingState
   if (isMobileDevice && fsm.currentState === playingState) {
@@ -3117,6 +3125,9 @@ canvas.addEventListener('touchend', (e) => {
     return;
   }
 
+  // Countdown slider tap handling
+  if (handleCountdownSliderTap(cx, cy)) return;
+
   // Settings screen tap handling
   if (handleSettingsTap(cx, cy)) { _touchHandled = true; setTimeout(() => { _touchHandled = false; }, 400); return; }
 
@@ -3134,7 +3145,7 @@ canvas.addEventListener('touchend', (e) => {
     AudioManager.startTitleDrone();
     AudioManager.playRiser();
     resetGameState();
-    fsm.transition(playingState);
+    startGame();
   } else if (fsm.currentState === gameOverState) {
     const delta = touchStartY - cy;
     if (Math.abs(delta) < 10) {
@@ -3143,7 +3154,7 @@ canvas.addEventListener('touchend', (e) => {
       if (cy < 268 || cy > 640) {
         AudioManager.playDrumRoll();
         resetGameState();
-        fsm.transition(playingState);
+        startGame();
       }
     }
   } else if (fsm.currentState === titleRankingState) {
@@ -3184,6 +3195,9 @@ canvas.addEventListener('click', (e) => {
   const scaleY = CANVAS_HEIGHT / rect.height;
   const cx = (e.clientX - rect.left) * scaleX;
   const cy = (e.clientY - rect.top) * scaleY;
+
+  // Countdown slider tap handling
+  if (handleCountdownSliderTap(cx, cy)) return;
 
   // Pause overlay "Continuar" button (US-003): centered at (200, CANVAS_HEIGHT/2+40), 180x44
   if (gamePaused) {
@@ -6875,7 +6889,7 @@ const titleState = {
       AudioManager.startTitleDrone();
       AudioManager.playRiser();
       resetGameState();
-      fsm.transition(playingState);
+      startGame();
     }
   },
 
@@ -7157,6 +7171,188 @@ const titleState = {
     ctx.fillText('R = RANKING', CX, CANVAS_HEIGHT - 6);
   },
 };
+
+// Helper: start game with countdown if gyro is enabled, or directly
+function startGame () {
+  if (gyroEnabled && isMobileDevice) {
+    fsm.transition(countdownState);
+  } else {
+    fsm.transition(playingState);
+  }
+}
+
+// --- Countdown State (pre-game, gyro calibration) ---
+const COUNTDOWN_DURATION = 3.0; // seconds
+const countdownState = {
+  timer: 0,
+  scrollOffset: 0,
+
+  onEnter () {
+    this.timer = COUNTDOWN_DURATION;
+    this.scrollOffset = 0;
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+
+    // Start gyroscope and calibrate
+    if (gyroEnabled && isMobileDevice) {
+      if (gyroPermissionGranted) {
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        // Calibrate after a small delay to let sensor settle
+        setTimeout(() => calibrateGyroscope(), 200);
+      } else {
+        requestGyroPermissionAndStart().then(() => {
+          setTimeout(() => calibrateGyroscope(), 200);
+        });
+      }
+    }
+  },
+
+  onExit () {
+    // Stop gyro listener — playingState.onEnter will re-attach
+    if (gyroEnabled) {
+      window.removeEventListener('deviceorientation', onDeviceOrientation, true);
+    }
+  },
+
+  update (dt) {
+    this.timer -= dt;
+    this.scrollOffset += 150 * dt; // Slow road scroll for visual effect
+
+    // Allow sensitivity adjustments during countdown via gyro slider
+    if (gyroEnabled && isMobileDevice) {
+      // handleGyroToggleTap handles slider taps in click/touch events
+    }
+
+    if (this.timer <= 0) {
+      fsm.transition(playingState);
+    }
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Render scrolling road background
+    renderRoad(ctx, this.scrollOffset);
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(8,8,20,0.65)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Render player car in starting position
+    const carX = ROAD_LEFT + ROAD_WIDTH / 2 - PLAYER_WIDTH / 2;
+    const carY = PLAYER_Y;
+    ctx.save();
+    ctx.shadowColor = '#FF1744';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#E53935';
+    ctx.beginPath(); ctx.roundRect(carX, carY, PLAYER_WIDTH, PLAYER_HEIGHT, 6); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(100,180,255,0.65)';
+    ctx.fillRect(carX + 6, carY + 8, PLAYER_WIDTH - 12, 16);
+
+    // Countdown number
+    const remaining = Math.ceil(this.timer);
+    const displayText = remaining > 0 ? String(remaining) : 'GO!';
+    const progress = 1 - (this.timer - Math.floor(this.timer)); // 0→1 within each second
+    const scale = remaining > 0 ? 1 + (1 - progress) * 0.3 : 1.5;
+    const alpha = remaining > 0 ? 0.7 + progress * 0.3 : 1;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(CX, 280);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = remaining > 0 ? '#FFFFFF' : '#00FF88';
+    ctx.font = `bold ${remaining > 0 ? 80 : 50}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = remaining > 0 ? '#FFFFFF' : '#00FF88';
+    ctx.shadowBlur = 20;
+    ctx.fillText(displayText, 0, 0);
+    ctx.restore();
+
+    // Gyro calibration info
+    if (gyroEnabled && isMobileDevice) {
+      ctx.save();
+
+      // "Segure o celular na posição de jogo" message
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.beginPath(); ctx.roundRect(CX - 170, 380, 340, 110, 14); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,255,136,0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(CX - 170, 380, 340, 110, 14); ctx.stroke();
+
+      ctx.fillStyle = '#00FF88';
+      ctx.font = 'bold 13px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('📱 GIROSCÓPIO CALIBRADO', CX, 405);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '11px monospace';
+      ctx.fillText('Segure na posição de jogo', CX, 425);
+
+      // Sensitivity slider inline
+      const sliderX = CX - 110;
+      const sliderW = 220;
+      const sliderY = 455;
+      const levels = GYRO_SENSITIVITY_LEVELS.length;
+
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('Sensibilidade', sliderX, sliderY);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#00FF88';
+      ctx.fillText(gyroSensitivity.toFixed(2) + 'x', sliderX + sliderW, sliderY);
+
+      const trackY = sliderY + 14;
+      // Track
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.roundRect(sliderX, trackY, sliderW, 6, 3); ctx.fill();
+      // Filled
+      const fillW = (gyroSensitivityIndex / (levels - 1)) * sliderW;
+      ctx.fillStyle = 'rgba(0,255,136,0.5)';
+      ctx.beginPath(); ctx.roundRect(sliderX, trackY, fillW, 6, 3); ctx.fill();
+      // Ticks
+      for (let i = 0; i < levels; i++) {
+        const tx = sliderX + (i / (levels - 1)) * sliderW;
+        ctx.fillStyle = i <= gyroSensitivityIndex ? '#00FF88' : 'rgba(255,255,255,0.3)';
+        ctx.beginPath(); ctx.arc(tx, trackY + 3, 3, 0, Math.PI * 2); ctx.fill();
+      }
+      // Handle
+      const handleX = sliderX + (gyroSensitivityIndex / (levels - 1)) * sliderW;
+      ctx.fillStyle = '#00FF88';
+      ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(handleX, trackY + 3, 8, 0, Math.PI * 2); ctx.stroke();
+
+      ctx.restore();
+    }
+  },
+};
+
+// Countdown sensitivity slider tap handler
+function handleCountdownSliderTap (cx, cy) {
+  if (fsm.currentState !== countdownState) return false;
+  if (!gyroEnabled || !isMobileDevice) return false;
+
+  const CX = CANVAS_WIDTH / 2;
+  const sliderX = CX - 110;
+  const sliderW = 220;
+  const trackY = 455 + 14;
+
+  if (cy >= trackY - 15 && cy <= trackY + 20 && cx >= sliderX - 10 && cx <= sliderX + sliderW + 10) {
+    const ratio = Math.max(0, Math.min(1, (cx - sliderX) / sliderW));
+    const newIndex = Math.round(ratio * (GYRO_SENSITIVITY_LEVELS.length - 1));
+    gyroSensitivityIndex = newIndex;
+    gyroSensitivity = GYRO_SENSITIVITY_LEVELS[gyroSensitivityIndex];
+    saveGyroPrefs();
+    return true;
+  }
+  return false;
+}
 
 // --- Playing State ---
 const playingState = {
@@ -8029,7 +8225,7 @@ const gameOverState = {
     if (consumeKey('Enter')) {
       AudioManager.playDrumRoll();
       resetGameState();
-      fsm.transition(playingState);
+      startGame();
     }
     // Update DOM ranking when data changes
     if (this.rankingStatus === 'loaded' && !this._rankingBuilt) {
@@ -8193,7 +8389,6 @@ const settingsState = {
   onEnter () {
     rankingBtnEl.style.display = 'none';
     feedbackBtnEl.style.display = 'none';
-    settingsBtnEl.style.display = 'none';
     settingsBackBtnEl.style.display = 'block';
     positionSettingsBackBtn();
   },
