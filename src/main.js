@@ -8381,8 +8381,13 @@ const settingsState = {
 };
 
 // --- Settings State click/tap handler ---
+let _settingsLastTap = 0;
 function handleSettingsTap (cx, cy) {
   if (fsm.currentState !== settingsState) return false;
+  // Debounce: prevent touch + click double-fire on mobile
+  const now = performance.now();
+  if (now - _settingsLastTap < 300) return true;
+  _settingsLastTap = now;
 
   const cardX = 24;
   const cardW = CANVAS_WIDTH - 48;
