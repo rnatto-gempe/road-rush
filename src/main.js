@@ -2378,6 +2378,7 @@ function resizeCanvas () {
   positionRankingBtn();
   positionRankingBackBtn();
   positionFeedbackBtn();
+  positionCommunityBtns();
   positionGameOverRanking();
 }
 
@@ -2407,6 +2408,9 @@ let rankingBtnEl = null;
 let rankingBackBtnEl = null;
 // Declared early so positionFeedbackBtn() guard works when resizeCanvas() is called below
 let feedbackBtnEl = null;
+// Declared early so positionCommunityBtns() guard works when resizeCanvas() is called below
+let communityBackBtnEl = null;
+let communitySuggestBtnEl = null;
 // DOM ranking container for game over screen
 let gameOverRankingEl = null;
 
@@ -2925,7 +2929,13 @@ function closeFeedbackModal () {
   feedbackModalEl.style.display = 'none';
 }
 
-feedbackBtnEl.addEventListener('click', openFeedbackModal);
+feedbackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === titleState) {
+    fsm.transition(communityFeaturesState);
+  } else {
+    openFeedbackModal();
+  }
+});
 feedbackCloseEl.addEventListener('click', closeFeedbackModal);
 
 // Close on backdrop click (not on card click)
@@ -2967,6 +2977,71 @@ feedbackSubmitEl.addEventListener('click', async () => {
     feedbackSubmitEl.disabled = false;
   }
 });
+
+// --- Community Features Buttons (US-006) ---
+communityBackBtnEl = document.createElement('button');
+communityBackBtnEl.id = 'community-back-btn';
+communityBackBtnEl.textContent = 'VOLTAR';
+communityBackBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(0,0,0,0.55)',
+  'color:#fff',
+  'border:1.5px solid rgba(255,255,255,0.35)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(communityBackBtnEl);
+
+communityBackBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === communityFeaturesState) {
+    fsm.transition(titleState);
+  }
+});
+
+communitySuggestBtnEl = document.createElement('button');
+communitySuggestBtnEl.id = 'community-suggest-btn';
+communitySuggestBtnEl.textContent = '💡 Sugerir Feature';
+communitySuggestBtnEl.style.cssText = [
+  'display:none',
+  'position:fixed',
+  'z-index:20',
+  'background:rgba(255,193,7,0.13)',
+  'color:#FFC107',
+  'border:1.5px solid rgba(255,193,7,0.40)',
+  'border-radius:20px',
+  'min-height:44px',
+  'min-width:110px',
+  'font:14px monospace',
+  'padding:0 16px',
+  'cursor:pointer',
+].join(';') + ';';
+document.body.appendChild(communitySuggestBtnEl);
+
+communitySuggestBtnEl.addEventListener('click', () => {
+  if (fsm.currentState === communityFeaturesState) {
+    openFeedbackModal();
+  }
+});
+
+function positionCommunityBtns () {
+  if (!communityBackBtnEl || !communitySuggestBtnEl) return;
+  const rect = canvas.getBoundingClientRect();
+  const scale = rect.width / CANVAS_WIDTH;
+  // Back button: bottom-left area
+  communityBackBtnEl.style.left = `${rect.left + 70 * scale}px`;
+  communityBackBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  communityBackBtnEl.style.transform = 'translateX(-50%)';
+  // Suggest button: bottom-right area
+  communitySuggestBtnEl.style.left = `${rect.left + 310 * scale}px`;
+  communitySuggestBtnEl.style.top = `${rect.top + 660 * scale}px`;
+  communitySuggestBtnEl.style.transform = 'translateX(-50%)';
+}
 
 // Abort controller for title ranking fetch
 let titleRankingAbortController = null;
@@ -3029,6 +3104,13 @@ canvas.addEventListener('touchend', (e) => {
         const scrollDelta = Math.round(delta / 30);
         titleRankingState.rankingScroll = Math.max(0, Math.min(titleRankingState.rankingScroll + scrollDelta, maxScroll));
       }
+    }
+  } else if (fsm.currentState === communityFeaturesState) {
+    const delta = touchStartY - cy; // positive = swipe up = scroll down
+    if (Math.abs(delta) >= 10) {
+      const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * 110);
+      const scrollDelta = delta * 2;
+      communityFeaturesState.scrollOffset = Math.max(0, Math.min(communityFeaturesState.scrollOffset + scrollDelta, maxScroll));
     }
   }
   // No tap action during playingState
@@ -7997,6 +8079,179 @@ const gameOverState = {
     const retryLabel = ('ontouchstart' in window) ? 'Toque para tentar novamente' : 'ENTER para tentar novamente';
     ctx.fillText(retryLabel, CX, CANVAS_HEIGHT - 6);
     ctx.globalAlpha = 1;
+  },
+};
+
+// --- Community Features Data (US-006) ---
+const COMMUNITY_FEATURES = [
+  { name: 'Power-up de Tiro', by: 'S', desc: 'Colete e destrua veículos com tiros automáticos!', status: 'done' },
+  { name: 'Controle por Giroscópio', by: 'John Snow', desc: 'Controle o carro inclinando o celular!', status: 'done' },
+  { name: 'Botão de Pause', by: 'Comunidade', desc: 'Pause o jogo a qualquer momento!', status: 'done' },
+  { name: 'Novos Power-ups', by: 'Comunidade', desc: 'Magnet, slow-motion e mais!', status: 'soon' },
+  { name: 'Modo Multiplayer', by: 'Comunidade', desc: 'Desafie seus amigos em tempo real!', status: 'soon' },
+];
+
+// --- Community Features State (US-006) ---
+const communityFeaturesState = {
+  scrollOffset: 0,
+
+  onEnter () {
+    this.scrollOffset = 0;
+    rankingBtnEl.style.display = 'none';
+    feedbackBtnEl.style.display = 'none';
+    communityBackBtnEl.style.display = 'block';
+    communitySuggestBtnEl.style.display = 'block';
+    positionCommunityBtns();
+  },
+
+  onExit () {
+    communityBackBtnEl.style.display = 'none';
+    communitySuggestBtnEl.style.display = 'none';
+  },
+
+  update (dt) {
+    if (consumeKey('Escape')) {
+      fsm.transition(titleState);
+      return;
+    }
+    // Keyboard scroll
+    const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * 110);
+    if (consumeKey('ArrowDown')) this.scrollOffset = Math.min(this.scrollOffset + 110, maxScroll);
+    if (consumeKey('ArrowUp')) this.scrollOffset = Math.max(this.scrollOffset - 110, 0);
+  },
+
+  render (ctx) {
+    const CX = CANVAS_WIDTH / 2;
+
+    // Background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    bg.addColorStop(0, '#0D0D1A');
+    bg.addColorStop(1, '#1A1A2E');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
+    }
+
+    // Header background bar
+    ctx.fillStyle = 'rgba(138,43,226,0.10)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 75);
+
+    // Title
+    ctx.fillStyle = '#BB86FC';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('FEATURES DA COMUNIDADE', CX, 30);
+
+    // Subtitle
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = '11px monospace';
+    ctx.fillText('Solicitadas por jogadores como você!', CX, 55);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(187,134,252,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(16, 75); ctx.lineTo(CANVAS_WIDTH - 16, 75); ctx.stroke();
+
+    // Clip area for feature cards (scrollable)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 80, CANVAS_WIDTH, 570);
+    ctx.clip();
+
+    // Feature cards
+    const cardX = 20;
+    const cardW = CANVAS_WIDTH - 40;
+    const cardH = 100;
+    const cardGap = 10;
+
+    for (let i = 0; i < COMMUNITY_FEATURES.length; i++) {
+      const feat = COMMUNITY_FEATURES[i];
+      const cardY = 90 + i * (cardH + cardGap) - this.scrollOffset;
+
+      // Skip rendering cards fully outside clip
+      if (cardY + cardH < 80 || cardY > 650) continue;
+
+      // Card background
+      const isDone = feat.status === 'done';
+      ctx.fillStyle = isDone ? 'rgba(76,175,80,0.08)' : 'rgba(255,193,7,0.08)';
+      ctx.strokeStyle = isDone ? 'rgba(76,175,80,0.25)' : 'rgba(255,193,7,0.25)';
+      ctx.lineWidth = 1;
+      // Rounded rect
+      const r = 10;
+      ctx.beginPath();
+      ctx.moveTo(cardX + r, cardY);
+      ctx.lineTo(cardX + cardW - r, cardY);
+      ctx.quadraticCurveTo(cardX + cardW, cardY, cardX + cardW, cardY + r);
+      ctx.lineTo(cardX + cardW, cardY + cardH - r);
+      ctx.quadraticCurveTo(cardX + cardW, cardY + cardH, cardX + cardW - r, cardY + cardH);
+      ctx.lineTo(cardX + r, cardY + cardH);
+      ctx.quadraticCurveTo(cardX, cardY + cardH, cardX, cardY + cardH - r);
+      ctx.lineTo(cardX, cardY + r);
+      ctx.quadraticCurveTo(cardX, cardY, cardX + r, cardY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Status badge
+      const statusText = isDone ? '✅ Implementada' : '🔜 Em breve';
+      const statusColor = isDone ? '#4CAF50' : '#FFC107';
+      ctx.fillStyle = statusColor;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(statusText, cardX + cardW - 12, cardY + 12);
+
+      // Feature name
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(feat.name, cardX + 14, cardY + 12);
+
+      // Requested by
+      ctx.fillStyle = 'rgba(187,134,252,0.8)';
+      ctx.font = '11px monospace';
+      ctx.fillText(`Solicitada por ${feat.by}`, cardX + 14, cardY + 34);
+
+      // Description
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = '11px monospace';
+      ctx.fillText(feat.desc, cardX + 14, cardY + 56);
+
+      // Decorative line at bottom of card
+      ctx.strokeStyle = isDone ? 'rgba(76,175,80,0.15)' : 'rgba(255,193,7,0.15)';
+      ctx.beginPath();
+      ctx.moveTo(cardX + 14, cardY + 78);
+      ctx.lineTo(cardX + cardW - 14, cardY + 78);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Scroll indicator (if content overflows)
+    const maxScroll = Math.max(0, (COMMUNITY_FEATURES.length - 4) * (cardH + cardGap));
+    if (maxScroll > 0) {
+      const trackH = 560;
+      const thumbH = Math.max(40, trackH * (4 / COMMUNITY_FEATURES.length));
+      const thumbY = 85 + (this.scrollOffset / maxScroll) * (trackH - thumbH);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(CANVAS_WIDTH - 6, 85, 3, trackH);
+      ctx.fillStyle = 'rgba(187,134,252,0.40)';
+      ctx.fillRect(CANVAS_WIDTH - 6, thumbY, 3, thumbH);
+    }
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('ESC ou VOLTAR para sair', CX, CANVAS_HEIGHT - 6);
   },
 };
 
